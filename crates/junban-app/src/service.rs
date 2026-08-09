@@ -2436,6 +2436,17 @@ where
             .map_err(AppError::from)
     }
 
+    pub async fn finalize_plugin_resync(
+        &self,
+        request: crate::FinalizePluginResyncRequest,
+        now: Timestamp,
+    ) -> Result<crate::FinalizePluginResyncOutcome, AppError> {
+        self.repository
+            .finalize_plugin_resync(request, now)
+            .await
+            .map_err(AppError::from)
+    }
+
     pub async fn advance_plugin_cursor(
         &self,
         request: crate::AdvancePluginCursorRequest,

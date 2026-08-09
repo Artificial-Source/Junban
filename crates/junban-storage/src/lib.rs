@@ -1357,6 +1357,16 @@ impl PluginRepository for SqliteRepository {
         })
     }
 
+    fn finalize_plugin_resync(
+        &self,
+        request: junban_app::FinalizePluginResyncRequest,
+        now: Timestamp,
+    ) -> RepositoryFuture<'_, junban_app::FinalizePluginResyncOutcome> {
+        self.plugin_request(move |connection, _| {
+            plugin_ops::finalize_plugin_resync(connection, request, now)
+        })
+    }
+
     fn advance_plugin_cursor(
         &self,
         request: junban_app::AdvancePluginCursorRequest,

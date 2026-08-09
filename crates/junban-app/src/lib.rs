@@ -10,6 +10,7 @@ mod event;
 mod plugin;
 mod plugin_delivery;
 mod plugin_event;
+mod plugin_resync;
 mod ports;
 mod requests;
 mod service;
@@ -35,6 +36,7 @@ pub use event::{
 pub use plugin::*;
 pub use plugin_delivery::*;
 pub use plugin_event::*;
+pub use plugin_resync::*;
 pub use ports::{Repository, RepositoryFuture, SyncState};
 pub use requests::{
     ACTIVITY_PAGE_DEFAULT, ACTIVITY_PAGE_MAX, AppSettings, BulkAction, BulkSchedule, BulkTagChange,

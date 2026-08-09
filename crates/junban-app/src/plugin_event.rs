@@ -386,7 +386,7 @@ fn snapshot_subject(
     }
 }
 
-fn task_view(task: &Task, event_revision: u64) -> Result<TaskView, PluginEventError> {
+pub(crate) fn task_view(task: &Task, event_revision: u64) -> Result<TaskView, PluginEventError> {
     validate_task_snapshot(task, event_revision)?;
     let priority = task.priority.map(priority).transpose()?;
     Ok(TaskView {
@@ -602,7 +602,7 @@ const fn task_status(value: TaskStatus) -> WitTaskStatus {
     }
 }
 
-fn project_view(
+pub(crate) fn project_view(
     project: &Project,
     event_revision: u64,
 ) -> Result<ProjectViewRecord, PluginEventError> {
@@ -627,7 +627,7 @@ fn project_view(
     })
 }
 
-fn tag_view(tag: &Tag, event_revision: u64) -> Result<TagView, PluginEventError> {
+pub(crate) fn tag_view(tag: &Tag, event_revision: u64) -> Result<TagView, PluginEventError> {
     validate_tag_snapshot(tag, event_revision)?;
     Ok(TagView {
         id: tag.id.to_string(),

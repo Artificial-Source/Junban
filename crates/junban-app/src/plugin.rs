@@ -1760,6 +1760,14 @@ pub trait PluginRepository: Send + Sync + 'static {
         plugin_unavailable()
     }
 
+    fn finalize_plugin_resync(
+        &self,
+        _request: crate::FinalizePluginResyncRequest,
+        _now: Timestamp,
+    ) -> RepositoryFuture<'_, crate::FinalizePluginResyncOutcome> {
+        plugin_unavailable()
+    }
+
     // P7-2D-DB-002 REMOVAL BLOCKER: the pre-integration supervisor still calls
     // this unwrapped cursor mutation. New event delivery must use the verified
     // retained-event terminal or skip paths instead.

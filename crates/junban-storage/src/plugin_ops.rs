@@ -14,29 +14,31 @@ use junban_app::{
     AuthorizedTransitionPluginInvocationRequest, BeginPluginResyncRequest, CommittedEvent,
     CommittedMutation, CommittedPluginInvocation, CommunityPluginPolicy,
     CompletePluginActivationRequest, CompletePluginInvocationRequest, DeletePluginSettingRequest,
-    DuePluginRetryRequest, EventType, InstallPluginRequest, InstalledPlugin,
-    InstalledPluginProfile, OpenedPluginComponentSource, PLUGIN_DEPENDENTS_MAX,
-    PLUGIN_FAILURE_BACKOFF_MAX_SECONDS, PLUGIN_FAILURE_BACKOFF_START_SECONDS,
-    PLUGIN_GRAPH_FENCE_ENTRIES_MAX, PLUGIN_INVOCATION_MATERIAL_BYTES_MAX,
-    PLUGIN_INVOCATION_MATERIAL_PER_PLUGIN_BYTES_MAX, PLUGIN_INVOCATION_RETENTION_DAYS,
-    PLUGIN_INVOCATIONS_MAX, PLUGIN_INVOCATIONS_PER_PLUGIN_MAX, PLUGIN_KV_BYTES_MAX,
-    PLUGIN_KV_KEYS_MAX, PLUGIN_KV_VALUE_BYTES_MAX, PLUGIN_RESYNC_PAGE_BYTES_MAX,
-    PLUGIN_RESYNC_PAGE_ITEMS_MAX, PLUGIN_SETTINGS_BYTES_MAX, PLUGIN_SETTINGS_KEYS_MAX,
-    PLUGINS_ENABLED_MAX, PLUGINS_INSTALLED_MAX, PlannedPluginInvocationCommit,
-    PluginComponentSelection, PluginCursorPosition, PluginDeliveryMode, PluginEventCursor,
-    PluginGrant, PluginGraphFenceCause, PluginGraphFenceDisposition, PluginGraphFenceOutcome,
-    PluginGraphFenceRequest, PluginGraphFenceResult, PluginGraphRejection, PluginHookKind,
-    PluginInstallSource, PluginInvocation, PluginInvocationDelivery, PluginInvocationDeliveryCheck,
+    DuePluginRetryRequest, EVENT_RETAIN_MAX_COUNT, EventType, FinalizePluginResyncOutcome,
+    FinalizePluginResyncRequest, InstallPluginRequest, InstalledPlugin, InstalledPluginProfile,
+    OpenedPluginComponentSource, PLUGIN_DEPENDENTS_MAX, PLUGIN_FAILURE_BACKOFF_MAX_SECONDS,
+    PLUGIN_FAILURE_BACKOFF_START_SECONDS, PLUGIN_GRAPH_FENCE_ENTRIES_MAX,
+    PLUGIN_INVOCATION_MATERIAL_BYTES_MAX, PLUGIN_INVOCATION_MATERIAL_PER_PLUGIN_BYTES_MAX,
+    PLUGIN_INVOCATION_RETENTION_DAYS, PLUGIN_INVOCATIONS_MAX, PLUGIN_INVOCATIONS_PER_PLUGIN_MAX,
+    PLUGIN_KV_BYTES_MAX, PLUGIN_KV_KEYS_MAX, PLUGIN_KV_VALUE_BYTES_MAX,
+    PLUGIN_RESYNC_PAGE_BYTES_MAX, PLUGIN_RESYNC_PAGE_ITEMS_MAX, PLUGIN_SETTINGS_BYTES_MAX,
+    PLUGIN_SETTINGS_KEYS_MAX, PLUGINS_ENABLED_MAX, PLUGINS_INSTALLED_MAX,
+    PlannedPluginInvocationCommit, PluginComponentSelection, PluginCursorPosition,
+    PluginDeliveryMode, PluginEventCursor, PluginGrant, PluginGraphFenceCause,
+    PluginGraphFenceDisposition, PluginGraphFenceOutcome, PluginGraphFenceRequest,
+    PluginGraphFenceResult, PluginGraphRejection, PluginHookKind, PluginInstallSource,
+    PluginInvocation, PluginInvocationDelivery, PluginInvocationDeliveryCheck,
     PluginInvocationState, PluginInvocationTerminalKind, PluginKvEntry, PluginKvPatch,
     PluginManifestEntry, PluginManifestEntrySelector, PluginMutationOutcome,
     PluginOperatorRequestIdentity, PluginPackageAdmission, PluginPackageReconciliation,
-    PluginResyncKvCommit, PluginResyncPage, PluginResyncPageRequest, PluginResyncSession,
-    PluginRetainedEventClassification, PluginRuntimeState, PluginSetting, PluginSnapshotItem,
-    PluginSnapshotKind, PublisherTrust, PublisherTrustStatus, RecordPluginAttemptFailureRequest,
-    ReplacePluginGrantsRequest, RepositoryError, ReservePluginInvocationRequest,
-    ReservedPluginInvocation, ResourceRef, ResourceSnapshot, ResyncScope,
-    RevokePluginGrantsRequest, SetPluginSettingRequest, TransitionPluginInvocationRequest,
-    TrustPublisherRequest, VerifiedPluginCursorSkipRequest, plugin_committed_event_content_hash,
+    PluginResyncEvent, PluginResyncKvCommit, PluginResyncPage, PluginResyncPageRequest,
+    PluginResyncSession, PluginRetainedEventClassification, PluginRuntimeState, PluginSetting,
+    PluginSnapshotItem, PluginSnapshotKind, PublisherTrust, PublisherTrustStatus,
+    RecordPluginAttemptFailureRequest, ReplacePluginGrantsRequest, RepositoryError,
+    ReservePluginInvocationRequest, ReservedPluginInvocation, ResourceRef, ResourceSnapshot,
+    ResyncScope, RevokePluginGrantsRequest, SetPluginSettingRequest,
+    TransitionPluginInvocationRequest, TrustPublisherRequest, VerifiedPluginCursorSkipRequest,
+    classify_plugin_resync_event, plugin_committed_event_content_hash,
     plugin_invocation_request_hash, plugin_manifest_entry_authority, plugin_resync_request_hash,
     plugin_retained_event_payload_hash,
 };
@@ -2707,6 +2709,210 @@ pub(crate) fn list_plugin_resync_page(
     }
     transaction.commit().map_err(storage_error)?;
     Ok(page)
+}
+
+pub(crate) fn finalize_plugin_resync(
+    connection: &mut Connection,
+    request: FinalizePluginResyncRequest,
+    now: Timestamp,
+) -> Result<FinalizePluginResyncOutcome, RepositoryError> {
+    finalize_plugin_resync_with(connection, request, now, || Ok(()), || Ok(()))
+}
+
+fn finalize_plugin_resync_with(
+    connection: &mut Connection,
+    request: FinalizePluginResyncRequest,
+    now: Timestamp,
+    before_commit: impl FnOnce() -> Result<(), RepositoryError>,
+    after_commit: impl FnOnce() -> Result<(), RepositoryError>,
+) -> Result<FinalizePluginResyncOutcome, RepositoryError> {
+    let transaction = connection
+        .transaction_with_behavior(TransactionBehavior::Immediate)
+        .map_err(storage_error)?;
+    request
+        .transcript
+        .validate(&request.delivery, &request.session)?;
+    let plugin = load_installed_plugin(&transaction, &request.session.plugin_id)?;
+    let invocation = load_invocation(&transaction, request.session.operation_id)?;
+    let cursor = load_plugin_cursor(&transaction, &request.session.plugin_id)?;
+    let entry_authority = plugin_manifest_entry_authority(
+        &plugin.manifest,
+        invocation.hook_kind,
+        PluginManifestEntrySelector::Requested(&invocation.entry),
+    )
+    .ok_or(RepositoryError::Conflict)?;
+    verify_delivery(
+        &transaction,
+        &request.delivery,
+        &invocation,
+        &entry_authority.persisted_id,
+    )?;
+    let (event_epoch, current_head, earliest): (String, i64, Option<i64>) = transaction
+        .query_row(
+            "SELECT event_epoch, global_revision, (SELECT MIN(revision) FROM events)
+             FROM app_state WHERE singleton = 1",
+            [],
+            |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?)),
+        )
+        .map_err(storage_error)?;
+    let current_head = parse_u64(current_head, "resync final head")?;
+    if invocation.hook_kind != PluginHookKind::Resync
+        || invocation.state != PluginInvocationState::EffectCommitting
+        || request.delivery.authority.mode != PluginDeliveryMode::StartingResync
+        || request.delivery.retained_event_source().is_some()
+        || plugin.package_generation != request.session.package_generation
+        || plugin.activation_epoch != request.session.activation_epoch
+        || !plugin.desired_enabled
+        || plugin.runtime_state != PluginRuntimeState::Starting
+        || now < plugin.updated_at
+        || now < invocation.updated_at
+        || invocation.retain_until <= now
+        || request.session.snapshot_revision > current_head
+        || !cursor_matches(&cursor, &request.session.expected_cursor)
+        || !cursor.resync_required
+        || has_other_active_invocation(
+            &transaction,
+            &request.session.plugin_id,
+            Some(request.session.operation_id),
+        )?
+    {
+        return Err(RepositoryError::Conflict);
+    }
+    match (
+        request.transcript.choice(),
+        request.transcript.replacement(),
+    ) {
+        (junban_plugin_sdk::private_body_types::FinalKvChoice::LeaveKv, None) => {}
+        (
+            junban_plugin_sdk::private_body_types::FinalKvChoice::ReplaceKvWithStagedSegments,
+            Some(replacement),
+        ) => {
+            validate_kv_replacement(replacement)?;
+            if !has_capability(&transaction, &plugin, Capability::Storage)? {
+                return Err(RepositoryError::Conflict);
+            }
+        }
+        _ => return Err(RepositoryError::Conflict),
+    }
+
+    let tail_length = current_head
+        .checked_sub(request.session.snapshot_revision)
+        .ok_or(RepositoryError::Conflict)?;
+    let retained_tail_max =
+        u64::try_from(EVENT_RETAIN_MAX_COUNT).map_err(|_| RepositoryError::OperationTooLarge)?;
+    let mut restart_required = request.session.expected_cursor.event_epoch != event_epoch
+        || request.session.snapshot_event_epoch != event_epoch
+        || tail_length > retained_tail_max;
+    if !restart_required && request.session.snapshot_revision < current_head {
+        let required = request
+            .session
+            .snapshot_revision
+            .checked_add(1)
+            .ok_or_else(|| RepositoryError::Storage("resync revision overflow".to_owned()))?;
+        if earliest
+            .and_then(|revision| u64::try_from(revision).ok())
+            .is_none_or(|revision| revision > required)
+        {
+            restart_required = true;
+        } else {
+            let mut revision = required;
+            while revision <= current_head {
+                let classification =
+                    load_exact_retained_event(&transaction, revision).and_then(|event| {
+                        classify_plugin_resync_event(
+                            &event_epoch,
+                            &event,
+                            &plugin.manifest.subscriptions,
+                        )
+                        .map_err(|_| RepositoryError::Conflict)
+                    });
+                match classification {
+                    Ok(PluginResyncEvent::Represented(_) | PluginResyncEvent::Irrelevant) => {}
+                    Ok(PluginResyncEvent::Invalidating) | Err(_) => {
+                        restart_required = true;
+                        break;
+                    }
+                }
+                revision = revision.checked_add(1).ok_or_else(|| {
+                    RepositoryError::Storage("resync revision overflow".to_owned())
+                })?;
+            }
+        }
+    }
+
+    if restart_required {
+        let deleted = transaction
+            .execute(
+                "DELETE FROM plugin_invocations WHERE operation_id = ?1
+                   AND plugin_id = ?2 AND package_generation = ?3
+                   AND activation_epoch = ?4 AND hook_kind = 'resync'
+                   AND request_hash = ?5 AND state = 'effect_committing'",
+                params![
+                    request.session.operation_id.to_string(),
+                    request.session.plugin_id.as_str(),
+                    as_i64(request.session.package_generation, "invocation generation")?,
+                    as_i64(request.session.activation_epoch, "invocation epoch")?,
+                    request.delivery.request_sha256.as_str(),
+                ],
+            )
+            .map_err(storage_error)?;
+        if deleted != 1 {
+            return Err(RepositoryError::Conflict);
+        }
+        before_commit()?;
+        transaction.commit().map_err(storage_error)?;
+        after_commit()?;
+        return Ok(FinalizePluginResyncOutcome::RestartRequired);
+    }
+
+    if let Some(replacement) = request.transcript.replacement() {
+        apply_kv_replacement(&transaction, &plugin, replacement, now)?;
+    }
+    let changed = transaction
+        .execute(
+            "UPDATE plugin_event_cursors
+             SET event_epoch = ?2, revision = ?3, resync_required = 0, updated_at = ?4
+             WHERE plugin_id = ?1 AND event_epoch = ?5 AND revision = ?6
+               AND resync_required = 1",
+            params![
+                request.session.plugin_id.as_str(),
+                request.session.snapshot_event_epoch,
+                as_i64(
+                    request.session.snapshot_revision,
+                    "resync snapshot revision"
+                )?,
+                now.to_string(),
+                request.session.expected_cursor.event_epoch,
+                as_i64(request.session.expected_cursor.revision, "cursor revision")?,
+            ],
+        )
+        .map_err(storage_error)?;
+    if changed != 1 {
+        return Err(RepositoryError::Conflict);
+    }
+    let deleted = transaction
+        .execute(
+            "DELETE FROM plugin_invocations WHERE operation_id = ?1
+               AND plugin_id = ?2 AND package_generation = ?3
+               AND activation_epoch = ?4 AND hook_kind = 'resync'
+               AND request_hash = ?5 AND state = 'effect_committing'",
+            params![
+                request.session.operation_id.to_string(),
+                request.session.plugin_id.as_str(),
+                as_i64(request.session.package_generation, "invocation generation")?,
+                as_i64(request.session.activation_epoch, "invocation epoch")?,
+                request.delivery.request_sha256.as_str(),
+            ],
+        )
+        .map_err(storage_error)?;
+    if deleted != 1 {
+        return Err(RepositoryError::Conflict);
+    }
+    let committed_cursor = load_plugin_cursor(&transaction, &request.session.plugin_id)?;
+    before_commit()?;
+    transaction.commit().map_err(storage_error)?;
+    after_commit()?;
+    Ok(FinalizePluginResyncOutcome::Committed(committed_cursor))
 }
 
 fn cursor_matches(cursor: &PluginEventCursor, position: &PluginCursorPosition) -> bool {
@@ -5935,20 +6141,26 @@ mod tests {
 
     use ed25519_dalek::SigningKey;
     use junban_app::{
-        CommitPluginInvocationRequest, PlannedPluginInvocationCommit, PluginAttemptFailureCause,
-        PluginComponentSelection, PluginDomainEffect, PluginGraphFenceEntry,
-        PluginPackageAuthority, PluginRepository, ProjectDraft, ProjectPatch, Repository,
-        SetPluginSettingRequest, StagedFile, plan_plugin_invocation_commit,
+        CommitPluginInvocationRequest, FinalizePluginResyncRequest, PlannedPluginInvocationCommit,
+        PluginAttemptFailureCause, PluginComponentSelection, PluginDomainEffect,
+        PluginGraphFenceEntry, PluginPackageAuthority, PluginRepository, PluginResyncTranscript,
+        ProjectDraft, ProjectPatch, Repository, SetPluginSettingRequest, StagedFile,
+        plan_plugin_invocation_commit,
     };
     use junban_domain::{
         EntityName, HexColor, ProjectId, SortOrder, TagId, TagName, TaskDraft, TaskId, TaskTitle,
     };
     use junban_plugin_sdk::{
         Capability, CommandDeclaration, Dependency, EventKind, EventScope, HttpMethod, HttpOrigin,
-        HttpScope, InvocationRequest, Permission, PermissionScope, Publisher, RuntimeProfile,
-        SettingDeclaration, SettingSchema, SurfaceDeclaration, SurfaceKind, SurfaceLocation,
-        UnscopedPermission, WitAuthority, pack_package,
-        private_body_types::{CommandCall, EventEnvelope, EventSubject},
+        HttpScope, InvocationOutcome, InvocationRequest, Permission, PermissionScope, Publisher,
+        RuntimeProfile, SettingDeclaration, SettingSchema, SurfaceDeclaration, SurfaceKind,
+        SurfaceLocation, UnscopedPermission, WitAuthority, pack_package,
+        private_body_types::{
+            ByteList, CommandCall, EventEnvelope, EventSubject, FinalKvChoice, FinalizeResync,
+            FinalizedResync, FlushAck, FlushStagedKv, FlushState, KvOperation, KvSegment, KvSet,
+            ResourceKind, ResyncPage as PrivateResyncPage, ResyncPageOutcome, SnapshotAck,
+            SnapshotPage, SnapshotRecords, WitResult,
+        },
         signer_key_id,
     };
     use uuid::Uuid;
@@ -6461,6 +6673,173 @@ mod tests {
             },
             delivery,
         }
+    }
+
+    fn encode_resync_request(page: PrivateResyncPage) -> Vec<u8> {
+        serde_json::to_vec(&InvocationRequest::resync(Some("resync".to_owned()), page)).unwrap()
+    }
+
+    fn encode_resync_outcome(page: ResyncPageOutcome) -> Vec<u8> {
+        serde_json::to_vec(&InvocationOutcome::Resync(WitResult::Ok(page))).unwrap()
+    }
+
+    fn prepare_finalize_request(
+        connection: &mut Connection,
+        store: &PluginPackageStore,
+        now: Timestamp,
+        staged: Vec<(String, Vec<u8>)>,
+        choice: FinalKvChoice,
+    ) -> (FinalizePluginResyncRequest, InstalledPlugin, u64) {
+        let installed = install_fixture(connection, store, now);
+        let granted = grant_capabilities(connection, &installed, &[Capability::Storage], now);
+        set_plugin_desired_enabled(
+            connection,
+            store,
+            OperationId::new(),
+            granted.plugin_id.clone(),
+            true,
+            now,
+        )
+        .unwrap();
+        let plugin = get_installed_plugin(connection, granted.plugin_id).unwrap();
+        prepare_finalize_for_plugin(connection, plugin, now, staged, choice)
+    }
+
+    fn prepare_finalize_for_plugin(
+        connection: &mut Connection,
+        plugin: InstalledPlugin,
+        now: Timestamp,
+        staged: Vec<(String, Vec<u8>)>,
+        choice: FinalKvChoice,
+    ) -> (FinalizePluginResyncRequest, InstalledPlugin, u64) {
+        let operation_id = OperationId::new();
+        let session = begin_plugin_resync(
+            connection,
+            BeginPluginResyncRequest {
+                operation_id,
+                plugin_id: plugin.plugin_id.clone(),
+                package_generation: plugin.package_generation,
+                activation_epoch: plugin.activation_epoch,
+            },
+            now,
+        )
+        .unwrap();
+        let authorized = authorized_reservation(
+            &plugin,
+            operation_id,
+            PluginHookKind::Resync,
+            PluginManifestEntry::Resync,
+            PluginDeliveryMode::StartingResync,
+            plugin_resync_request_hash(&session),
+            Some(session.clone()),
+        );
+        let mut transcript =
+            PluginResyncTranscript::new(authorized.delivery.clone(), session.clone()).unwrap();
+        for (index, kind) in [
+            PluginSnapshotKind::Task,
+            PluginSnapshotKind::Project,
+            PluginSnapshotKind::Tag,
+        ]
+        .into_iter()
+        .enumerate()
+        {
+            let request = PluginResyncPageRequest {
+                session: session.clone(),
+                kind,
+                after_id: None,
+            };
+            let page = list_plugin_resync_page(connection, request.clone(), now).unwrap();
+            assert!(page.items.is_empty());
+            assert!(page.exhausted);
+            let resource_kind = match kind {
+                PluginSnapshotKind::Task => ResourceKind::Task,
+                PluginSnapshotKind::Project => ResourceKind::Project,
+                PluginSnapshotKind::Tag => ResourceKind::Tag,
+            };
+            let records = match kind {
+                PluginSnapshotKind::Task => SnapshotRecords::Tasks(Vec::new()),
+                PluginSnapshotKind::Project => SnapshotRecords::Projects(Vec::new()),
+                PluginSnapshotKind::Tag => SnapshotRecords::Tags(Vec::new()),
+            };
+            let request_body = encode_resync_request(PrivateResyncPage::Snapshot(SnapshotPage {
+                session_id: operation_id.to_string(),
+                event_epoch: session.snapshot_event_epoch.clone(),
+                head_revision: session.snapshot_revision,
+                kind: resource_kind,
+                page_index: u32::try_from(index).unwrap(),
+                records,
+                final_snapshot_page: kind == PluginSnapshotKind::Tag,
+            }));
+            let outcome_body = encode_resync_outcome(ResyncPageOutcome::SnapshotAck(SnapshotAck {
+                session_id: operation_id.to_string(),
+                page_index: u32::try_from(index).unwrap(),
+                kind: resource_kind,
+                segment: None,
+            }));
+            transcript
+                .record_snapshot(&request, &page, &request_body, &outcome_body)
+                .unwrap();
+        }
+        let segment = if staged.is_empty() {
+            None
+        } else {
+            Some(KvSegment {
+                operations: staged
+                    .iter()
+                    .map(|(key, value)| {
+                        KvOperation::Set(KvSet {
+                            key: key.clone(),
+                            value: ByteList::new(value.clone()).unwrap(),
+                        })
+                    })
+                    .collect(),
+            })
+        };
+        let flush_request =
+            encode_resync_request(PrivateResyncPage::FlushStagedKv(FlushStagedKv {
+                session_id: operation_id.to_string(),
+                request_index: 0,
+            }));
+        let flush_outcome = encode_resync_outcome(ResyncPageOutcome::FlushAck(FlushAck {
+            session_id: operation_id.to_string(),
+            request_index: 0,
+            segment,
+            state: FlushState::Complete,
+        }));
+        transcript
+            .record_flush(&flush_request, &flush_outcome)
+            .unwrap();
+        let finalize_request = encode_resync_request(PrivateResyncPage::Finalize(FinalizeResync {
+            session_id: operation_id.to_string(),
+        }));
+        let finalize_outcome =
+            encode_resync_outcome(ResyncPageOutcome::Finalized(FinalizedResync {
+                session_id: operation_id.to_string(),
+                choice,
+            }));
+        transcript
+            .record_finalize(&finalize_request, &finalize_outcome)
+            .unwrap();
+        let finalize = transcript.into_finalize_request().unwrap();
+        reserve_authorized_plugin_invocation(connection, authorized.clone(), now).unwrap();
+        transition_authorized_plugin_invocation(
+            connection,
+            AuthorizedTransitionPluginInvocationRequest {
+                request: TransitionPluginInvocationRequest {
+                    operation_id,
+                    plugin_id: plugin.plugin_id.clone(),
+                    package_generation: plugin.package_generation,
+                    activation_epoch: plugin.activation_epoch,
+                    expected_state: PluginInvocationState::Reserved,
+                    next_state: PluginInvocationState::EffectCommitting,
+                },
+                delivery: authorized.delivery.clone(),
+            },
+            now,
+        )
+        .unwrap();
+        let snapshot_revision = session.snapshot_revision;
+        (finalize, plugin, snapshot_revision)
     }
 
     fn authorized_retained_event_reservation(
@@ -9994,6 +10373,462 @@ mod tests {
                 .unwrap() as u64,
             head
         );
+    }
+
+    #[test]
+    fn finalize_resync_applies_leave_replace_and_zero_replace_without_event() {
+        for (choice, staged, expected) in [
+            (
+                FinalKvChoice::LeaveKv,
+                vec![("ignored".to_owned(), vec![9])],
+                vec![("old".to_owned(), vec![1])],
+            ),
+            (
+                FinalKvChoice::ReplaceKvWithStagedSegments,
+                vec![("new".to_owned(), vec![2, 3])],
+                vec![("new".to_owned(), vec![2, 3])],
+            ),
+            (
+                FinalKvChoice::ReplaceKvWithStagedSegments,
+                Vec::new(),
+                Vec::new(),
+            ),
+        ] {
+            let profile = TestProfile::new();
+            let mut connection = profile.connection();
+            let store = PluginPackageStore::open(&profile.path).unwrap();
+            let now = Timestamp::constant(1_800_000_185, 20);
+            let (request, plugin, snapshot_revision) =
+                prepare_finalize_request(&mut connection, &store, now, staged, choice);
+            connection
+                .execute(
+                    "INSERT INTO plugin_kv(plugin_id, key, value, updated_at)
+                     VALUES (?1, 'old', X'01', ?2)",
+                    params![plugin.plugin_id.as_str(), now.to_string()],
+                )
+                .unwrap();
+            let head_before: i64 = connection
+                .query_row(
+                    "SELECT global_revision FROM app_state WHERE singleton = 1",
+                    [],
+                    |row| row.get(0),
+                )
+                .unwrap();
+            let outcome = finalize_plugin_resync(&mut connection, request, now).unwrap();
+            assert_eq!(
+                outcome,
+                FinalizePluginResyncOutcome::Committed(PluginEventCursor {
+                    plugin_id: plugin.plugin_id.clone(),
+                    event_epoch: get_plugin_cursor(&connection, plugin.plugin_id.clone())
+                        .unwrap()
+                        .event_epoch,
+                    revision: snapshot_revision,
+                    resync_required: false,
+                    updated_at: now,
+                })
+            );
+            let actual: Vec<_> = list_plugin_kv(&connection, plugin.plugin_id.clone())
+                .unwrap()
+                .into_iter()
+                .map(|entry| (entry.key, entry.value))
+                .collect();
+            assert_eq!(actual, expected);
+            assert!(list_plugin_invocations(&connection).unwrap().is_empty());
+            assert_eq!(
+                connection
+                    .query_row::<i64, _, _>(
+                        "SELECT global_revision FROM app_state WHERE singleton = 1",
+                        [],
+                        |row| row.get(0),
+                    )
+                    .unwrap(),
+                head_before
+            );
+        }
+    }
+
+    #[test]
+    fn finalize_resync_transaction_failure_injection_rolls_back_before_commit_only() {
+        let profile = TestProfile::new();
+        let mut connection = profile.connection();
+        let store = PluginPackageStore::open(&profile.path).unwrap();
+        let now = Timestamp::constant(1_800_000_185, 21);
+        let (request, plugin, _) = prepare_finalize_request(
+            &mut connection,
+            &store,
+            now,
+            vec![("new".to_owned(), vec![2])],
+            FinalKvChoice::ReplaceKvWithStagedSegments,
+        );
+        connection
+            .execute(
+                "INSERT INTO plugin_kv(plugin_id, key, value, updated_at)
+                 VALUES (?1, 'old', X'01', ?2)",
+                params![plugin.plugin_id.as_str(), now.to_string()],
+            )
+            .unwrap();
+        let injected = || RepositoryError::Storage("injected finalize failure".to_owned());
+        assert_eq!(
+            finalize_plugin_resync_with(
+                &mut connection,
+                request.clone(),
+                now,
+                || Err(injected()),
+                || Ok(()),
+            ),
+            Err(injected())
+        );
+        assert!(
+            get_plugin_cursor(&connection, plugin.plugin_id.clone())
+                .unwrap()
+                .resync_required
+        );
+        assert_eq!(list_plugin_invocations(&connection).unwrap().len(), 1);
+        assert_eq!(
+            list_plugin_kv(&connection, plugin.plugin_id.clone()).unwrap()[0].key,
+            "old"
+        );
+        assert_eq!(
+            finalize_plugin_resync_with(
+                &mut connection,
+                request.clone(),
+                now,
+                || Ok(()),
+                || Err(injected()),
+            ),
+            Err(injected())
+        );
+        assert!(
+            !get_plugin_cursor(&connection, plugin.plugin_id.clone())
+                .unwrap()
+                .resync_required
+        );
+        assert!(list_plugin_invocations(&connection).unwrap().is_empty());
+        assert_eq!(
+            list_plugin_kv(&connection, plugin.plugin_id).unwrap()[0].key,
+            "new"
+        );
+        assert_eq!(
+            finalize_plugin_resync(&mut connection, request, now),
+            Err(RepositoryError::NotFound)
+        );
+    }
+
+    #[test]
+    fn finalize_resync_rechecks_every_authority_field_under_the_lock() {
+        let profile = TestProfile::new();
+        let mut connection = profile.connection();
+        let store = PluginPackageStore::open(&profile.path).unwrap();
+        let now = Timestamp::constant(1_800_000_185, 22);
+        let (request, _, _) = prepare_finalize_request(
+            &mut connection,
+            &store,
+            now,
+            Vec::new(),
+            FinalKvChoice::LeaveKv,
+        );
+        let mut attacks = Vec::new();
+        let mut changed = request.clone();
+        changed.delivery.authority.plugin_id = PluginId::parse("changed").unwrap();
+        attacks.push(changed);
+        let mut changed = request.clone();
+        changed.delivery.authority.package_generation += 1;
+        attacks.push(changed);
+        let mut changed = request.clone();
+        changed.delivery.authority.activation_epoch += 1;
+        attacks.push(changed);
+        let mut changed = request.clone();
+        changed.delivery.authority.host_session_id = OperationId::new();
+        attacks.push(changed);
+        let mut changed = request.clone();
+        changed.delivery.authority.invocation_id = OperationId::new();
+        attacks.push(changed);
+        let mut changed = request.clone();
+        changed.delivery.authority.payload_sha256 = Sha256Digest::of(b"changed payload");
+        attacks.push(changed);
+        let mut changed = request.clone();
+        changed.delivery.authority.mode = PluginDeliveryMode::Active;
+        attacks.push(changed);
+        let mut changed = request.clone();
+        changed.delivery.persisted_entry_id = PluginId::parse("changed").unwrap();
+        attacks.push(changed);
+        let mut changed = request.clone();
+        changed.delivery.request_sha256 = Sha256Digest::of(b"changed final request");
+        attacks.push(changed);
+        let mut changed = request.clone();
+        changed.session.operation_id = OperationId::new();
+        attacks.push(changed);
+        let mut changed = request.clone();
+        changed.session.plugin_id = PluginId::parse("changed").unwrap();
+        attacks.push(changed);
+        let mut changed = request.clone();
+        changed.session.package_generation += 1;
+        attacks.push(changed);
+        let mut changed = request.clone();
+        changed.session.activation_epoch += 1;
+        attacks.push(changed);
+        let mut changed = request.clone();
+        changed.session.expected_cursor.revision += 1;
+        attacks.push(changed);
+        let mut changed = request.clone();
+        changed.session.snapshot_revision -= 1;
+        attacks.push(changed);
+        let mut changed = request.clone();
+        changed.session.snapshot_event_epoch = OperationId::new().to_string();
+        attacks.push(changed);
+        for attack in attacks {
+            assert_eq!(
+                finalize_plugin_resync(&mut connection, attack, now),
+                Err(RepositoryError::Conflict)
+            );
+            assert_eq!(list_plugin_invocations(&connection).unwrap().len(), 1);
+        }
+        connection
+            .execute(
+                "UPDATE plugin_invocations SET request_hash = ?2 WHERE operation_id = ?1",
+                params![
+                    request.session.operation_id.to_string(),
+                    Sha256Digest::of(b"changed durable request").as_str()
+                ],
+            )
+            .unwrap();
+        assert_eq!(
+            finalize_plugin_resync(&mut connection, request.clone(), now),
+            Err(RepositoryError::Conflict)
+        );
+        connection
+            .execute(
+                "UPDATE plugin_invocations SET request_hash = ?2 WHERE operation_id = ?1",
+                params![
+                    request.session.operation_id.to_string(),
+                    request.delivery.request_sha256.as_str()
+                ],
+            )
+            .unwrap();
+        connection
+            .execute(
+                "UPDATE plugin_invocations SET state = 'reserved' WHERE operation_id = ?1",
+                [request.session.operation_id.to_string()],
+            )
+            .unwrap();
+        assert_eq!(
+            finalize_plugin_resync(&mut connection, request.clone(), now),
+            Err(RepositoryError::Conflict)
+        );
+        connection
+            .execute(
+                "UPDATE plugin_invocations SET state = 'effect_committing' WHERE operation_id = ?1",
+                [request.session.operation_id.to_string()],
+            )
+            .unwrap();
+        connection
+            .execute(
+                "UPDATE plugin_event_cursors SET revision = revision + 1 WHERE plugin_id = ?1",
+                [request.session.plugin_id.as_str()],
+            )
+            .unwrap();
+        assert_eq!(
+            finalize_plugin_resync(&mut connection, request.clone(), now),
+            Err(RepositoryError::Conflict)
+        );
+        connection
+            .execute(
+                "UPDATE plugin_event_cursors SET revision = ?2 WHERE plugin_id = ?1",
+                params![
+                    request.session.plugin_id.as_str(),
+                    as_i64(request.session.expected_cursor.revision, "test cursor").unwrap()
+                ],
+            )
+            .unwrap();
+        assert!(matches!(
+            finalize_plugin_resync(&mut connection, request, now).unwrap(),
+            FinalizePluginResyncOutcome::Committed(_)
+        ));
+    }
+
+    #[test]
+    fn finalize_resync_accepts_complete_retained_represented_and_irrelevant_tail() {
+        let profile = TestProfile::new();
+        let mut connection = profile.connection();
+        let store = PluginPackageStore::open(&profile.path).unwrap();
+        let now = Timestamp::constant(1_800_000_185, 23);
+        let (request, plugin, snapshot_revision) = prepare_finalize_request(
+            &mut connection,
+            &store,
+            now,
+            Vec::new(),
+            FinalKvChoice::LeaveKv,
+        );
+        set_community_plugin_policy(&mut connection, OperationId::new(), false, now).unwrap();
+        task_ops::create_task(
+            &mut connection,
+            OperationId::new(),
+            TaskId::new(),
+            TaskDraft::new(TaskTitle::new("Retained tail").unwrap()),
+            now,
+        )
+        .unwrap();
+        let head: i64 = connection
+            .query_row(
+                "SELECT global_revision FROM app_state WHERE singleton = 1",
+                [],
+                |row| row.get(0),
+            )
+            .unwrap();
+        assert!(u64::try_from(head).unwrap() > snapshot_revision);
+        let classifications: Vec<_> = ((snapshot_revision + 1)..=u64::try_from(head).unwrap())
+            .map(|revision| {
+                classify_plugin_resync_event(
+                    &request.session.snapshot_event_epoch,
+                    &load_exact_retained_event(&connection, revision).unwrap(),
+                    &plugin.manifest.subscriptions,
+                )
+                .unwrap()
+            })
+            .collect();
+        assert!(classifications.contains(&PluginResyncEvent::Irrelevant));
+        assert!(
+            classifications
+                .iter()
+                .any(|classification| matches!(classification, PluginResyncEvent::Represented(_)))
+        );
+        let FinalizePluginResyncOutcome::Committed(cursor) =
+            finalize_plugin_resync(&mut connection, request, now).unwrap()
+        else {
+            panic!("complete retained tail unexpectedly restarted resync")
+        };
+        assert_eq!(cursor.revision, snapshot_revision);
+        assert!(!cursor.resync_required);
+        assert_eq!(cursor.plugin_id, plugin.plugin_id);
+    }
+
+    #[test]
+    fn finalize_resync_restarts_on_epoch_retention_invalidating_malformed_and_capacity_tail() {
+        #[derive(Clone, Copy)]
+        enum Attack {
+            Epoch,
+            Missing,
+            Invalidating,
+            Malformed,
+            Capacity,
+        }
+        for attack in [
+            Attack::Epoch,
+            Attack::Missing,
+            Attack::Invalidating,
+            Attack::Malformed,
+            Attack::Capacity,
+        ] {
+            let profile = TestProfile::new();
+            let mut connection = profile.connection();
+            let store = PluginPackageStore::open(&profile.path).unwrap();
+            let now = Timestamp::constant(1_800_000_185, 24);
+            let (request, plugin, snapshot_revision) = prepare_finalize_request(
+                &mut connection,
+                &store,
+                now,
+                vec![("new".to_owned(), vec![2])],
+                FinalKvChoice::ReplaceKvWithStagedSegments,
+            );
+            connection
+                .execute(
+                    "INSERT INTO plugin_kv(plugin_id, key, value, updated_at)
+                     VALUES (?1, 'old', X'01', ?2)",
+                    params![plugin.plugin_id.as_str(), now.to_string()],
+                )
+                .unwrap();
+            match attack {
+                Attack::Epoch => {
+                    connection
+                        .execute(
+                            "UPDATE app_state SET event_epoch = ?1 WHERE singleton = 1",
+                            [OperationId::new().to_string()],
+                        )
+                        .unwrap();
+                }
+                Attack::Missing | Attack::Malformed => {
+                    task_ops::create_task(
+                        &mut connection,
+                        OperationId::new(),
+                        TaskId::new(),
+                        TaskDraft::new(TaskTitle::new("Concurrent event").unwrap()),
+                        now,
+                    )
+                    .unwrap();
+                    if matches!(attack, Attack::Missing) {
+                        connection
+                            .execute(
+                                "DELETE FROM events WHERE revision = ?1",
+                                [i64::try_from(snapshot_revision + 1).unwrap()],
+                            )
+                            .unwrap();
+                    } else {
+                        connection
+                            .execute(
+                                "UPDATE events SET event_json = '{}' WHERE revision = ?1",
+                                [i64::try_from(snapshot_revision + 1).unwrap()],
+                            )
+                            .unwrap();
+                    }
+                }
+                Attack::Invalidating => {
+                    let source = OperationId::new();
+                    task_ops::create_task(
+                        &mut connection,
+                        source,
+                        TaskId::new(),
+                        TaskDraft::new(TaskTitle::new("Concurrent undo").unwrap()),
+                        now,
+                    )
+                    .unwrap();
+                    crate::undo_ops::undo(&mut connection, source, OperationId::new(), now)
+                        .unwrap();
+                }
+                Attack::Capacity => {
+                    connection
+                        .execute(
+                            "UPDATE app_state SET global_revision = ?1 WHERE singleton = 1",
+                            [i64::try_from(
+                                snapshot_revision
+                                    + u64::try_from(EVENT_RETAIN_MAX_COUNT).unwrap()
+                                    + 1,
+                            )
+                            .unwrap()],
+                        )
+                        .unwrap();
+                }
+            }
+            let expected_revision = request.session.expected_cursor.revision;
+            assert_eq!(
+                finalize_plugin_resync(&mut connection, request, now).unwrap(),
+                FinalizePluginResyncOutcome::RestartRequired
+            );
+            let cursor = get_plugin_cursor(&connection, plugin.plugin_id.clone()).unwrap();
+            assert!(cursor.resync_required);
+            assert_eq!(cursor.revision, expected_revision);
+            assert!(list_plugin_invocations(&connection).unwrap().is_empty());
+            let kv = list_plugin_kv(&connection, plugin.plugin_id.clone()).unwrap();
+            assert_eq!(kv.len(), 1);
+            assert_eq!(kv[0].key, "old");
+            if matches!(attack, Attack::Invalidating) {
+                let fresh_plugin =
+                    get_installed_plugin(&connection, plugin.plugin_id.clone()).unwrap();
+                let (fresh, _, fresh_revision) = prepare_finalize_for_plugin(
+                    &mut connection,
+                    fresh_plugin,
+                    now,
+                    Vec::new(),
+                    FinalKvChoice::LeaveKv,
+                );
+                let FinalizePluginResyncOutcome::Committed(cursor) =
+                    finalize_plugin_resync(&mut connection, fresh, now).unwrap()
+                else {
+                    panic!("fresh resync did not commit after invalidating restart")
+                };
+                assert_eq!(cursor.revision, fresh_revision);
+                assert!(!cursor.resync_required);
+            }
+        }
     }
 
     #[test]

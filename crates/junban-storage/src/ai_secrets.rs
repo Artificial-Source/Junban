@@ -26,6 +26,8 @@ use crate::atomic_replace_private_file;
 const VERIFICATION_KEY_BYTES: usize = 32;
 const VERIFICATION_KEY_HEX_BYTES: usize = VERIFICATION_KEY_BYTES * 2;
 const RECEIPT_VERIFIER_DOMAIN: &[u8] = b"junban-ai-secret-receipt-v1\0";
+const PLUGIN_QUERY_CURSOR_DOMAIN: &[u8] = b"junban.plugin.ordinary-query-cursor.v1\0";
+const PLUGIN_QUERY_KEY_COMPARISON_PROBE: &[u8] = b"junban.plugin.query-key-comparison.v1";
 
 /// Internal durable record. The `secret` field is never re-exported.
 #[derive(Clone, Serialize, Deserialize)]
@@ -54,6 +56,48 @@ struct AiSecretsFile {
     version: u32,
     verification_key: String,
     secrets: Vec<StoredAiSecret>,
+}
+
+/// Purpose-limited ordinary-plugin cursor key. It cannot resolve provider
+/// credentials or select another HMAC domain.
+pub(crate) struct PluginQueryCursorKey {
+    key: String,
+}
+
+impl fmt::Debug for PluginQueryCursorKey {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        formatter
+            .debug_struct("PluginQueryCursorKey")
+            .field("key", &"[redacted]")
+            .finish()
+    }
+}
+
+impl PluginQueryCursorKey {
+    pub(crate) fn mac(&self, envelope: &[u8]) -> Result<[u8; 32], AiSecretStoreError> {
+        let mut mac = Hmac::<Sha256>::new_from_slice(self.key.as_bytes())
+            .map_err(|_| AiSecretStoreError::Invalid("verification key is invalid"))?;
+        mac.update(PLUGIN_QUERY_CURSOR_DOMAIN);
+        mac.update(envelope);
+        Ok(mac.finalize().into_bytes().into())
+    }
+
+    pub(crate) fn verify(
+        &self,
+        envelope: &[u8],
+        expected: &[u8],
+    ) -> Result<bool, AiSecretStoreError> {
+        let mut mac = Hmac::<Sha256>::new_from_slice(self.key.as_bytes())
+            .map_err(|_| AiSecretStoreError::Invalid("verification key is invalid"))?;
+        mac.update(PLUGIN_QUERY_CURSOR_DOMAIN);
+        mac.update(envelope);
+        Ok(mac.verify_slice(expected).is_ok())
+    }
+
+    pub(crate) fn has_same_key(&self, other: &Self) -> Result<bool, AiSecretStoreError> {
+        let other_mac = other.mac(PLUGIN_QUERY_KEY_COMPARISON_PROBE)?;
+        self.verify(PLUGIN_QUERY_KEY_COMPARISON_PROBE, &other_mac)
+    }
 }
 
 /// In-memory authority loaded from the durable private secrets file.
@@ -116,6 +160,20 @@ impl AiSecretStore {
             store.verification_key = Some(verification_key);
         }
         Ok(store)
+    }
+
+    /// Derive a purpose-limited ordinary-plugin cursor authority. Provider
+    /// secret records are not retained by the query keyring.
+    pub(crate) fn plugin_query_cursor_key(
+        &self,
+    ) -> Result<PluginQueryCursorKey, AiSecretStoreError> {
+        let key = self
+            .verification_key
+            .clone()
+            .ok_or(AiSecretStoreError::Invalid(
+                "verification key is unavailable",
+            ))?;
+        Ok(PluginQueryCursorKey { key })
     }
 
     /// Compute the keyed, domain-separated receipt verifier for secret request bytes.

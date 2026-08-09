@@ -30,15 +30,16 @@ use crate::{
     DeleteAiMemoryRequest, DeleteAiSessionRequest, DopamineMenuPage, EatTheFrogPage, EndOfDayPage,
     EventCatchUp, ExportFormat, FinishAiResponseRequest, LinkAiSessionMemoryRequest,
     ListAiMemoriesRequest, ListAiMessagesRequest, ListAiSessionsRequest, MoveTarget, NudgesPage,
-    PreparedAiResponse, ProjectDraft, ProjectPatch, ProposeAiApprovalRequest,
-    RenameAiSessionRequest, ReorderScope, ReplanPastBlocksAction, ReplanPastBlocksPreview,
-    Repository, RepositoryError, ReserveDailyAiResponseRequest, RewriteAiResponseRequest,
-    SavedFilterDraft, SavedFilterPatch, SectionDraft, SectionPatch, SelectAiMemoriesRequest,
-    SetAiApprovalStatusRequest, StagedFile, StatsPage, SyncState, TagDraft, TagPatch, TaskJarPage,
-    TaskListAsOf, TaskListPage, TaskPatch, TemplateApply, TemplateDraft, TemplatePatch,
-    TemporalContext, TemporalSettings, TimeBlockPatch, TimeBlockRangePatch, TimeSlotPatch,
-    TimeblockingRangePage, TimeblockingRangeQuery, UpdateAiMemoryRequest, UpsertAiMessageRequest,
-    UpsertAiRunStateRequest, WeeklyReviewPage,
+    PluginCatalogQuery, PluginProjectQueryPage, PluginQueryError, PluginTagQueryPage,
+    PluginTaskQuery, PluginTaskQueryPage, PreparedAiResponse, ProjectDraft, ProjectPatch,
+    ProposeAiApprovalRequest, RenameAiSessionRequest, ReorderScope, ReplanPastBlocksAction,
+    ReplanPastBlocksPreview, Repository, RepositoryError, ReserveDailyAiResponseRequest,
+    RewriteAiResponseRequest, SavedFilterDraft, SavedFilterPatch, SectionDraft, SectionPatch,
+    SelectAiMemoriesRequest, SetAiApprovalStatusRequest, StagedFile, StatsPage, SyncState,
+    TagDraft, TagPatch, TaskJarPage, TaskListAsOf, TaskListPage, TaskPatch, TemplateApply,
+    TemplateDraft, TemplatePatch, TemporalContext, TemporalSettings, TimeBlockPatch,
+    TimeBlockRangePatch, TimeSlotPatch, TimeblockingRangePage, TimeblockingRangeQuery,
+    UpdateAiMemoryRequest, UpsertAiMessageRequest, UpsertAiRunStateRequest, WeeklyReviewPage,
 };
 
 /// Cursor page size used when collecting multi-page task reads.
@@ -384,6 +385,33 @@ where
     pub async fn list_tasks_simple(&self) -> Result<TaskListPage, AppError> {
         let as_of = TaskListAsOf::from_zoned(&Zoned::now())?;
         self.list_tasks(TaskQuery::new().with_limit(100)?, as_of)
+            .await
+    }
+
+    pub async fn query_plugin_tasks(
+        &self,
+        request: junban_plugin_sdk::private_body_types::TaskQuery,
+    ) -> Result<PluginTaskQueryPage, PluginQueryError> {
+        self.repository
+            .query_plugin_tasks(PluginTaskQuery::normalize(request)?)
+            .await
+    }
+
+    pub async fn query_plugin_projects(
+        &self,
+        request: junban_plugin_sdk::private_body_types::CatalogQuery,
+    ) -> Result<PluginProjectQueryPage, PluginQueryError> {
+        self.repository
+            .query_plugin_projects(PluginCatalogQuery::normalize(request)?)
+            .await
+    }
+
+    pub async fn query_plugin_tags(
+        &self,
+        request: junban_plugin_sdk::private_body_types::CatalogQuery,
+    ) -> Result<PluginTagQueryPage, PluginQueryError> {
+        self.repository
+            .query_plugin_tags(PluginCatalogQuery::normalize(request)?)
             .await
     }
 
@@ -2847,6 +2875,8 @@ mod tests {
             Box::pin(async move { result })
         }
     }
+
+    impl crate::PluginQueryRepository for FakeRepository {}
 
     impl crate::PluginRepository for FakeRepository {
         fn retry_due_plugin(

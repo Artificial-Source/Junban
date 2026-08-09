@@ -10,6 +10,7 @@ mod migration;
 mod ops_types;
 mod package_store;
 mod plugin_ops;
+mod plugin_query_ops;
 mod plugin_validation;
 mod query_ops;
 mod reminder_ops;
@@ -46,7 +47,8 @@ use jiff::{Timestamp, civil::Date};
 use junban_app::{
     AiCredentialBindResult, AiCredentialBindingTarget, AiMemoryCursor, AiMemoryListPage,
     AiSessionCursor, AiSessionListPage, AppSettings, BulkAction, CatalogSnapshot, CommentPatch,
-    CommittedMutation, EventCatchUp, ExportFormat, MoveTarget, PluginRepository,
+    CommittedMutation, EventCatchUp, ExportFormat, MoveTarget, PluginCatalogQuery,
+    PluginQueryError, PluginQueryFuture, PluginQueryRepository, PluginRepository, PluginTaskQuery,
     PreparedAiResponse, ProjectDraft, ProjectListPage, ProjectPatch, ReorderScope,
     ReplanPastBlocksAction, ReplanPastBlocksPreview, Repository, RepositoryError, RepositoryFuture,
     ReserveDailyAiResponseRequest, RewriteAiResponseRequest, SavedFilterDraft, SavedFilterPatch,
@@ -65,6 +67,7 @@ use junban_domain::{
     TaskDraft, TaskId, TaskQuery, TaskRelation, TemplateId, TimeBlockDraft, TimeBlockId,
     TimeSlotDraft, TimeSlotId, TransferApply, TransferFormat, TransferPreview,
 };
+use junban_plugin_sdk::private_body_types::{ProjectPage, TagPage, TaskPage};
 use rusqlite::Connection;
 use thiserror::Error;
 use tokio::sync::oneshot;
@@ -1032,6 +1035,48 @@ impl SqliteRepository {
         })
     }
 
+    fn plugin_query_request<T>(
+        &self,
+        operation: impl FnOnce(
+            &Connection,
+            &Path,
+            &mut plugin_query_ops::PluginQueryKeyring,
+        ) -> Result<T, PluginQueryError>
+        + Send
+        + 'static,
+    ) -> PluginQueryFuture<'_, T>
+    where
+        T: Send + 'static,
+    {
+        let sender = self
+            .worker
+            .sender
+            .lock()
+            .expect("worker sender poisoned")
+            .as_ref()
+            .cloned();
+        Box::pin(async move {
+            let sender = sender.ok_or(PluginQueryError::Unavailable)?;
+            let (reply_sender, reply_receiver) = oneshot::channel();
+            match sender.try_send(Command::PluginQuery {
+                job: Box::new(move |connection, profile_dir, keys| {
+                    let _ = reply_sender.send(operation(connection, profile_dir, keys));
+                }),
+            }) {
+                Ok(()) => {}
+                Err(
+                    std::sync::mpsc::TrySendError::Full(_)
+                    | std::sync::mpsc::TrySendError::Disconnected(_),
+                ) => {
+                    return Err(PluginQueryError::Unavailable);
+                }
+            }
+            reply_receiver
+                .await
+                .map_err(|_| PluginQueryError::Unavailable)?
+        })
+    }
+
     fn plugin_request<T>(
         &self,
         operation: impl FnOnce(&mut Connection, &PluginPackageStore) -> Result<T, RepositoryError>
@@ -1078,6 +1123,29 @@ macro_rules! mut_cmd {
     ($self:ident, $variant:ident { $($field:ident),* }) => {
         $self.request(move |reply| Command::$variant { $($field,)* reply })
     };
+}
+
+impl PluginQueryRepository for SqliteRepository {
+    fn query_plugin_tasks(&self, query: PluginTaskQuery) -> PluginQueryFuture<'_, TaskPage> {
+        self.plugin_query_request(move |connection, profile_dir, keys| {
+            plugin_query_ops::query_tasks(connection, profile_dir, keys, query)
+        })
+    }
+
+    fn query_plugin_projects(
+        &self,
+        query: PluginCatalogQuery,
+    ) -> PluginQueryFuture<'_, ProjectPage> {
+        self.plugin_query_request(move |connection, profile_dir, keys| {
+            plugin_query_ops::query_projects(connection, profile_dir, keys, query)
+        })
+    }
+
+    fn query_plugin_tags(&self, query: PluginCatalogQuery) -> PluginQueryFuture<'_, TagPage> {
+        self.plugin_query_request(move |connection, profile_dir, keys| {
+            plugin_query_ops::query_tags(connection, profile_dir, keys, query)
+        })
+    }
 }
 
 impl PluginRepository for SqliteRepository {
@@ -2998,11 +3066,16 @@ impl Repository for SqliteRepository {
 }
 
 type PluginJob = Box<dyn FnOnce(&mut Connection, &PluginPackageStore) + Send>;
+type PluginQueryJob =
+    Box<dyn FnOnce(&Connection, &Path, &mut plugin_query_ops::PluginQueryKeyring) + Send>;
 
 #[allow(clippy::large_enum_variant)]
 enum Command {
     Plugin {
         job: PluginJob,
+    },
+    PluginQuery {
+        job: PluginQueryJob,
     },
     CreateTask {
         operation_id: OperationId,
@@ -3694,9 +3767,13 @@ fn run_worker(
     package_store: PluginPackageStore,
     receiver: mpsc::Receiver<Command>,
 ) {
+    let mut plugin_query_keys = plugin_query_ops::PluginQueryKeyring::default();
     for command in receiver {
         match command {
             Command::Plugin { job } => job(connection, &package_store),
+            Command::PluginQuery { job } => {
+                job(connection, &profile_dir, &mut plugin_query_keys);
+            }
             Command::CreateTask {
                 operation_id,
                 task_id,

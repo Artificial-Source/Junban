@@ -508,7 +508,7 @@ pub(crate) fn load_project(tx: &Connection, id: ProjectId) -> Result<Project, Re
     .map_err(map_not_found)
 }
 
-fn project_from_row(row: &rusqlite::Row<'_>) -> rusqlite::Result<Project> {
+pub(crate) fn project_from_row(row: &rusqlite::Row<'_>) -> rusqlite::Result<Project> {
     let id: String = row.get(0)?;
     let name: String = row.get(1)?;
     let color: String = row.get(2)?;
@@ -582,7 +582,7 @@ pub(crate) fn load_tag(tx: &Connection, id: TagId) -> Result<Tag, RepositoryErro
     .map_err(map_not_found)
 }
 
-fn tag_from_row(row: &rusqlite::Row<'_>) -> rusqlite::Result<Tag> {
+pub(crate) fn tag_from_row(row: &rusqlite::Row<'_>) -> rusqlite::Result<Tag> {
     let id: String = row.get(0)?;
     let name: String = row.get(1)?;
     let color: String = row.get(2)?;

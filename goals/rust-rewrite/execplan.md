@@ -590,6 +590,10 @@ Acceptance:
 Work:
 
 - create a fresh whole-repository map covering ownership, dependency direction, concurrency boundaries, public contracts, generated code and runtime entry points;
+- before any Phase 10 refactor and again after all accepted fixes, record a reproducible Rust shape inventory of crates and modules; handwritten production, handwritten test and generated lines of code; dependency and reverse-dependency edges; trait required-method counts; public and crate-boundary documentation gaps; unsafe, lint-allow and panic sites; function and test spans; focused compile and test timings; and git churn and co-change hotspots;
+- use files with at least 2,000 production lines, functions with at least 200 lines, tests with at least 250 lines, traits with at least 40 required methods and top-decile churn as discovery triggers. These are triage signals, never automatic split or failure thresholds. Give every trigger and every generated-code exclusion a stable finding-ledger disposition with evidence;
+- freshly revalidate, rather than pre-judge, the broad `junban-app` `Repository`/`JunbanService` boundary; the triplicated `junban-storage` forwarding/`Command`/`run_worker` dispatch authority; and the large `junban-storage::plugin_ops`, `junban-server::routes` and `junban-server::tests_api` modules as possible mixed-owner candidates. They are pre-audit hypotheses, not confirmed final defects;
+- refactor Rust shape only where evidence demonstrates mixed ownership, repeated multi-site edits or other change amplification, obstruction for narrow consumers, review or navigation cost, or focused build/test friction. Do not split solely to reduce line counts. Do not add a crate, trait or abstraction unless it reduces a demonstrated cost while preserving behavior, dependency direction, performance and test protection;
 - inspect production Rust and React for dead or superseded paths, needless duplication, unclear ownership, unsafe assumptions, panic/error behavior, hidden global state and avoidable complexity;
 - audit direct dependencies, enabled features, advisories, licenses, duplicate versions, binary contribution and optional-subsystem isolation; remove only dependencies or features whose value is not demonstrated;
 - assess test effectiveness, flake history, fixture duplication, slow suites and uncovered high-consequence invariants; add or simplify tests where evidence shows value rather than chasing a cosmetic coverage number;
@@ -601,6 +605,8 @@ Work:
 
 Acceptance:
 
+- the evidence contains reproducible start and end Rust shape inventories with every required measure, plus a stable disposition for every discovery trigger, generated-code exclusion and named pre-audit candidate;
+- every landed structural change identifies the demonstrated cost it reduces; no line-count-only split or speculative crate, trait or abstraction lands, and behavior, dependency direction, performance and test protection remain intact;
 - a clean checkout on each supported development platform can follow the documented setup and reach the nearest focused checks without hidden machine state;
 - all runtime entry points, ownership boundaries, generated artifacts and optional feature-loading rules have one documented authority and match implementation;
 - no superseded implementation, unexplained production dependency, unresolved advisory, unapproved license, accidental runtime Node path or material dead code remains;
@@ -611,7 +617,7 @@ Acceptance:
 - the finding ledger has no unresolved severe or material issue; an integrated final reviewer approves the changed delta, with a specialist checkpoint added only if a discovered issue creates a distinct severe-risk domain;
 - one clean commit before the separately approved release tag: `chore: complete Junban codebase excellence audit`.
 
-Phase 10 is deliberately bounded. “Take the codebase to the next level” means measurable improvements to correctness, clarity, feedback speed, onboarding and operational confidence—not an endless refactor or theoretical perfection exercise.
+Phase 10 remains the bounded final audit after Phase 9. “Take the codebase to the next level” means measurable improvements to correctness, clarity, feedback speed, onboarding and operational confidence—not an endless refactor, a line-count exercise or a theoretical perfection project.
 
 ## Phase-level validation policy
 
@@ -746,6 +752,9 @@ Track findings by stable ID as open, fixed, rejected or deferred with reasons. A
 - [x] User requested sequential execution through a new Phase 10 without pausing at phase boundaries.
 - [x] Phase 10 scope and release sequencing passed focused planning review.
 - [ ] Phase 10 codebase excellence, DX and documentation audit.
+  - [ ] Capture the reproducible start Rust shape inventory and record a ledger disposition for every discovery trigger and generated-code exclusion.
+  - [ ] Revalidate each named pre-audit candidate and complete only evidence-justified fixes or explicit ledger dispositions.
+  - [ ] Capture the end Rust shape inventory, verify structural-change invariants and complete the integrated review before release approval.
 
 ## Plan review ledger
 
@@ -762,7 +771,7 @@ Track findings by stable ID as open, fixed, rejected or deferred with reasons. A
 - `PLAN-002` — **fixed**. Phase 1 must freeze a numeric final hosted-memory ceiling and exact protocol before Phase 2; Phase 9 must pass it and cannot waive it by explaining cumulative deltas.
 - `PLAN-003` — **fixed**. Phase 8 and Phase 9 now require target-native package/install/launch evidence for Linux x64, macOS Intel/ARM64 and Windows x64/ARM64. Only an explicit recorded user exception can permit a missing target.
 - Focused recheck — **approved**. The planning reviewer found no remaining blocker in `PLAN-001`–`PLAN-003`.
-- Phase 10 planning review — **approved**. The final audit is bounded by evidence and stable findings, has observable DX/docs/quality acceptance, and precedes rather than follows the separately approved release tag.
+- Phase 10 planning review — **approved**. The final audit is bounded by evidence and stable findings, has observable DX/docs/quality acceptance, and precedes rather than follows the separately approved release tag. The later user-directed Rust shape round is additive acceptance work and cannot be omitted from Phase 10 closure.
 - Phase 6 planning review — **approved after fixes**. `P6-PLAN-001`–`P6-PLAN-005` close secret backup/restore authority, dispatch/cancel linearization, aggregate quotas and mutation policy, manifest-verified real local-engine acceptance, and independent legacy-rendered visual authorities.
 - `DBPLAN2-001`–`DBPLAN2-006` — **fixed and approved**. Phase 2 freezes a generalized one-event-per-revision envelope, SQLite table rebuild, bounded cascade/receipt/event payloads, complete delete-undo closure, pending-only completion cascade, and explicit section deletion. Focused database recheck approved implementation.
 - Phase 2 final review — **approved after fixes**. Frontend, accessibility, database and API findings plus six dogfood issues are fixed with focused regressions. Targeted closure re-review confirmed `P2-CLOSE-001`–`P2-CLOSE-003` fixed with no material finding remaining; the full ledger is `evidence/phase-2-review-ledger.md`.
@@ -811,6 +820,7 @@ Track findings by stable ID as open, fixed, rejected or deferred with reasons. A
 - 2026-08-05: `P7-PLAN-RUNTIME-001` blocked selecting a child cap from Wasmtime's default approximately 4-GiB wasm32 reservation. The calibration preflight tunes the one-memory Engine to the frozen 128-MiB maximum with zero guard/growth reservation and adds valid held-callback workloads plus exact-child release sampling.
 - 2026-08-05: Exact clean-commit run `31008905408` passed one warm-up plus five optimized runs per Rust/TypeScript profile on Linux, macOS and Windows. Linux virtual-address and Windows private-commit ranges separate valid workloads from a candidate cap, but macOS reports roughly 415 GiB valid VSIZE, making its mechanical 519-GiB `RLIMIT_AS` minimum ineffective and rejecting that remedy. No cap is frozen and Slice 2C stays blocked.
 - 2026-08-05: The approved narrower correction uses Wasmtime 36.0.13 guest-to-host hostcall fuel rather than a hard process cap. The smallest audited authority is 4,464,640 bytes: 4-MiB private callback body + 139,264-byte maximum valid nested ABI structure + 128-KiB margin. Every initial/replacement Store sets and reads it back before instantiation; all 11 imports/9 exports, valid/near-bound/oversized Rust lifts, the retained TypeScript bulk typed-array oversized-import argument with no capability request published, normalized failure, Store destruction/replacement, diagnostics and five-run optimized Linux exact-child peaks are covered. Focused recheck remains mandatory, so `P7-PLAN-RUNTIME-001`, `P7-RUNTIME-SEC-001`, `P7-DEP-001` and the Slice 2C block remain open.
+- 2026-08-09: user made a start-to-end Rust shape and module-maintainability round explicit, non-skippable Phase 10 acceptance. Numeric size and churn signals are triage only; refactoring requires demonstrated ownership or workflow cost, and current candidates remain hypotheses to revalidate after Phase 9 rather than confirmed defects.
 
 ## Discoveries and risks
 

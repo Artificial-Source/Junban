@@ -1,6 +1,6 @@
 # Phase 7 Wave 2 — hostile plugin runtime plan
 
-Status: Slice 2B and hostcall-fuel security correction accepted; `P7-PLAN-2C-001`–`003` closed by focused recheck; `P7-PLAN-2C-004` and `P7-PLAN-2C-004-EVENT-ATOMICITY` fixed in writing and pending focused recheck; Slice 2C unauthorized; `P7-DEP-001` and macOS containment CI remain open
+Status: Slice 2B and hostcall-fuel security correction accepted; all `P7-PLAN-2C-001`–`004` plus `P7-PLAN-2C-004-EVENT-ATOMICITY` closed; Slice 2C authorized to implement from planning and security; `P7-DEP-001` open; Wave 2 in progress; clean replacement full CI at the current head pending
 
 ## Outcome and boundary
 
@@ -62,7 +62,9 @@ The protocol's exact 10-second compile/load authority is unchanged. It is delibe
 
 Independent security review found `P7-RUNTIME-SEC-001`: typed canonical ABI lifting can allocate native Rust strings/lists/results from 64/128-MiB guest memory before post-lift 4-MiB callback and 256-KiB output serialization bounds run. Exact cross-platform calibration subsequently rejected the macOS `RLIMIT_AS` remedy: a valid process reserves roughly 415 GiB, so its mechanical 519-GiB minimum is not a meaningful backstop. The approved minimal correction instead configures Wasmtime 36.0.13 `Store::set_hostcall_fuel` to **4,464,640 bytes** before every initial and replacement instantiation, with readback asserted. This guest-to-host canonical-lift authority is separate from wasm execution fuel and does not meter host-to-guest values. The bound derives from the 4-MiB callback body plus the largest 139,264-byte valid nested ABI structure and an explicit 128-KiB margin; generated-adapter coverage spans all 11 imports and 9 exports. Rust maximum-valid/oversized imports and the retained TypeScript bulk typed-array oversized-import argument (one 558,081-element `BigInt64Array`, 4,464,648 flat bytes, invoked on the original healthy Store with no capability request published) prove pre-adapter/pre-allocation failure, normalized `resource-limit`, failed-Store destruction and same-process replacement.
 
-The approved focused hostcall-fuel recheck marks `P7-PLAN-RUNTIME-001` and `P7-RUNTIME-SEC-001` fixed and authorizes Slice 2C from that security gate. It does not close `P7-DEP-001`, waive the current macOS containment failure in CI run `31036645108`, or approve Slice 2C. The focused planning recheck closed `P7-PLAN-2C-001`–`003`; `P7-PLAN-2C-004` and `P7-PLAN-2C-004-EVENT-ATOMICITY` remain fixed in writing but pending the one focused recheck required before implementation.
+The approved focused hostcall-fuel recheck marks `P7-PLAN-RUNTIME-001` and `P7-RUNTIME-SEC-001` fixed. The focused Slice 2C planning verdict at exact reviewed HEAD `442ebdd61e71a19a3e906b33b54bf7857ad555f8` is **APPROVE**, with no blockers: `P7-PLAN-2C-001`–`003` remain closed, while `P7-PLAN-2C-004` and `P7-PLAN-2C-004-EVENT-ATOMICITY` are fixed and closed. Together the planning and security verdicts authorize Slice 2C implementation. They do not close `P7-DEP-001` or accept Wave 2.
+
+On exact code head `0220c8c67bd1da94f90fecc11aeabf87e784f777`, CI run `31294773893` jobs `93197967769`, `93197967800`, and `93197967814` passed Ubuntu, macOS, and Windows plugin-host containment, proving the competing `Timeout`/`ResourceLimit` assertion correction. The same run failed only unrelated storage test isolation and newly disclosed tooling advisories, both fixed at current head `ce80dead79c5ec2dadd95bddb8202ee7dbd2bf46`; a clean replacement full CI run is pending, so neither current-head full-CI green nor Wave 2 acceptance is claimed. Phase 7 process-memory calibration run `31294772199` at `0220c8c67bd1da94f90fecc11aeabf87e784f777` passed.
 
 ### Slice 2C — lazy parent supervisor and verified source bridge
 
@@ -116,7 +118,7 @@ Build signed Rust and TypeScript hostile/golden components from pinned authoring
 
 Slice 2E may add exactly one non-shipped optimized integration/measurement harness. It constructs the real Slice 2C supervisor with real storage/AppService and the real sibling host; its only path injection is the tests-only absolute Cargo binary path. It runs Rust and TypeScript profiles separately and measures multi-runtime scaling at one, four and sixteen loaded runtimes, including dependency graphs, one/four invocation admission and cleanup. It replaces the selected-path 45.0.3 active-runtime projections with clean 36.0.13 evidence while retaining separate default/Rust/TypeScript reports.
 
-This harness is replacement runtime evidence only. It does not satisfy Wave 3 ordinary `ServerState` startup/restore/maintenance composition and cannot substitute for Wave 5 product-integrated default/Rust/TypeScript evidence. Obtain the Wave 2 security gate, make the current macOS containment job pass, and close `P7-DEP-001` plus every other named material finding before Wave 2 acceptance.
+This harness is replacement runtime evidence only. It does not satisfy Wave 3 ordinary `ServerState` startup/restore/maintenance composition and cannot substitute for Wave 5 product-integrated default/Rust/TypeScript evidence. Obtain the complete Wave 2 security gate, retain the corrected cross-platform containment evidence, obtain a clean replacement full CI run at the current head, and close `P7-DEP-001` plus every other named material finding before Wave 2 acceptance.
 
 ## Ownership and lifecycle
 

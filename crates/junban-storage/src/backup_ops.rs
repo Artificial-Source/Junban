@@ -10,8 +10,7 @@ use std::{
 use jiff::{Timestamp, ToSpan};
 use junban_app::{
     CommittedEvent, CommittedMutation, CommittedPluginInvocation, EventType,
-    PluginInvocationTerminalKind, RepositoryError, ResourceSnapshot,
-    ResourceType, StagedFile,
+    PluginInvocationTerminalKind, RepositoryError, ResourceSnapshot, ResourceType, StagedFile,
 };
 use junban_domain::{
     AI_APPROVAL_LIFETIME_SECS, AI_MEMORIES_PER_PROFILE_MAX, AI_MEMORY_BYTES_MAX,
@@ -1552,8 +1551,7 @@ fn validate_plugin_invocation_receipt(
     response_json: &str,
     head: u64,
 ) -> Result<(), RepositoryError> {
-    let _request =
-        crate::plugin_ops::parse_invocation_receipt_request(operation_id, request_json)?;
+    let _request = crate::plugin_ops::parse_invocation_receipt_request(operation_id, request_json)?;
     let response: CommittedPluginInvocation =
         serde_json::from_str(response_json).map_err(storage_error)?;
     let in_flight: bool = tx
@@ -1986,9 +1984,7 @@ fn validate_subject(
     }
 }
 
-pub(crate) fn validate_committed_event(
-    event: &CommittedEvent,
-) -> Result<(), RepositoryError> {
+pub(crate) fn validate_committed_event(event: &CommittedEvent) -> Result<(), RepositoryError> {
     if event.revision == 0 {
         return Err(RepositoryError::Storage(
             "event revision is zero".to_owned(),

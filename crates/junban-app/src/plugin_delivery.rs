@@ -159,8 +159,7 @@ impl PluginRetainedEventSource {
         self.validate_position()?;
         let request = decode_invocation_request(InvocationKind::HandleEvent, &self.private_body)
             .map_err(|_| RepositoryError::Conflict)?;
-        let junban_plugin_sdk::InvocationRequest::HandleEvent(payload) = request
-        else {
+        let junban_plugin_sdk::InvocationRequest::HandleEvent(payload) = request else {
             return Err(RepositoryError::Conflict);
         };
         let event = payload.argument();

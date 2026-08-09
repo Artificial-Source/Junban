@@ -859,7 +859,9 @@ pub fn plugin_manifest_entry_authority(
 pub fn plugin_manifest_entry_persisted_id(entry: &PluginManifestEntry) -> Option<PluginId> {
     match entry {
         PluginManifestEntry::Command { command_id }
-        | PluginManifestEntry::Event { event_id: command_id } => Some(command_id.clone()),
+        | PluginManifestEntry::Event {
+            event_id: command_id,
+        } => Some(command_id.clone()),
         PluginManifestEntry::SurfaceAction {
             surface_id,
             action_id,

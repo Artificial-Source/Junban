@@ -13,33 +13,31 @@ use junban_app::{
     AuthorizedPlannedPluginInvocationCommit, AuthorizedReservePluginInvocationRequest,
     AuthorizedTransitionPluginInvocationRequest, BeginPluginResyncRequest, CommittedEvent,
     CommittedMutation, CommittedPluginInvocation, CommunityPluginPolicy,
-    CompletePluginActivationRequest,
-    CompletePluginInvocationRequest, DeletePluginSettingRequest, DuePluginRetryRequest, EventType,
-    InstallPluginRequest, InstalledPlugin, InstalledPluginProfile, OpenedPluginComponentSource,
-    PLUGIN_DEPENDENTS_MAX, PLUGIN_FAILURE_BACKOFF_MAX_SECONDS,
-    PLUGIN_FAILURE_BACKOFF_START_SECONDS, PLUGIN_GRAPH_FENCE_ENTRIES_MAX,
-    PLUGIN_INVOCATION_MATERIAL_BYTES_MAX, PLUGIN_INVOCATION_MATERIAL_PER_PLUGIN_BYTES_MAX,
-    PLUGIN_INVOCATION_RETENTION_DAYS, PLUGIN_INVOCATIONS_MAX, PLUGIN_INVOCATIONS_PER_PLUGIN_MAX,
-    PLUGIN_KV_BYTES_MAX, PLUGIN_KV_KEYS_MAX, PLUGIN_KV_VALUE_BYTES_MAX,
-    PLUGIN_RESYNC_PAGE_BYTES_MAX, PLUGIN_RESYNC_PAGE_ITEMS_MAX, PLUGIN_SETTINGS_BYTES_MAX,
-    PLUGIN_SETTINGS_KEYS_MAX, PLUGINS_ENABLED_MAX, PLUGINS_INSTALLED_MAX,
-    PlannedPluginInvocationCommit, PluginComponentSelection, PluginCursorPosition,
-    PluginDeliveryMode, PluginEventCursor, PluginGrant, PluginGraphFenceCause,
-    PluginGraphFenceDisposition, PluginGraphFenceOutcome, PluginGraphFenceRequest,
-    PluginGraphFenceResult, PluginGraphRejection, PluginHookKind, PluginInstallSource,
-    PluginInvocation, PluginInvocationDelivery, PluginInvocationDeliveryCheck,
+    CompletePluginActivationRequest, CompletePluginInvocationRequest, DeletePluginSettingRequest,
+    DuePluginRetryRequest, EventType, InstallPluginRequest, InstalledPlugin,
+    InstalledPluginProfile, OpenedPluginComponentSource, PLUGIN_DEPENDENTS_MAX,
+    PLUGIN_FAILURE_BACKOFF_MAX_SECONDS, PLUGIN_FAILURE_BACKOFF_START_SECONDS,
+    PLUGIN_GRAPH_FENCE_ENTRIES_MAX, PLUGIN_INVOCATION_MATERIAL_BYTES_MAX,
+    PLUGIN_INVOCATION_MATERIAL_PER_PLUGIN_BYTES_MAX, PLUGIN_INVOCATION_RETENTION_DAYS,
+    PLUGIN_INVOCATIONS_MAX, PLUGIN_INVOCATIONS_PER_PLUGIN_MAX, PLUGIN_KV_BYTES_MAX,
+    PLUGIN_KV_KEYS_MAX, PLUGIN_KV_VALUE_BYTES_MAX, PLUGIN_RESYNC_PAGE_BYTES_MAX,
+    PLUGIN_RESYNC_PAGE_ITEMS_MAX, PLUGIN_SETTINGS_BYTES_MAX, PLUGIN_SETTINGS_KEYS_MAX,
+    PLUGINS_ENABLED_MAX, PLUGINS_INSTALLED_MAX, PlannedPluginInvocationCommit,
+    PluginComponentSelection, PluginCursorPosition, PluginDeliveryMode, PluginEventCursor,
+    PluginGrant, PluginGraphFenceCause, PluginGraphFenceDisposition, PluginGraphFenceOutcome,
+    PluginGraphFenceRequest, PluginGraphFenceResult, PluginGraphRejection, PluginHookKind,
+    PluginInstallSource, PluginInvocation, PluginInvocationDelivery, PluginInvocationDeliveryCheck,
     PluginInvocationState, PluginInvocationTerminalKind, PluginKvEntry, PluginKvPatch,
-    PluginOperatorRequestIdentity, PluginRetainedEventClassification,
     PluginManifestEntry, PluginManifestEntrySelector, PluginMutationOutcome,
-    PluginPackageAdmission, PluginPackageReconciliation, PluginResyncKvCommit, PluginResyncPage,
-    PluginResyncPageRequest, PluginResyncSession, PluginRuntimeState, PluginSetting,
-    PluginSnapshotItem, PluginSnapshotKind, PublisherTrust, PublisherTrustStatus,
-    RecordPluginAttemptFailureRequest, ReplacePluginGrantsRequest, RepositoryError,
-    ReservePluginInvocationRequest, ReservedPluginInvocation, ResourceRef, ResourceSnapshot,
-    ResyncScope, RevokePluginGrantsRequest, SetPluginSettingRequest,
-    TransitionPluginInvocationRequest, TrustPublisherRequest, VerifiedPluginCursorSkipRequest,
-    plugin_committed_event_content_hash, plugin_invocation_request_hash,
-    plugin_manifest_entry_authority, plugin_resync_request_hash,
+    PluginOperatorRequestIdentity, PluginPackageAdmission, PluginPackageReconciliation,
+    PluginResyncKvCommit, PluginResyncPage, PluginResyncPageRequest, PluginResyncSession,
+    PluginRetainedEventClassification, PluginRuntimeState, PluginSetting, PluginSnapshotItem,
+    PluginSnapshotKind, PublisherTrust, PublisherTrustStatus, RecordPluginAttemptFailureRequest,
+    ReplacePluginGrantsRequest, RepositoryError, ReservePluginInvocationRequest,
+    ReservedPluginInvocation, ResourceRef, ResourceSnapshot, ResyncScope,
+    RevokePluginGrantsRequest, SetPluginSettingRequest, TransitionPluginInvocationRequest,
+    TrustPublisherRequest, VerifiedPluginCursorSkipRequest, plugin_committed_event_content_hash,
+    plugin_invocation_request_hash, plugin_manifest_entry_authority, plugin_resync_request_hash,
     plugin_retained_event_payload_hash,
 };
 use junban_domain::{OperationId, ProjectId, TagId, TaskId};
@@ -2975,9 +2973,7 @@ pub(crate) fn verified_skip_plugin_cursor(
         .map_err(storage_error)?;
     let plugin = load_installed_plugin(&transaction, &request.authority.plugin_id)?;
     let runtime_admits = match request.authority.mode {
-        PluginDeliveryMode::StartingCatchUp => {
-            plugin.runtime_state == PluginRuntimeState::Starting
-        }
+        PluginDeliveryMode::StartingCatchUp => plugin.runtime_state == PluginRuntimeState::Starting,
         PluginDeliveryMode::Active => runtime_admits_ordinary(&plugin, now),
         PluginDeliveryMode::StartingResync => false,
     };
@@ -2990,8 +2986,7 @@ pub(crate) fn verified_skip_plugin_cursor(
     {
         return Err(RepositoryError::Conflict);
     }
-    let current =
-        PluginCursorPosition::from(&load_plugin_cursor(&transaction, &plugin.plugin_id)?);
+    let current = PluginCursorPosition::from(&load_plugin_cursor(&transaction, &plugin.plugin_id)?);
     if current != request.expected_cursor {
         return Err(RepositoryError::Conflict);
     }
@@ -3241,8 +3236,8 @@ fn invocation_receipt_request_json(
     request_sha256: &Sha256Digest,
     delivery_operation_id: OperationId,
 ) -> Result<String, RepositoryError> {
-    let persisted_entry_id = junban_app::plugin_manifest_entry_persisted_id(entry)
-        .ok_or(RepositoryError::Conflict)?;
+    let persisted_entry_id =
+        junban_app::plugin_manifest_entry_persisted_id(entry).ok_or(RepositoryError::Conflict)?;
     let stable = PluginOperatorRequestIdentity::new(
         operation_id,
         plugin_id.clone(),
@@ -3316,8 +3311,10 @@ pub(crate) fn parse_invocation_receipt_request(
 ) -> Result<InvocationReceiptRequest, RepositoryError> {
     let request: InvocationReceiptRequest =
         serde_json::from_str(request_json).map_err(storage_error)?;
-    let persisted_entry_id = junban_app::plugin_manifest_entry_persisted_id(&request.executed.entry)
-        .ok_or_else(|| RepositoryError::Storage("invalid invocation receipt entry".to_owned()))?;
+    let persisted_entry_id = junban_app::plugin_manifest_entry_persisted_id(
+        &request.executed.entry,
+    )
+    .ok_or_else(|| RepositoryError::Storage("invalid invocation receipt entry".to_owned()))?;
     let operator_entry = matches!(
         (request.executed.hook_kind, &request.executed.entry),
         (
@@ -5963,7 +5960,8 @@ mod tests {
         HttpScope, InvocationRequest, Permission, PermissionScope, Publisher, RuntimeProfile,
         SettingDeclaration, SettingSchema, SurfaceDeclaration, SurfaceKind, SurfaceLocation,
         UnscopedPermission, WitAuthority, pack_package,
-        private_body_types::{CommandCall, EventEnvelope, EventSubject}, signer_key_id,
+        private_body_types::{CommandCall, EventEnvelope, EventSubject},
+        signer_key_id,
     };
     use uuid::Uuid;
 
@@ -6503,13 +6501,9 @@ mod tests {
             revision: source_revision,
             resync_required: false,
         };
-        let source = junban_app::PluginRetainedEventSource::new(
-            &event,
-            expected_cursor,
-            next_cursor,
-            body,
-        )
-        .unwrap();
+        let source =
+            junban_app::PluginRetainedEventSource::new(&event, expected_cursor, next_cursor, body)
+                .unwrap();
         let payload_sha256 = plugin_retained_event_payload_hash(
             &source.event_content_sha256,
             entry_id.as_str(),
@@ -6589,12 +6583,7 @@ mod tests {
             .unwrap()
             .next_cursor
             .revision += 1;
-        vec![
-            source_revision,
-            content_hash,
-            expected_cursor,
-            next_cursor,
-        ]
+        vec![source_revision, content_hash, expected_cursor, next_cursor]
     }
 
     fn verified_skip_request(
@@ -6626,11 +6615,7 @@ mod tests {
         }
     }
 
-    fn append_irrelevant_settings_event(
-        connection: &mut Connection,
-        now: Timestamp,
-        accent: &str,
-    ) {
+    fn append_irrelevant_settings_event(connection: &mut Connection, now: Timestamp, accent: &str) {
         let mut appearance = crate::settings_ops::get_settings(connection)
             .unwrap()
             .appearance;
@@ -10392,7 +10377,10 @@ mod tests {
             .unwrap()
             .unwrap();
         assert!(replay.replayed);
-        assert_eq!(serde_json::to_string(&replay).unwrap(), serde_json::to_string(&committed).unwrap());
+        assert_eq!(
+            serde_json::to_string(&replay).unwrap(),
+            serde_json::to_string(&committed).unwrap()
+        );
 
         let rotated_delivery = PluginInvocationDelivery::new(
             junban_app::PluginDeliveryAuthority {
@@ -10403,7 +10391,10 @@ mod tests {
             entry_id.clone(),
         )
         .unwrap();
-        assert_ne!(rotated_delivery.authority.host_session_id, first_host_session);
+        assert_ne!(
+            rotated_delivery.authority.host_session_id,
+            first_host_session
+        );
         let mut rotated = authorized.clone();
         rotated.request.request_sha256 = rotated_delivery.request_sha256.clone();
         rotated.delivery = rotated_delivery;
@@ -10543,13 +10534,11 @@ mod tests {
         let mut attacks = Vec::new();
         let mut changed_stable: serde_json::Value =
             serde_json::from_str(&canonical_request).unwrap();
-        changed_stable["stable"]["payload_sha256"] =
-            serde_json::Value::String("11".repeat(32));
+        changed_stable["stable"]["payload_sha256"] = serde_json::Value::String("11".repeat(32));
         attacks.push(serde_json::to_string(&changed_stable).unwrap());
         let mut changed_final: serde_json::Value =
             serde_json::from_str(&canonical_request).unwrap();
-        changed_final["executed"]["request_sha256"] =
-            serde_json::Value::String("22".repeat(32));
+        changed_final["executed"]["request_sha256"] = serde_json::Value::String("22".repeat(32));
         attacks.push(serde_json::to_string(&changed_final).unwrap());
         for attack in attacks {
             connection
@@ -10858,12 +10847,8 @@ mod tests {
             )
             .unwrap();
             let operation_id = OperationId::new();
-            let authorized = authorized_retained_event_reservation(
-                &connection,
-                &plugin,
-                operation_id,
-                mode,
-            );
+            let authorized =
+                authorized_retained_event_reservation(&connection, &plugin, operation_id, mode);
 
             for changed in mutated_event_deliveries(&authorized.delivery) {
                 let mut request = authorized.clone();
@@ -10874,8 +10859,7 @@ mod tests {
                     RepositoryError::Conflict
                 );
             }
-            reserve_authorized_plugin_invocation(&mut connection, authorized.clone(), now)
-                .unwrap();
+            reserve_authorized_plugin_invocation(&mut connection, authorized.clone(), now).unwrap();
 
             let transition = TransitionPluginInvocationRequest {
                 operation_id,
@@ -10975,7 +10959,10 @@ mod tests {
                 now,
             )
             .unwrap();
-            assert_eq!(committed.cursor.unwrap().revision, exact_cursor.next.revision);
+            assert_eq!(
+                committed.cursor.unwrap().revision,
+                exact_cursor.next.revision
+            );
         }
     }
 
@@ -12633,8 +12620,7 @@ mod tests {
                 operation_id,
                 PluginDeliveryMode::StartingCatchUp,
             );
-            reserve_authorized_plugin_invocation(&mut connection, authorized.clone(), now)
-                .unwrap();
+            reserve_authorized_plugin_invocation(&mut connection, authorized.clone(), now).unwrap();
             if effect_committing {
                 transition_authorized_plugin_invocation(
                     &mut connection,

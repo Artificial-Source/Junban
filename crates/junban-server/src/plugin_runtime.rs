@@ -1342,28 +1342,23 @@ impl RuntimeActor {
         self.nodes.clear();
         self.activation_order.clear();
         self.host_session_id = None;
-        self.lifecycle = PluginRuntimeLifecycle::Dormant;
         self.exit_when_idle = true;
-        let Some(session_id) = failure.host_session_id else {
-            return;
+        let fenced = match failure.host_session_id {
+            Some(host_session_id) => {
+                self.fence_current_graph(
+                    &plan.selected,
+                    failure
+                        .failing_plugin
+                        .map(|plugin_id| (plugin_id, failure.cause)),
+                    host_session_id,
+                )
+                .await
+            }
+            None => false,
         };
-        let entries = graph_fence_entries(
-            &plan.selected,
-            failure
-                .failing_plugin
-                .map(|plugin_id| (plugin_id, failure.cause)),
-        );
-        let request = PluginGraphFenceRequest {
-            operation_id: OperationId::new(),
-            host_session_id: session_id,
-            entries,
-        };
-        if self
-            .service
-            .fence_graph(request, Timestamp::now())
-            .await
-            .is_err()
-        {
+        if fenced {
+            self.lifecycle = PluginRuntimeLifecycle::Dormant;
+        } else {
             self.enter_fenced();
         }
     }
@@ -3008,28 +3003,9 @@ impl RuntimeActor {
                 host_session_id,
                 completion,
             } => {
-                let current_graph = self.current_fence_graph(&graph).await;
-                let fenced = match current_graph {
-                    Ok(graph) if graph.is_empty() => true,
-                    Ok(graph) => {
-                        let trigger = trigger.filter(|(plugin_id, _)| {
-                            graph.iter().any(|plugin| plugin.plugin_id == *plugin_id)
-                        });
-                        let entries = graph_fence_entries(&graph, trigger);
-                        self.service
-                            .fence_graph(
-                                PluginGraphFenceRequest {
-                                    operation_id: OperationId::new(),
-                                    host_session_id,
-                                    entries,
-                                },
-                                Timestamp::now(),
-                            )
-                            .await
-                            .is_ok()
-                    }
-                    Err(_) => false,
-                };
+                let fenced = self
+                    .fence_current_graph(&graph, trigger, host_session_id)
+                    .await;
                 if !fenced {
                     self.enter_fenced();
                 } else {
@@ -3059,6 +3035,33 @@ impl RuntimeActor {
                 self.exit_when_idle = true;
             }
         }
+    }
+
+    async fn fence_current_graph(
+        &self,
+        loaded_graph: &[InstalledPlugin],
+        trigger: Option<(PluginId, PluginGraphFenceCause)>,
+        host_session_id: String,
+    ) -> bool {
+        let Ok(graph) = self.current_fence_graph(loaded_graph).await else {
+            return false;
+        };
+        if graph.is_empty() {
+            return true;
+        }
+        let trigger = trigger
+            .filter(|(plugin_id, _)| graph.iter().any(|plugin| plugin.plugin_id == *plugin_id));
+        self.service
+            .fence_graph(
+                PluginGraphFenceRequest {
+                    operation_id: OperationId::new(),
+                    host_session_id,
+                    entries: graph_fence_entries(&graph, trigger),
+                },
+                Timestamp::now(),
+            )
+            .await
+            .is_ok()
     }
 
     async fn current_fence_graph(

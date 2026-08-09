@@ -1129,6 +1129,9 @@ for _ in range(load_count):
     frame, _ = read_message()
     if frame is None or frame.get("type") != "load":
         sys.exit(2)
+    if CFG.get("load_stall") == frame["fence"]["plugin_id"]:
+        stdin.read(1)
+        sys.exit(0)
     if CFG.get("load_failure") == frame["fence"]["plugin_id"]:
         send({"type": "failed", "fence": frame["fence"], "code": "invalid_component"})
         # Keep EOF from racing the acknowledged failure frame. The parent
@@ -2508,7 +2511,7 @@ async fn watchdog_timeout_has_one_terminal_one_receipt_and_no_orphan() {
 
 #[cfg(unix)]
 #[tokio::test]
-async fn valid_staged_body_completes_but_every_fence_mismatch_fences_after_reap() {
+async fn valid_staged_body_completes_and_fence_mismatches_reap() {
     let valid_fixture = HostFixture::new("valid-body", json!({"loads": 1, "invoke": "success"}));
     let valid_service =
         MockService::new("valid-body", chain_profile(1, PluginRuntimeState::Active));
@@ -2585,11 +2588,13 @@ async fn valid_staged_body_completes_but_every_fence_mismatch_fences_after_reap(
             "{mode}: {terminal:?}"
         );
         if mode == "partial_body" {
-            // The watchdog durably degrades the only plugin before the child
-            // misses its cancellation deadline, leaving no Starting/Active
-            // authority for the later triggerless loss to fence.
+            // Durable timeout processing and forced child closure are both
+            // authorized; process reap is the phase barrier shared by them.
             wait_pids_reaped(&fixture.pid_file).await;
-            assert!(service.lock().fence_requests.is_empty());
+            let state = service.lock();
+            assert!(state.fence_requests.len() <= 1);
+            assert!(state.fence_saw_reaped.iter().all(|reaped| *reaped));
+            drop(state);
         } else {
             service.wait_fence().await;
             let state = service.lock();
@@ -2649,6 +2654,13 @@ async fn attributed_load_failure_reaps_reconciles_and_fences_the_mixed_graph_onc
     assert_eq!(state.fence_requests.len(), 1);
     assert_eq!(state.fence_saw_reaped, [true]);
     let entries = &state.fence_requests[0].entries;
+    assert_eq!(
+        entries
+            .iter()
+            .map(|entry| entry.plugin_id.as_str())
+            .collect::<Vec<_>>(),
+        ["a-dependent", "m-sibling", "z-base"]
+    );
     assert!(entries.iter().any(|entry| {
         entry.plugin_id.as_str() == "z-base"
             && entry.disposition == PluginGraphFenceDisposition::Failing
@@ -2664,6 +2676,142 @@ async fn attributed_load_failure_reaps_reconciles_and_fences_the_mixed_graph_onc
     }));
     drop(state);
     assert!(process_is_absent(pids.lock().unwrap()[0]));
+}
+
+#[cfg(unix)]
+#[tokio::test]
+async fn launch_failure_fences_the_fresh_graph_without_a_stale_trigger() {
+    let failing = installed_plugin("a-failing", 1, 10, PluginRuntimeState::Starting, Vec::new());
+    let sibling = installed_plugin("z-sibling", 2, 10, PluginRuntimeState::Starting, Vec::new());
+    let initial = profile(
+        vec![failing.clone(), sibling.clone()],
+        vec!["a-failing", "z-sibling"],
+    );
+    let fixture = HostFixture::new(
+        "launch-fresh-graph",
+        json!({"loads": 2, "load_stall": "a-failing"}),
+    );
+    let service = MockService::new("launch-fresh-graph", initial.clone());
+    service.require_reap_before_fence(fixture.pid_file.clone());
+    let pids = Arc::new(Mutex::new(Vec::new()));
+    let supervisor = Arc::new(PluginRuntimeSupervisor::for_test(
+        service.clone(),
+        fixture.policy(vec![session(299)], Arc::clone(&pids)),
+        Arc::new(DenyCallbacks),
+    ));
+    let reconciling = Arc::clone(&supervisor);
+    let reconcile = tokio::spawn(async move { reconciling.reconcile().await });
+
+    wait_for_captured_frame(&fixture, "load").await;
+    let mut current = initial;
+    current.plugins[0].runtime_state = PluginRuntimeState::Degraded;
+    current.plugins[0].failure_count = 1;
+    service.update_profile(current);
+
+    assert_eq!(
+        reconcile.await.unwrap(),
+        Err(PluginRuntimeError::SessionLost)
+    );
+    service.wait_fence().await;
+    let state = service.lock();
+    assert_eq!(state.fence_requests.len(), 1);
+    assert_eq!(state.fence_saw_reaped, [true]);
+    assert_eq!(state.fence_requests[0].entries.len(), 1);
+    assert_eq!(
+        state.fence_requests[0].entries[0].plugin_id,
+        sibling.plugin_id
+    );
+    assert_eq!(
+        state.fence_requests[0].entries[0].disposition,
+        PluginGraphFenceDisposition::LoadedSibling
+    );
+    assert_eq!(
+        state.fence_requests[0].entries[0].cause,
+        PluginGraphFenceCause::SessionLost
+    );
+    assert_eq!(
+        state.profile.plugins[0].activation_epoch,
+        failing.activation_epoch
+    );
+    assert_eq!(
+        state.profile.plugins[1].activation_epoch,
+        sibling.activation_epoch + 1
+    );
+    drop(state);
+    assert!(process_is_absent(pids.lock().unwrap()[0]));
+}
+
+#[cfg(unix)]
+#[tokio::test]
+async fn concurrent_graph_drift_during_load_failure_never_fences_a_stale_plan() {
+    let mut changed = chain_profile(1, PluginRuntimeState::Starting);
+    changed.plugins[0].activation_epoch += 1;
+    for (index, (label, current)) in [
+        (
+            "graph-addition",
+            chain_profile(2, PluginRuntimeState::Starting),
+        ),
+        ("epoch-change", changed),
+    ]
+    .into_iter()
+    .enumerate()
+    {
+        let fixture = HostFixture::new(
+            &format!("launch-drift-{label}"),
+            json!({"loads": 1, "load_stall": "plugin-00"}),
+        );
+        let service = MockService::new(
+            &format!("launch-drift-{label}"),
+            chain_profile(1, PluginRuntimeState::Starting),
+        );
+        service.require_reap_before_fence(fixture.pid_file.clone());
+        let pids = Arc::new(Mutex::new(Vec::new()));
+        let supervisor = Arc::new(PluginRuntimeSupervisor::for_test(
+            service.clone(),
+            fixture.policy(
+                vec![session(300 + u64::try_from(index).unwrap())],
+                Arc::clone(&pids),
+            ),
+            Arc::new(DenyCallbacks),
+        ));
+        let reconciling = Arc::clone(&supervisor);
+        let reconcile = tokio::spawn(async move { reconciling.reconcile().await });
+
+        // Seeing the load frame is the exact launch-phase barrier. The child
+        // remains blocked until the unchanged compile/load deadline closes it.
+        wait_for_captured_frame(&fixture, "load").await;
+        service.update_profile(current.clone());
+
+        assert_eq!(
+            reconcile.await.unwrap(),
+            Err(PluginRuntimeError::Fenced),
+            "{label}"
+        );
+        wait_pids_reaped(&fixture.pid_file).await;
+        assert_eq!(
+            supervisor.snapshot().await.unwrap().lifecycle,
+            PluginRuntimeLifecycle::Fenced,
+            "{label}"
+        );
+        assert_eq!(
+            supervisor.reconcile().await,
+            Err(PluginRuntimeError::Fenced),
+            "{label}"
+        );
+        assert!(matches!(
+            supervisor
+                .invoke(dispatch(
+                    &current.plugins[0],
+                    900 + u64::try_from(index).unwrap()
+                ))
+                .await,
+            Err(PluginRuntimeError::Fenced)
+        ));
+        let state = service.lock();
+        assert!(state.fence_requests.is_empty(), "{label}");
+        assert_eq!(pids.lock().unwrap().len(), 1, "{label}");
+        assert!(!fixture.violation_file.exists(), "{label}");
+    }
 }
 
 #[cfg(unix)]
@@ -2748,8 +2896,11 @@ async fn connect_hello_and_runtime_faults_are_triggerless_and_leave_no_orphan() 
         );
         let result = supervisor.reconcile().await;
         if result.is_ok() {
-            assert_eq!(supervisor.shutdown().await, Err(PluginRuntimeError::Closed));
+            // This releases the deliberately stalled runtime fixture. Closure
+            // may win before or during shutdown; both returns are secure.
+            let _ = supervisor.shutdown().await;
         }
+        // The durable fence, not the shutdown return, is the phase barrier.
         service.wait_fence().await;
         let state = service.lock();
         assert_eq!(state.fence_requests.len(), 1, "fault {index}");

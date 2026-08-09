@@ -17,6 +17,8 @@ mod dto;
 mod error;
 mod maintenance;
 mod owner_runtime;
+#[cfg(feature = "plugin-sdk")]
+pub mod plugin_host_process;
 mod reminder_wake;
 mod routes;
 mod routes_ai;

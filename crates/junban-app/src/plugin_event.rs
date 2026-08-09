@@ -6,7 +6,12 @@
 use std::{collections::HashSet, hash::Hash};
 
 use junban_domain::{
-    MAX_BULK_IDS, Project, ProjectView, Section, Tag, Task, TaskId, TaskStatus, validate_task_tags,
+    ActualMinutes, AiApprovalId, AiMemoryId, AiSessionId, CommentId, DreadLevel, EntityName,
+    EstimatedMinutes, HexColor, IconText, MAX_BULK_IDS, MarkdownText, MonthlyAnchorDay,
+    OperationId, Priority as DomainPriority, Project, ProjectId, ProjectView, RecurrenceRule,
+    SavedFilterId, Section, SectionId, Tag, TagId, TagName, Task, TaskId, TaskStatus, TaskTitle,
+    TemplateId, TimeBlockId, TimeSlotId, recurrence_rule_uses_anchor, resolve_recurrence_anchor,
+    validate_parent_chain, validate_project_parent_chain, validate_task_tags,
 };
 use junban_plugin_sdk::{
     EventKind as SubscriptionEventKind, InvocationKind, InvocationRequest, PluginId,
@@ -19,7 +24,10 @@ use junban_plugin_sdk::{
 };
 use thiserror::Error;
 
-use crate::{CommittedEvent, EventType, PLUGINS_INSTALLED_MAX, ResourceSnapshot, ResourceType};
+use crate::{
+    CommittedEvent, EventType, PLUGIN_GRAPH_FENCE_ENTRIES_MAX, PLUGINS_INSTALLED_MAX,
+    ResourceSnapshot, ResourceType, ResyncScope,
+};
 
 /// Canonical private `handle-event` body and the exact manifest entry it binds.
 #[derive(Clone, Debug, Eq, PartialEq)]
@@ -76,9 +84,7 @@ struct RepresentableDirect {
 
 enum DirectEvent {
     Representable(Box<RepresentableDirect>),
-    Nonrepresentable {
-        subscription_kind: SubscriptionEventKind,
-    },
+    Nonrepresentable,
     Other,
 }
 
@@ -102,18 +108,17 @@ pub fn convert_active_plugin_event(
                 *direct,
             )?))
         }
-        DirectEvent::Representable(_)
-        | DirectEvent::Nonrepresentable { .. }
-        | DirectEvent::Other => Ok(PluginActiveEvent::Irrelevant),
+        DirectEvent::Representable(_) | DirectEvent::Nonrepresentable | DirectEvent::Other => {
+            Ok(PluginActiveEvent::Irrelevant)
+        }
     }
 }
 
 /// Classify one retained event for resync-tail verification or starting catch-up.
 ///
-/// Only an exact subscribed Task, Project, or Tag subject that covers every
-/// affected baseline object is represented. Sections are not in the resync
-/// baseline, so a valid baseline-disjoint section event is irrelevant even when
-/// subscribed; ordinary active conversion still delivers it.
+/// Only an exact subscribed subject that covers every affected baseline object
+/// is represented. A subscribed section-only subject is represented even though
+/// sections are not themselves part of the resync baseline.
 pub fn classify_plugin_resync_event(
     event_epoch: &str,
     event: &CommittedEvent,
@@ -128,11 +133,6 @@ pub fn classify_plugin_resync_event(
 
     match direct {
         DirectEvent::Representable(direct) => {
-            if direct.descriptor.resource == DirectResource::Section
-                && !has_baseline_affected_ids(event)
-            {
-                return Ok(PluginResyncEvent::Irrelevant);
-            }
             if subscriptions.contains(&direct.descriptor.subscription_kind)
                 && completely_represents_baseline(event, &direct)
             {
@@ -148,14 +148,7 @@ pub fn classify_plugin_resync_event(
                 PluginResyncEvent::Irrelevant
             })
         }
-        DirectEvent::Nonrepresentable { subscription_kind } => {
-            let subscribed = subscriptions.contains(&subscription_kind);
-            if has_baseline_affected_ids(event) || subscribed {
-                Ok(PluginResyncEvent::Invalidating)
-            } else {
-                Ok(PluginResyncEvent::Irrelevant)
-            }
-        }
+        DirectEvent::Nonrepresentable => Ok(PluginResyncEvent::Invalidating),
         DirectEvent::Other => Ok(if has_baseline_affected_ids(event) {
             PluginResyncEvent::Invalidating
         } else {
@@ -169,7 +162,11 @@ fn validate_envelope(event_epoch: &str, event: &CommittedEvent) -> Result<(), Pl
     if canonical_epoch.to_string() != event_epoch
         || event.revision == 0
         || !valid_event_type(event.event_type.as_str())
-        || !affected_ids_are_unique(event)
+        || !affected_ids_are_valid(event)
+        || event
+            .primary
+            .as_ref()
+            .is_some_and(|primary| !valid_primary_resource_ref(primary.resource_type, &primary.id))
     {
         return Err(PluginEventError::Malformed);
     }
@@ -187,7 +184,24 @@ fn valid_event_type(value: &str) -> bool {
         })
 }
 
-fn affected_ids_are_unique(event: &CommittedEvent) -> bool {
+fn affected_ids_are_valid(event: &CommittedEvent) -> bool {
+    let plugin_ids_valid = if event.event_type.as_str() == EventType::PLUGIN_HEALTH_CHANGED {
+        !event.affected.plugin_ids.is_empty()
+            && event.affected.plugin_ids.len() <= PLUGIN_GRAPH_FENCE_ENTRIES_MAX
+            && event
+                .affected
+                .plugin_ids
+                .iter()
+                .all(|id| PluginId::parse(id.as_str()).as_ref() == Ok(id))
+            && event
+                .affected
+                .plugin_ids
+                .windows(2)
+                .all(|pair| pair[0] < pair[1])
+    } else {
+        unique_bounded(&event.affected.plugin_ids, PLUGINS_INSTALLED_MAX)
+    };
+
     unique_bounded(&event.affected.task_ids, MAX_BULK_IDS)
         && unique_bounded(&event.affected.project_ids, MAX_BULK_IDS)
         && unique_bounded(&event.affected.section_ids, MAX_BULK_IDS)
@@ -197,7 +211,7 @@ fn affected_ids_are_unique(event: &CommittedEvent) -> bool {
         && unique_bounded(&event.affected.comment_ids, MAX_BULK_IDS)
         && unique_bounded(&event.affected.time_block_ids, MAX_BULK_IDS)
         && unique_bounded(&event.affected.time_slot_ids, MAX_BULK_IDS)
-        && unique_bounded(&event.affected.plugin_ids, PLUGINS_INSTALLED_MAX)
+        && plugin_ids_valid
 }
 
 fn unique_bounded<T: Eq + Hash>(values: &[T], maximum: usize) -> bool {
@@ -206,6 +220,36 @@ fn unique_bounded<T: Eq + Hash>(values: &[T], maximum: usize) -> bool {
     }
     let mut seen = HashSet::with_capacity(values.len());
     values.iter().all(|value| seen.insert(value))
+}
+
+fn valid_primary_resource_ref(resource_type: ResourceType, id: &str) -> bool {
+    match resource_type {
+        ResourceType::Task => parses_canonical_id(id, TaskId::parse),
+        ResourceType::Project => parses_canonical_id(id, ProjectId::parse),
+        ResourceType::Section => parses_canonical_id(id, SectionId::parse),
+        ResourceType::Tag => parses_canonical_id(id, TagId::parse),
+        ResourceType::Template => parses_canonical_id(id, TemplateId::parse),
+        ResourceType::SavedFilter => parses_canonical_id(id, SavedFilterId::parse),
+        ResourceType::Comment => parses_canonical_id(id, CommentId::parse),
+        ResourceType::Operation => parses_canonical_id(id, OperationId::parse),
+        ResourceType::TimeBlock => parses_canonical_id(id, TimeBlockId::parse),
+        ResourceType::TimeSlot => parses_canonical_id(id, TimeSlotId::parse),
+        ResourceType::Settings => id == "settings",
+        ResourceType::AiSession => parses_canonical_id(id, AiSessionId::parse),
+        ResourceType::AiMemory => parses_canonical_id(id, AiMemoryId::parse),
+        ResourceType::AiApproval => parses_canonical_id(id, AiApprovalId::parse),
+        ResourceType::Plugin => parses_canonical_id(id, |value| PluginId::parse(value)),
+        // Relation events canonically identify their source task. There is no
+        // standalone relation identity or typed relation-ID parser.
+        ResourceType::Relation => false,
+    }
+}
+
+fn parses_canonical_id<T: ToString, E>(
+    value: &str,
+    parse: impl FnOnce(&str) -> Result<T, E>,
+) -> bool {
+    parse(value).is_ok_and(|parsed| parsed.to_string() == value)
 }
 
 fn analyze_direct_event(event: &CommittedEvent) -> Result<DirectEvent, PluginEventError> {
@@ -238,9 +282,7 @@ fn analyze_direct_event(event: &CommittedEvent) -> Result<DirectEvent, PluginEve
             return Err(PluginEventError::Malformed);
         }
         if !represents_all_same_type {
-            return Ok(DirectEvent::Nonrepresentable {
-                subscription_kind: descriptor.subscription_kind,
-            });
+            return Ok(DirectEvent::Nonrepresentable);
         }
         return Ok(DirectEvent::Representable(Box::new(RepresentableDirect {
             descriptor,
@@ -250,27 +292,47 @@ fn analyze_direct_event(event: &CommittedEvent) -> Result<DirectEvent, PluginEve
     }
 
     let Some(snapshot) = event.snapshot.as_ref() else {
-        // Current cascading completion/uncompletion envelopes intentionally omit
-        // a misleading single snapshot. They are valid, but not representable.
-        return if represents_all_same_type {
-            Err(PluginEventError::Malformed)
+        // Exact multi-task completion/uncompletion cascades intentionally omit
+        // a misleading single snapshot. No other non-delete direct shape may.
+        return if canonical_snapshotless_task_cascade(event, descriptor, represents_all_same_type) {
+            Ok(DirectEvent::Nonrepresentable)
         } else {
-            Ok(DirectEvent::Nonrepresentable {
-                subscription_kind: descriptor.subscription_kind,
-            })
+            Err(PluginEventError::Malformed)
         };
     };
     let subject = snapshot_subject(snapshot, descriptor.resource, &primary.id, event.revision)?;
     if !represents_all_same_type {
-        return Ok(DirectEvent::Nonrepresentable {
-            subscription_kind: descriptor.subscription_kind,
-        });
+        return Ok(DirectEvent::Nonrepresentable);
     }
     Ok(DirectEvent::Representable(Box::new(RepresentableDirect {
         descriptor,
         primary_id: primary.id.clone(),
         subject,
     })))
+}
+
+fn canonical_snapshotless_task_cascade(
+    event: &CommittedEvent,
+    descriptor: DirectDescriptor,
+    represents_all_same_type: bool,
+) -> bool {
+    descriptor.resource == DirectResource::Task
+        && matches!(
+            event.event_type.as_str(),
+            EventType::TASK_COMPLETED | EventType::TASK_UNCOMPLETED
+        )
+        && !represents_all_same_type
+        && event.affected.task_ids.len() > 1
+        && event.affected.project_ids.is_empty()
+        && event.affected.section_ids.is_empty()
+        && event.affected.tag_ids.is_empty()
+        && event.affected.template_ids.is_empty()
+        && event.affected.saved_filter_ids.is_empty()
+        && event.affected.comment_ids.is_empty()
+        && event.affected.time_block_ids.is_empty()
+        && event.affected.time_slot_ids.is_empty()
+        && event.affected.plugin_ids.is_empty()
+        && event.resync == ResyncScope::TASKS
 }
 
 fn affected_identity<T: ToString>(ids: &[T], primary_id: &str) -> (bool, bool) {
@@ -297,7 +359,7 @@ fn snapshot_subject(
         (DirectResource::Task, ResourceSnapshot::Task { task })
             if task.id.to_string() == primary_id =>
         {
-            Ok(EventSubject::Task(task_view(task)?))
+            Ok(EventSubject::Task(task_view(task, event_revision)?))
         }
         (DirectResource::Project, ResourceSnapshot::Project { project })
             if project.id.to_string() == primary_id =>
@@ -310,37 +372,23 @@ fn snapshot_subject(
         (DirectResource::Tag, ResourceSnapshot::Tag { tag })
             if tag.id.to_string() == primary_id =>
         {
-            Ok(EventSubject::Tag(tag_view(tag, event_revision)))
+            Ok(EventSubject::Tag(tag_view(tag, event_revision)?))
         }
         (DirectResource::Section, ResourceSnapshot::Section { section })
             if section.id.to_string() == primary_id =>
         {
-            Ok(EventSubject::Section(section_view(section, event_revision)))
+            Ok(EventSubject::Section(section_view(
+                section,
+                event_revision,
+            )?))
         }
         _ => Err(PluginEventError::Malformed),
     }
 }
 
-fn task_view(task: &Task) -> Result<TaskView, PluginEventError> {
-    if task.revision == 0
-        || task.parent_id == Some(task.id)
-        || (task.section_id.is_some() && task.project_id.is_none())
-        || (task.due_time.is_some() && task.due_date.is_none())
-        || validate_task_tags(&task.tag_ids).is_err()
-    {
-        return Err(PluginEventError::Malformed);
-    }
+fn task_view(task: &Task, event_revision: u64) -> Result<TaskView, PluginEventError> {
+    validate_task_snapshot(task, event_revision)?;
     let priority = task.priority.map(priority).transpose()?;
-    if task
-        .dread
-        .is_some_and(|value| !(1..=5).contains(&value.get()))
-        || task.estimated_minutes.is_some_and(|value| value.get() == 0)
-        || task
-            .recurrence_anchor_day
-            .is_some_and(|value| !(1..=31).contains(&value.get()))
-    {
-        return Err(PluginEventError::Malformed);
-    }
     Ok(TaskView {
         id: task.id.to_string(),
         title: task.title.as_str().to_owned(),
@@ -374,6 +422,168 @@ fn task_view(task: &Task) -> Result<TaskView, PluginEventError> {
     })
 }
 
+fn validate_task_snapshot(task: &Task, event_revision: u64) -> Result<(), PluginEventError> {
+    let title_valid = TaskTitle::new(task.title.as_str()).is_ok_and(|value| value == task.title);
+    let description_valid =
+        MarkdownText::new(task.description.as_str()).is_ok_and(|value| value == task.description);
+    let priority_valid = task
+        .priority
+        .is_none_or(|value| DomainPriority::new(value.get()).is_ok_and(|parsed| parsed == value));
+    let dread_valid = task
+        .dread
+        .is_none_or(|value| DreadLevel::new(value.get()).is_ok_and(|parsed| parsed == value));
+    let estimated_valid = task
+        .estimated_minutes
+        .is_none_or(|value| EstimatedMinutes::new(value.get()).is_ok_and(|parsed| parsed == value));
+    let actual_valid = task
+        .actual_minutes
+        .is_none_or(|value| ActualMinutes::new(value.get()).is_ok_and(|parsed| parsed == value));
+    let rule_valid = task.recurrence_rule.as_ref().is_none_or(|rule| {
+        RecurrenceRule::new(rule.as_str()).is_ok_and(|parsed| parsed.as_str() == rule.as_str())
+    });
+    let anchor_valid = task.recurrence_anchor_day.is_none_or(|anchor| {
+        MonthlyAnchorDay::new(anchor.get()).is_ok_and(|parsed| parsed == anchor)
+    });
+    let due_date_valid = task.due_date.is_none_or(|date| {
+        date.to_string()
+            .parse::<jiff::civil::Date>()
+            .is_ok_and(|parsed| parsed == date)
+    });
+    let due_time_valid = task.due_time.as_ref().is_none_or(|due_time| {
+        junban_domain::LocalDueTime::parse(&due_time.time.to_string(), due_time.time_zone.as_str())
+            .is_ok_and(|parsed| parsed == *due_time)
+    });
+    let timestamps_valid = [
+        Some(task.created_at),
+        Some(task.updated_at),
+        task.deadline,
+        task.remind_at,
+        task.completed_at,
+        task.cancelled_at,
+    ]
+    .into_iter()
+    .flatten()
+    .all(timestamp_round_trips);
+    let status_valid = match task.status {
+        TaskStatus::Pending => task.completed_at.is_none() && task.cancelled_at.is_none(),
+        TaskStatus::Completed => task.completed_at.is_some() && task.cancelled_at.is_none(),
+        TaskStatus::Cancelled => task.completed_at.is_none() && task.cancelled_at.is_some(),
+    };
+    let status_time_valid = task
+        .completed_at
+        .or(task.cancelled_at)
+        .is_none_or(|terminal| terminal >= task.created_at && terminal <= task.updated_at);
+    let completion_identity_valid =
+        task.completion_operation_id.is_none() || task.status == TaskStatus::Completed;
+    let recurrence_consistent = task.recurrence_anchor_day
+        == resolve_recurrence_anchor(
+            task.recurrence_rule.as_ref(),
+            task.due_date,
+            task.recurrence_anchor_day,
+        )
+        && task.recurrence_anchor_day.is_none_or(|_| {
+            task.recurrence_rule
+                .as_ref()
+                .is_some_and(recurrence_rule_uses_anchor)
+        });
+    let relationships_valid = task.section_id.is_none() || task.project_id.is_some();
+
+    if !title_valid
+        || !description_valid
+        || validate_task_tags(&task.tag_ids).is_err()
+        || !priority_valid
+        || !dread_valid
+        || !estimated_valid
+        || !actual_valid
+        || !rule_valid
+        || !anchor_valid
+        || !due_date_valid
+        || !due_time_valid
+        || !timestamps_valid
+        || !status_valid
+        || !status_time_valid
+        || !completion_identity_valid
+        || !recurrence_consistent
+        || !relationships_valid
+        || task.due_time.is_some() && task.due_date.is_none()
+        || validate_parent_chain(task.id, task.parent_id, &[]).is_err()
+        || task.recurrence_source_id == Some(task.id)
+        || task.created_at > task.updated_at
+        || task.revision == 0
+        || task.revision > event_revision
+    {
+        return Err(PluginEventError::Malformed);
+    }
+    Ok(())
+}
+
+fn validate_project_snapshot(
+    project: &Project,
+    event_revision: u64,
+) -> Result<(), PluginEventError> {
+    let name_valid =
+        EntityName::new(project.name.as_str()).is_ok_and(|value| value == project.name);
+    let color_valid =
+        HexColor::new(project.color.as_str()).is_ok_and(|value| value == project.color);
+    let icon_valid = project
+        .icon
+        .as_ref()
+        .is_none_or(|icon| IconText::new(icon.as_str()).is_ok_and(|value| value == *icon));
+    if event_revision == 0
+        || !name_valid
+        || !color_valid
+        || !icon_valid
+        || validate_project_parent_chain(project.id, project.parent_id, &[]).is_err()
+        || !timestamps_are_valid(project.created_at, project.updated_at)
+    {
+        return Err(PluginEventError::Malformed);
+    }
+    Ok(())
+}
+
+fn validate_section_snapshot(
+    section: &Section,
+    event_revision: u64,
+) -> Result<(), PluginEventError> {
+    let name_valid =
+        EntityName::new(section.name.as_str()).is_ok_and(|value| value == section.name);
+    if event_revision == 0
+        || !name_valid
+        || !parses_canonical_id(&section.project_id.to_string(), ProjectId::parse)
+        || !timestamps_are_valid(section.created_at, section.updated_at)
+    {
+        return Err(PluginEventError::Malformed);
+    }
+    Ok(())
+}
+
+fn validate_tag_snapshot(tag: &Tag, event_revision: u64) -> Result<(), PluginEventError> {
+    let name_valid =
+        TagName::new(tag.name.as_str()).is_ok_and(|value| value.as_str() == tag.name.as_str());
+    let color_valid = HexColor::new(tag.color.as_str()).is_ok_and(|value| value == tag.color);
+    if event_revision == 0
+        || !name_valid
+        || !color_valid
+        || !timestamps_are_valid(tag.created_at, tag.updated_at)
+    {
+        return Err(PluginEventError::Malformed);
+    }
+    Ok(())
+}
+
+fn timestamps_are_valid(created_at: jiff::Timestamp, updated_at: jiff::Timestamp) -> bool {
+    created_at <= updated_at
+        && timestamp_round_trips(created_at)
+        && timestamp_round_trips(updated_at)
+}
+
+fn timestamp_round_trips(value: jiff::Timestamp) -> bool {
+    value
+        .to_string()
+        .parse::<jiff::Timestamp>()
+        .is_ok_and(|parsed| parsed == value)
+}
+
 fn priority(value: junban_domain::Priority) -> Result<Priority, PluginEventError> {
     match value.get() {
         1 => Ok(Priority::P1),
@@ -396,9 +606,7 @@ fn project_view(
     project: &Project,
     event_revision: u64,
 ) -> Result<ProjectViewRecord, PluginEventError> {
-    if project.parent_id == Some(project.id) {
-        return Err(PluginEventError::Malformed);
-    }
+    validate_project_snapshot(project, event_revision)?;
     Ok(ProjectViewRecord {
         id: project.id.to_string(),
         name: project.name.as_str().to_owned(),
@@ -419,19 +627,21 @@ fn project_view(
     })
 }
 
-fn tag_view(tag: &Tag, event_revision: u64) -> TagView {
-    TagView {
+fn tag_view(tag: &Tag, event_revision: u64) -> Result<TagView, PluginEventError> {
+    validate_tag_snapshot(tag, event_revision)?;
+    Ok(TagView {
         id: tag.id.to_string(),
         name: tag.name.as_str().to_owned(),
         color: tag.color.as_str().to_owned(),
         created_at: tag.created_at.to_string(),
         updated_at: tag.updated_at.to_string(),
         revision: event_revision,
-    }
+    })
 }
 
-fn section_view(section: &Section, event_revision: u64) -> SectionView {
-    SectionView {
+fn section_view(section: &Section, event_revision: u64) -> Result<SectionView, PluginEventError> {
+    validate_section_snapshot(section, event_revision)?;
+    Ok(SectionView {
         id: section.id.to_string(),
         project_id: section.project_id.to_string(),
         name: section.name.as_str().to_owned(),
@@ -440,7 +650,7 @@ fn section_view(section: &Section, event_revision: u64) -> SectionView {
         created_at: section.created_at.to_string(),
         updated_at: section.updated_at.to_string(),
         revision: event_revision,
-    }
+    })
 }
 
 fn encode_direct(
@@ -494,7 +704,7 @@ fn completely_represents_baseline(event: &CommittedEvent, direct: &Representable
                 && event.affected.task_ids.is_empty()
                 && event.affected.project_ids.is_empty()
         }
-        DirectResource::Section => false,
+        DirectResource::Section => !has_baseline_affected_ids(event),
     }
 }
 
@@ -688,6 +898,10 @@ mod tests {
     }
 
     fn event(event_type: &str) -> CommittedEvent {
+        let mut affected = AffectedIds::default();
+        if event_type == EventType::PLUGIN_HEALTH_CHANGED {
+            affected.plugin_ids = vec![PluginId::parse("retained-plugin").unwrap()];
+        }
         CommittedEvent {
             revision: 7,
             operation_id: operation_id(),
@@ -695,7 +909,7 @@ mod tests {
             occurred_at: timestamp(),
             primary: None,
             snapshot: None,
-            affected: AffectedIds::default(),
+            affected,
             resync: ResyncScope::NONE,
         }
     }
@@ -783,6 +997,36 @@ mod tests {
             DirectResource::Tag => event.affected.tag_ids.clear(),
             DirectResource::Section => event.affected.section_ids.clear(),
         }
+    }
+
+    fn add_other_direct_affected(event: &mut CommittedEvent, resource: DirectResource) {
+        match resource {
+            DirectResource::Task => event
+                .affected
+                .task_ids
+                .push(TaskId::parse(TASK_ID_2).unwrap()),
+            DirectResource::Project => event
+                .affected
+                .project_ids
+                .push(ProjectId::parse(PROJECT_ID_2).unwrap()),
+            DirectResource::Tag => event.affected.tag_ids.push(TagId::parse(TAG_ID_2).unwrap()),
+            DirectResource::Section => event
+                .affected
+                .section_ids
+                .push(SectionId::parse(SECTION_ID_2).unwrap()),
+        }
+    }
+
+    fn with_json_fields<T>(value: &T, fields: &[(&str, serde_json::Value)]) -> T
+    where
+        T: serde::Serialize + serde::de::DeserializeOwned,
+    {
+        let mut encoded = serde_json::to_value(value).unwrap();
+        let object = encoded.as_object_mut().unwrap();
+        for (field, replacement) in fields {
+            object.insert((*field).to_owned(), replacement.clone());
+        }
+        serde_json::from_value(encoded).unwrap()
     }
 
     const fn other_id(resource: DirectResource) -> &'static str {
@@ -1043,7 +1287,7 @@ mod tests {
             TagId::parse(TAG_ID_2).unwrap(),
         ];
         snapshot.sort_order = SortOrder::new(-17);
-        snapshot.recurrence_rule = Some(RecurrenceRule::new("weekly").unwrap());
+        snapshot.recurrence_rule = Some(RecurrenceRule::new("monthly").unwrap());
         snapshot.remind_at = Some("2026-08-06T12:00:00Z".parse().unwrap());
         snapshot.recurrence_anchor_day = Some(MonthlyAnchorDay::new(5).unwrap());
         snapshot.complete(timestamp());
@@ -1090,7 +1334,7 @@ mod tests {
                 parent_id: Some(TASK_ID_2.to_owned()),
                 tag_ids: vec![TAG_ID.to_owned(), TAG_ID_2.to_owned()],
                 sort_order: -17,
-                recurrence_rule: Some("weekly".to_owned()),
+                recurrence_rule: Some("monthly".to_owned()),
                 remind_at: Some("2026-08-06T12:00:00Z".to_owned()),
                 recurrence_anchor_day: Some(5),
                 created_at: "2026-08-05T12:34:56Z".to_owned(),
@@ -1144,20 +1388,17 @@ mod tests {
                 let subscribed =
                     classify_plugin_resync_event(EVENT_EPOCH, &event, &[subscription]).unwrap();
                 let unsubscribed = classify_plugin_resync_event(EVENT_EPOCH, &event, &[]).unwrap();
-                if direct_descriptor(event_type).unwrap().resource == DirectResource::Section {
-                    assert_eq!(subscribed, PluginResyncEvent::Irrelevant, "{event_type}");
-                    assert_eq!(unsubscribed, PluginResyncEvent::Irrelevant, "{event_type}");
-                } else {
-                    assert!(
-                        matches!(subscribed, PluginResyncEvent::Represented(_)),
-                        "{event_type}"
-                    );
-                    assert_eq!(
-                        unsubscribed,
-                        PluginResyncEvent::Invalidating,
-                        "{event_type}"
-                    );
-                }
+                assert!(
+                    matches!(subscribed, PluginResyncEvent::Represented(_)),
+                    "{event_type}"
+                );
+                let expected_unsubscribed =
+                    if direct_descriptor(event_type).unwrap().resource == DirectResource::Section {
+                        PluginResyncEvent::Irrelevant
+                    } else {
+                        PluginResyncEvent::Invalidating
+                    };
+                assert_eq!(unsubscribed, expected_unsubscribed, "{event_type}");
             } else {
                 let event = event(event_type);
                 assert_eq!(
@@ -1217,6 +1458,70 @@ mod tests {
                 ));
                 assert_malformed(&malformed, subscription);
             }
+        }
+    }
+
+    #[test]
+    fn only_exact_multi_task_completion_cascades_may_omit_nondelete_snapshots() {
+        for (event_type, subscription, _) in direct_cases() {
+            let descriptor = direct_descriptor(event_type).unwrap();
+            if descriptor.delete {
+                continue;
+            }
+            let mut event = direct_event(event_type);
+            add_other_direct_affected(&mut event, descriptor.resource);
+            event.snapshot = None;
+
+            if matches!(
+                event_type,
+                EventType::TASK_COMPLETED | EventType::TASK_UNCOMPLETED
+            ) {
+                event.resync = ResyncScope::TASKS;
+                assert_eq!(
+                    convert_active_plugin_event(EVENT_EPOCH, &event, &[subscription]).unwrap(),
+                    PluginActiveEvent::Irrelevant,
+                    "{event_type}"
+                );
+            } else {
+                assert_malformed(&event, subscription);
+            }
+        }
+
+        let mut wrong_resync = direct_event(EventType::TASK_COMPLETED);
+        add_other_direct_affected(&mut wrong_resync, DirectResource::Task);
+        wrong_resync.snapshot = None;
+        assert_malformed(&wrong_resync, SubscriptionEventKind::TaskCompleted);
+
+        let mut mixed = wrong_resync;
+        mixed.resync = ResyncScope::TASKS;
+        mixed
+            .affected
+            .section_ids
+            .push(SectionId::parse(SECTION_ID).unwrap());
+        assert_malformed(&mixed, SubscriptionEventKind::TaskCompleted);
+    }
+
+    #[test]
+    fn every_nonrepresentable_direct_multi_id_event_invalidates_resync() {
+        for (event_type, subscription, _) in direct_cases() {
+            let descriptor = direct_descriptor(event_type).unwrap();
+            let mut event = direct_event(event_type);
+            add_other_direct_affected(&mut event, descriptor.resource);
+            assert_eq!(
+                convert_active_plugin_event(EVENT_EPOCH, &event, &[subscription]).unwrap(),
+                PluginActiveEvent::Irrelevant,
+                "active {event_type}"
+            );
+            assert_eq!(
+                classify_plugin_resync_event(EVENT_EPOCH, &event, &[subscription]).unwrap(),
+                PluginResyncEvent::Invalidating,
+                "subscribed {event_type}"
+            );
+            assert_eq!(
+                classify_plugin_resync_event(EVENT_EPOCH, &event, &[]).unwrap(),
+                PluginResyncEvent::Invalidating,
+                "unsubscribed {event_type}"
+            );
         }
     }
 
@@ -1292,38 +1597,298 @@ mod tests {
     }
 
     #[test]
+    fn every_present_other_primary_uses_its_exact_canonical_id_authority() {
+        for (resource_type, id) in [
+            (ResourceType::Task, TASK_ID),
+            (ResourceType::Project, PROJECT_ID),
+            (ResourceType::Section, SECTION_ID),
+            (ResourceType::Tag, TAG_ID),
+            (ResourceType::Template, TASK_ID),
+            (ResourceType::SavedFilter, TASK_ID),
+            (ResourceType::Comment, TASK_ID),
+            (ResourceType::Operation, TASK_ID),
+            (ResourceType::TimeBlock, TASK_ID),
+            (ResourceType::TimeSlot, TASK_ID),
+            (ResourceType::Settings, "settings"),
+            (ResourceType::AiSession, TASK_ID),
+            (ResourceType::AiMemory, TASK_ID),
+            (ResourceType::AiApproval, TASK_ID),
+            (ResourceType::Plugin, "retained-plugin"),
+        ] {
+            let mut other = event(EventType::COMMENT_UPDATED);
+            other.primary = Some(ResourceRef {
+                resource_type,
+                id: id.to_owned(),
+            });
+            assert_eq!(
+                convert_active_plugin_event(EVENT_EPOCH, &other, &[]).unwrap(),
+                PluginActiveEvent::Irrelevant,
+                "{resource_type:?}"
+            );
+            assert_eq!(
+                classify_plugin_resync_event(EVENT_EPOCH, &other, &[]).unwrap(),
+                PluginResyncEvent::Irrelevant,
+                "{resource_type:?}"
+            );
+        }
+
+        for resource_type in [
+            ResourceType::Task,
+            ResourceType::Project,
+            ResourceType::Section,
+            ResourceType::Tag,
+            ResourceType::Template,
+            ResourceType::SavedFilter,
+            ResourceType::Comment,
+            ResourceType::Relation,
+            ResourceType::Operation,
+            ResourceType::TimeBlock,
+            ResourceType::TimeSlot,
+            ResourceType::Settings,
+            ResourceType::AiSession,
+            ResourceType::AiMemory,
+            ResourceType::AiApproval,
+            ResourceType::Plugin,
+        ] {
+            let mut other = event(EventType::COMMENT_UPDATED);
+            other.primary = Some(ResourceRef {
+                resource_type,
+                id: "Not Canonical".to_owned(),
+            });
+            assert_malformed(&other, SubscriptionEventKind::TaskUpdated);
+        }
+
+        let mut uppercase_uuid = event(EventType::COMMENT_UPDATED);
+        uppercase_uuid.primary = Some(ResourceRef {
+            resource_type: ResourceType::Task,
+            id: "70000000-0000-7000-8000-0000000000AA".to_owned(),
+        });
+        assert_malformed(&uppercase_uuid, SubscriptionEventKind::TaskUpdated);
+    }
+
+    #[test]
+    fn plugin_health_changed_requires_one_to_sixteen_strictly_sorted_plugin_ids() {
+        let mut valid = event(EventType::PLUGIN_HEALTH_CHANGED);
+        valid.affected.plugin_ids = vec![
+            PluginId::parse("alpha-plugin").unwrap(),
+            PluginId::parse("beta-plugin").unwrap(),
+        ];
+        assert_eq!(
+            convert_active_plugin_event(EVENT_EPOCH, &valid, &[]).unwrap(),
+            PluginActiveEvent::Irrelevant
+        );
+        assert_eq!(
+            classify_plugin_resync_event(EVENT_EPOCH, &valid, &[]).unwrap(),
+            PluginResyncEvent::Irrelevant
+        );
+
+        let mut zero = valid.clone();
+        zero.affected.plugin_ids.clear();
+        assert_malformed(&zero, SubscriptionEventKind::TaskUpdated);
+
+        let mut reversed = valid.clone();
+        reversed.affected.plugin_ids.reverse();
+        assert_malformed(&reversed, SubscriptionEventKind::TaskUpdated);
+
+        let mut duplicate = valid.clone();
+        duplicate.affected.plugin_ids[1] = duplicate.affected.plugin_ids[0].clone();
+        assert_malformed(&duplicate, SubscriptionEventKind::TaskUpdated);
+
+        let mut seventeen = valid;
+        seventeen.affected.plugin_ids = (0..17)
+            .map(|index| PluginId::parse(format!("plugin-{index:02}")).unwrap())
+            .collect();
+        assert_malformed(&seventeen, SubscriptionEventKind::TaskUpdated);
+    }
+
+    #[test]
+    fn task_snapshot_one_field_invariant_matrix_fails_closed() {
+        let baseline = task(7);
+        let malformed = vec![
+            with_json_fields(&baseline, &[("title", serde_json::json!(""))]),
+            with_json_fields(
+                &baseline,
+                &[("description", serde_json::json!("x".repeat(10_001)))],
+            ),
+            with_json_fields(&baseline, &[("priority", serde_json::json!(0))]),
+            with_json_fields(&baseline, &[("dread", serde_json::json!(0))]),
+            with_json_fields(&baseline, &[("estimated_minutes", serde_json::json!(0))]),
+            with_json_fields(
+                &baseline,
+                &[("tag_ids", serde_json::json!([TAG_ID, TAG_ID]))],
+            ),
+            with_json_fields(
+                &baseline,
+                &[("recurrence_rule", serde_json::json!(" DAILY "))],
+            ),
+            with_json_fields(
+                &baseline,
+                &[
+                    ("due_date", serde_json::json!("2026-08-06")),
+                    ("recurrence_rule", serde_json::json!("monthly")),
+                ],
+            ),
+            with_json_fields(
+                &baseline,
+                &[
+                    ("due_date", serde_json::json!("2026-08-06")),
+                    ("recurrence_rule", serde_json::json!("weekly")),
+                    ("recurrence_anchor_day", serde_json::json!(5)),
+                ],
+            ),
+            with_json_fields(
+                &baseline,
+                &[
+                    ("due_date", serde_json::json!("2026-08-06")),
+                    ("recurrence_rule", serde_json::json!("monthly")),
+                    ("recurrence_anchor_day", serde_json::json!(0)),
+                ],
+            ),
+            with_json_fields(
+                &baseline,
+                &[("recurrence_source_id", serde_json::json!(TASK_ID))],
+            ),
+            with_json_fields(
+                &baseline,
+                &[(
+                    "due_time",
+                    serde_json::json!({"time": "09:30:00", "time_zone": "invalid"}),
+                )],
+            ),
+            with_json_fields(
+                &baseline,
+                &[(
+                    "due_time",
+                    serde_json::json!({"time": "09:30:00", "time_zone": "UTC"}),
+                )],
+            ),
+            with_json_fields(&baseline, &[("status", serde_json::json!("completed"))]),
+            with_json_fields(
+                &baseline,
+                &[("completed_at", serde_json::json!("2026-08-05T12:34:56Z"))],
+            ),
+            with_json_fields(
+                &baseline,
+                &[(
+                    "completion_operation_id",
+                    serde_json::json!(operation_id().to_string()),
+                )],
+            ),
+            with_json_fields(&baseline, &[("parent_id", serde_json::json!(TASK_ID))]),
+            with_json_fields(&baseline, &[("section_id", serde_json::json!(SECTION_ID))]),
+            with_json_fields(
+                &baseline,
+                &[("updated_at", serde_json::json!("2026-08-04T12:34:56Z"))],
+            ),
+            with_json_fields(&baseline, &[("revision", serde_json::json!(0))]),
+            with_json_fields(&baseline, &[("revision", serde_json::json!(8))]),
+        ];
+
+        for (index, task) in malformed.into_iter().enumerate() {
+            let mut event = direct_event(EventType::TASK_UPDATED);
+            event.snapshot = Some(ResourceSnapshot::task(task));
+            assert_eq!(
+                convert_active_plugin_event(
+                    EVENT_EPOCH,
+                    &event,
+                    &[SubscriptionEventKind::TaskUpdated]
+                ),
+                Err(PluginEventError::Malformed),
+                "active case {index}"
+            );
+            assert_eq!(
+                classify_plugin_resync_event(
+                    EVENT_EPOCH,
+                    &event,
+                    &[SubscriptionEventKind::TaskUpdated]
+                ),
+                Err(PluginEventError::Malformed),
+                "resync case {index}"
+            );
+        }
+    }
+
+    #[test]
+    fn catalog_snapshot_one_field_invariant_matrices_fail_closed() {
+        let project = project();
+        for (index, malformed) in [
+            with_json_fields(&project, &[("name", serde_json::json!(""))]),
+            with_json_fields(&project, &[("color", serde_json::json!("blue"))]),
+            with_json_fields(&project, &[("icon", serde_json::json!(""))]),
+            with_json_fields(&project, &[("parent_id", serde_json::json!(PROJECT_ID))]),
+            with_json_fields(
+                &project,
+                &[("updated_at", serde_json::json!("2026-08-04T12:34:56Z"))],
+            ),
+        ]
+        .into_iter()
+        .enumerate()
+        {
+            let mut event = direct_event(EventType::PROJECT_UPDATED);
+            event.snapshot = Some(ResourceSnapshot::Project { project: malformed });
+            assert_malformed(&event, SubscriptionEventKind::ProjectUpdated);
+            assert!(index < 5);
+        }
+
+        let section = section();
+        for malformed in [
+            with_json_fields(&section, &[("name", serde_json::json!(""))]),
+            with_json_fields(
+                &section,
+                &[("updated_at", serde_json::json!("2026-08-04T12:34:56Z"))],
+            ),
+        ] {
+            let mut event = direct_event(EventType::SECTION_UPDATED);
+            event.snapshot = Some(ResourceSnapshot::Section { section: malformed });
+            assert_malformed(&event, SubscriptionEventKind::SectionUpdated);
+        }
+
+        let tag = tag();
+        for malformed in [
+            with_json_fields(&tag, &[("name", serde_json::json!(" retained "))]),
+            with_json_fields(&tag, &[("color", serde_json::json!("green"))]),
+            with_json_fields(
+                &tag,
+                &[("updated_at", serde_json::json!("2026-08-04T12:34:56Z"))],
+            ),
+        ] {
+            let mut event = direct_event(EventType::TAG_UPDATED);
+            event.snapshot = Some(ResourceSnapshot::Tag { tag: malformed });
+            assert_malformed(&event, SubscriptionEventKind::TagUpdated);
+        }
+    }
+
+    #[test]
     fn valid_multi_subject_cascades_are_nonrepresentable_not_malformed() {
-        for event_type in [EventType::TASK_COMPLETED, EventType::TASK_DELETED] {
+        for (event_type, subscription) in [
+            (
+                EventType::TASK_COMPLETED,
+                SubscriptionEventKind::TaskCompleted,
+            ),
+            (
+                EventType::TASK_UNCOMPLETED,
+                SubscriptionEventKind::TaskUncompleted,
+            ),
+            (EventType::TASK_DELETED, SubscriptionEventKind::TaskDeleted),
+        ] {
             let mut cascade = direct_event(event_type);
             cascade
                 .affected
                 .task_ids
                 .push(TaskId::parse(TASK_ID_2).unwrap());
             cascade.snapshot = None;
+            if matches!(
+                event_type,
+                EventType::TASK_COMPLETED | EventType::TASK_UNCOMPLETED
+            ) {
+                cascade.resync = ResyncScope::TASKS;
+            }
             assert_eq!(
-                convert_active_plugin_event(
-                    EVENT_EPOCH,
-                    &cascade,
-                    &[if event_type == EventType::TASK_COMPLETED {
-                        SubscriptionEventKind::TaskCompleted
-                    } else {
-                        SubscriptionEventKind::TaskDeleted
-                    }]
-                )
-                .unwrap(),
+                convert_active_plugin_event(EVENT_EPOCH, &cascade, &[subscription]).unwrap(),
                 PluginActiveEvent::Irrelevant
             );
             assert_eq!(
-                classify_plugin_resync_event(
-                    EVENT_EPOCH,
-                    &cascade,
-                    &[if event_type == EventType::TASK_COMPLETED {
-                        SubscriptionEventKind::TaskCompleted
-                    } else {
-                        SubscriptionEventKind::TaskDeleted
-                    }]
-                )
-                .unwrap(),
+                classify_plugin_resync_event(EVENT_EPOCH, &cascade, &[subscription]).unwrap(),
                 PluginResyncEvent::Invalidating
             );
         }
@@ -1458,8 +2023,12 @@ mod tests {
         ] {
             let section_only = direct_event(event_type);
             let subscription = direct_descriptor(event_type).unwrap().subscription_kind;
-            assert_eq!(
+            assert!(matches!(
                 classify_plugin_resync_event(EVENT_EPOCH, &section_only, &[subscription]).unwrap(),
+                PluginResyncEvent::Represented(_)
+            ));
+            assert_eq!(
+                classify_plugin_resync_event(EVENT_EPOCH, &section_only, &[]).unwrap(),
                 PluginResyncEvent::Irrelevant
             );
             assert!(matches!(

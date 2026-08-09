@@ -126,9 +126,9 @@ enum ProcessPhase {
 }
 
 #[derive(Clone, Copy)]
-struct ProcessDeadlines {
-    control: Duration,
-    compile_load: Duration,
+pub(crate) struct ProcessDeadlines {
+    pub(crate) control: Duration,
+    pub(crate) compile_load: Duration,
 }
 
 impl ProcessDeadlines {
@@ -1312,13 +1312,13 @@ impl PluginHostProcess {
     }
 
     #[cfg(test)]
-    fn process_id(&self) -> Option<u32> {
+    pub(crate) fn process_id(&self) -> Option<u32> {
         self.child.as_ref().map(Child::id)
     }
 
     /// The sole non-product explicit executable-path constructor.
     #[cfg(test)]
-    fn connect_for_test(
+    pub(crate) fn connect_for_test(
         executable: &Path,
         host_session_id: Uuid,
         deadlines: ProcessDeadlines,

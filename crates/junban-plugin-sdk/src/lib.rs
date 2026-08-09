@@ -12,6 +12,7 @@ mod permission;
 mod private_body;
 pub mod private_body_types;
 mod protocol;
+mod protocol_io;
 mod registry;
 mod util;
 
@@ -66,6 +67,7 @@ pub use private_body::{
     decode_invocation_outcome, decode_invocation_request,
 };
 pub use protocol::*;
+pub use protocol_io::*;
 pub use registry::{
     JRI1_MAGIC, REGISTRY_ENTRIES_MAX, REGISTRY_ENVELOPE_BYTES_MAX, REGISTRY_INDEX_BYTES_MAX,
     RegistryEntry, RegistryIndex, VerifiedRegistry, parse_and_verify_registry,

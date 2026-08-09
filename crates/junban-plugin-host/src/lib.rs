@@ -7,17 +7,17 @@ mod transfer_bounds;
 
 use std::{
     collections::BTreeMap,
-    io::{self, Read, Write},
+    io::{Read, Write},
     sync::{Arc, mpsc},
     thread::JoinHandle,
     time::Duration,
 };
 
 use junban_plugin_sdk::{
-    AuthorityFence, ChildFrame, GUEST_STACK_BYTES, HOST_FRAME_BYTES_MAX, HOST_JUNBAN_VERSION,
-    HOST_PROTOCOL_NAME, HOST_PROTOCOL_VERSION, HOST_RUNTIME_ENTRIES_MAX, HostFailureCode,
-    ParentFrame, TYPESCRIPT_LINEAR_MEMORY_BYTES, decode_parent_frame, encode_child_frame,
-    parent_body_len, validate_child_body, validate_parent_body,
+    AuthorityFence, ChildFrame, GUEST_STACK_BYTES, HOST_JUNBAN_VERSION, HOST_PROTOCOL_NAME,
+    HOST_PROTOCOL_VERSION, HOST_RUNTIME_ENTRIES_MAX, HostFailureCode, ParentFrame, ParentMessage,
+    ProtocolIoError, TYPESCRIPT_LINEAR_MEMORY_BYTES, read_parent_body, read_parent_frame,
+    write_child_message,
 };
 use wasmtime::{Config, Engine, InstanceAllocationStrategy, ProfilingStrategy};
 
@@ -57,92 +57,13 @@ impl std::fmt::Display for HostError {
 
 impl std::error::Error for HostError {}
 
-#[derive(Debug)]
-pub struct ParentMessage {
-    pub frame: ParentFrame,
-    pub body: Vec<u8>,
-}
-
-impl ParentMessage {
-    #[must_use]
-    pub fn new(frame: ParentFrame, body: Vec<u8>) -> Self {
-        Self { frame, body }
-    }
-}
-
-pub fn read_parent_message(reader: &mut impl Read) -> Result<Option<ParentMessage>, HostError> {
-    let Some(frame) = read_parent_header(reader)? else {
-        return Ok(None);
-    };
-    let body = read_parent_body(reader, &frame)?;
-    match &frame {
-        ParentFrame::Invoke { kind, .. } => {
-            junban_plugin_sdk::decode_invocation_request(*kind, &body)
-                .map_err(|_| HostError::Input)?;
-        }
-        ParentFrame::CapabilityReply { kind, result, .. } => {
-            junban_plugin_sdk::decode_host_call_reply(*kind, *result, &body)
-                .map_err(|_| HostError::Input)?;
-        }
-        _ => {}
-    }
-    Ok(Some(ParentMessage::new(frame, body)))
-}
-
-fn read_parent_header(reader: &mut impl Read) -> Result<Option<ParentFrame>, HostError> {
-    let Some(prefix) = read_prefix(reader)? else {
-        return Ok(None);
-    };
-    let header_len = u32::from_be_bytes(prefix) as usize;
-    if header_len == 0 || header_len > HOST_FRAME_BYTES_MAX {
-        return Err(HostError::Input);
-    }
-    let encoded_len = 4_usize.checked_add(header_len).ok_or(HostError::Input)?;
-    let mut encoded = vec![0; encoded_len];
-    encoded[..4].copy_from_slice(&prefix);
-    read_exact_input(reader, &mut encoded[4..])?;
-    decode_parent_frame(&encoded)
-        .map(Some)
-        .map_err(|_| HostError::Input)
-}
-
-fn read_parent_body(reader: &mut impl Read, frame: &ParentFrame) -> Result<Vec<u8>, HostError> {
-    let body_len = parent_body_len(frame).map_err(|_| HostError::Input)?;
-    let mut body = vec![0; body_len];
-    read_exact_input(reader, &mut body)?;
-    validate_parent_body(frame, &body).map_err(|_| HostError::Input)?;
-    Ok(body)
-}
-
-pub fn write_child_message(
-    writer: &mut impl Write,
-    frame: &ChildFrame,
-    body: &[u8],
-) -> Result<(), HostError> {
-    validate_child_body(frame, body).map_err(|_| HostError::Output)?;
-    let encoded = encode_child_frame(frame).map_err(|_| HostError::Output)?;
-    writer.write_all(&encoded).map_err(|_| HostError::Output)?;
-    writer.write_all(body).map_err(|_| HostError::Output)?;
-    writer.flush().map_err(|_| HostError::Output)
-}
-
-fn read_prefix(reader: &mut impl Read) -> Result<Option<[u8; 4]>, HostError> {
-    let mut prefix = [0; 4];
-    loop {
-        match reader.read(&mut prefix[..1]) {
-            Ok(0) => return Ok(None),
-            Ok(1) => break,
-            Ok(_) => return Err(HostError::Input),
-            Err(error) if error.kind() == io::ErrorKind::Interrupted => {}
-            Err(_) => return Err(HostError::Input),
+impl From<ProtocolIoError> for HostError {
+    fn from(error: ProtocolIoError) -> Self {
+        match error {
+            ProtocolIoError::Input => Self::Input,
+            ProtocolIoError::Output => Self::Output,
         }
     }
-    read_exact_input(reader, &mut prefix[1..])?;
-    Ok(Some(prefix))
-}
-
-fn read_exact_input(reader: &mut impl Read, bytes: &mut [u8]) -> Result<(), HostError> {
-    reader.read_exact(bytes).map_err(|_| HostError::Input)
 }
 
 #[derive(Clone)]
@@ -390,7 +311,7 @@ fn run_protocol_loop(
     outbound: &mpsc::SyncSender<OutboundMessage>,
     state: &mut ProtocolState,
 ) -> Result<(), HostError> {
-    while let Some(frame) = read_parent_header(reader)? {
+    while let Some(frame) = read_parent_frame(reader)? {
         match check_header_before_body(&frame, state)? {
             HeaderDisposition::Accept => {}
             HeaderDisposition::SessionFatal(fence, code) => {
@@ -688,21 +609,7 @@ fn send_failed(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use junban_plugin_sdk::{
-        CallbackFence, CapabilityReplyKind, HostCallKind, ParentFrame, RuntimeLimits,
-        RuntimeProfile, canonical_permission_hash, encode_parent_frame,
-    };
-    use std::io::Cursor;
-
-    fn fence(invocation: &str) -> AuthorityFence {
-        AuthorityFence {
-            plugin_id: "test-plugin".into(),
-            package_generation: 4,
-            activation_epoch: 8,
-            host_session_id: "00000000-0000-4000-8000-000000000001".into(),
-            invocation_id: invocation.into(),
-        }
-    }
+    use junban_plugin_sdk::{RuntimeLimits, RuntimeProfile};
 
     #[test]
     fn engine_memory_tuning_matches_the_largest_one_memory_profile() {
@@ -713,55 +620,5 @@ mod tests {
         assert_eq!(WASMTIME_MEMORY_RESERVATION_BYTES, 128 * 1024 * 1024);
         assert_eq!(WASMTIME_MEMORY_GUARD_BYTES, 0);
         assert_eq!(WASMTIME_MEMORY_RESERVATION_FOR_GROWTH_BYTES, 0);
-    }
-
-    #[test]
-    fn message_codec_consumes_exact_raw_bodies() {
-        let component = b"component";
-        let frame = ParentFrame::Load {
-            fence: fence("00000000-0000-4000-8000-000000000002"),
-            package_sha256: "1".repeat(64),
-            component_sha256: "6985ca1f4daa5a584a28eae043a239cb96689af1337ea13afb63e00c2bf512fa"
-                .into(),
-            import_export_fingerprint: "2".repeat(64),
-            runtime_profile: RuntimeProfile::Typescript,
-            component_size: component.len() as u64,
-            grants: Vec::new(),
-            permission_hash: canonical_permission_hash(&[]).unwrap(),
-            limits: RuntimeLimits::for_profile(RuntimeProfile::Typescript),
-        };
-        let mut bytes = encode_parent_frame(&frame).unwrap();
-        bytes.extend_from_slice(component);
-        let message = read_parent_message(&mut Cursor::new(bytes))
-            .unwrap()
-            .unwrap();
-        assert_eq!(message.frame, frame);
-        assert_eq!(message.body, component);
-    }
-
-    #[test]
-    fn message_codec_rejects_truncated_and_noncanonical_callback_bodies() {
-        let callback = CallbackFence {
-            plugin_id: "test-plugin".into(),
-            package_generation: 4,
-            activation_epoch: 8,
-            host_session_id: "00000000-0000-4000-8000-000000000001".into(),
-            invocation_id: "00000000-0000-4000-8000-000000000002".into(),
-            callback_id: 1,
-        };
-        let frame = ParentFrame::CapabilityReply {
-            callback,
-            kind: HostCallKind::Log,
-            result: CapabilityReplyKind::Success,
-            response_sha256: "2f05d4b689d270cafb02285f35f44866f7dc8a2d368a3f9d1124373eeab31fb1"
-                .into(),
-            response_size: 3,
-        };
-        let mut bytes = encode_parent_frame(&frame).unwrap();
-        bytes.extend_from_slice(b"bad");
-        assert!(matches!(
-            read_parent_message(&mut Cursor::new(bytes)),
-            Err(HostError::Input)
-        ));
     }
 }

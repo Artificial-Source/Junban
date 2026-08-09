@@ -1,0 +1,103 @@
+diff --git a/dist/fixtures.d.ts b/dist/fixtures.d.ts
+index 7024276715bea11d2b3cc84f4c358be55ca554bb..dc648adc2c928b573a6a74f8e10a3927dd6204d3 100644
+--- a/dist/fixtures.d.ts
++++ b/dist/fixtures.d.ts
+@@ -3,15 +3,15 @@ import { VoiceId } from './types';
+ /**
+  * Location of the ml models
+  */
+-export declare const HF_BASE = "https://huggingface.co/diffusionstudio/piper-voices/resolve/main";
++export declare const HF_BASE = "https://huggingface.co/rhasspy/piper-voices/resolve/junban-blocked";
+ /**
+  * Inference runtime libary base path
+  */
+-export declare const ONNX_BASE = "https://cdnjs.cloudflare.com/ajax/libs/onnxruntime-web/1.18.0/";
++export declare const ONNX_BASE = "";
+ /**
+  * Path to wasm related files
+  */
+-export declare const WASM_BASE = "https://cdn.jsdelivr.net/npm/@diffusionstudio/piper-wasm@1.0.0/build/piper_phonemize";
++export declare const WASM_BASE = "";
+ /**
+  * Path to ml models on huggingface
+  */
+diff --git a/dist/piper-tts-web.js b/dist/piper-tts-web.js
+index 32767f4efba2b4c0c97f847902ebe7ab23406912..ca3173fb33719f29bafd12925d8df72dd317a479 100644
+--- a/dist/piper-tts-web.js
++++ b/dist/piper-tts-web.js
+@@ -9,9 +9,11 @@ var __privateGet = (obj, member, getter) => (__accessCheck(obj, member, "read fr
+ var __privateAdd = (obj, member, value) => member.has(obj) ? __typeError("Cannot add the same private member more than once") : member instanceof WeakSet ? member.add(obj) : member.set(obj, value);
+ var __privateSet = (obj, member, value, setter) => (__accessCheck(obj, member, "write to private field"), setter ? setter.call(obj, value) : member.set(obj, value), value);
+ var _createPiperPhonemize, _modelConfig, _ort, _ortSession, _progressCallback, _wasmPaths, _logger;
+-const HF_BASE = "https://huggingface.co/diffusionstudio/piper-voices/resolve/main";
+-const ONNX_BASE = "https://cdnjs.cloudflare.com/ajax/libs/onnxruntime-web/1.18.0/";
+-const WASM_BASE = "https://cdn.jsdelivr.net/npm/@diffusionstudio/piper-wasm@1.0.0/build/piper_phonemize";
++// Junban patch: package CDN defaults and mutable upstream model roots are removed.
++// Callers must supply same-origin wasmPaths and pre-seed OPFS via the verified fetch path.
++const HF_BASE = "https://huggingface.co/rhasspy/piper-voices/resolve/junban-blocked";
++const ONNX_BASE = "";
++const WASM_BASE = "";
+ const PATH_MAP = {
+   "ar_JO-kareem-low": "ar/ar_JO/kareem/low/ar_JO-kareem-low.onnx",
+   "ar_JO-kareem-medium": "ar/ar_JO/kareem/medium/ar_JO-kareem-medium.onnx",
+@@ -233,9 +235,9 @@ function pcm2wav(buffer, numChannels, sampleRate) {
+   return view.buffer;
+ }
+ const DEFAULT_WASM_PATHS = {
+-  onnxWasm: ONNX_BASE,
+-  piperData: `${WASM_BASE}.data`,
+-  piperWasm: `${WASM_BASE}.wasm`
++  onnxWasm: "",
++  piperData: "",
++  piperWasm: ""
+ };
+ const _TtsSession = class _TtsSession {
+   constructor({
+@@ -366,20 +368,19 @@ async function predict(config, callback) {
+   });
+   return session.predict(config.text);
+ }
+-async function getBlob(url, callback) {
+-  let blob = await readBlob(url);
++async function getBlob(url, _callback) {
++  const blob = await readBlob(url);
+   if (!blob) {
+-    blob = await fetchBlob(url, callback);
+-    await writeBlob(url, blob);
++    throw new Error(
++      "Junban piper model is not present in verified OPFS cache; refuse network fallback."
++    );
+   }
+   return blob;
+ }
+-async function download(voiceId, callback) {
+-  const path = PATH_MAP[voiceId];
+-  const urls = [`${HF_BASE}/${path}`, `${HF_BASE}/${path}.json`];
+-  await Promise.all(urls.map(async (url) => {
+-    writeBlob(url, await fetchBlob(url, url.endsWith(".onnx") ? callback : void 0));
+-  }));
++async function download(voiceId, _callback) {
++  throw new Error(
++    "Junban blocks @mintplex-labs/piper-tts-web download(); use the verified local voice manifest loader."
++  );
+ }
+ async function remove(voiceId) {
+   const path = PATH_MAP[voiceId];
+@@ -410,15 +411,8 @@ async function flush() {
+   }
+ }
+ async function voices() {
+-  try {
+-    const res = await fetch(`${HF_BASE}/voices.json`);
+-    if (!res.ok) throw new Error("Could not retrieve voices file from huggingface");
+-    return Object.values(await res.json());
+-  } catch {
+-    const LOCAL_VOICES_JSON = await import("./voices_static-D_OtJDHM.js");
+-    console.log(`Could not fetch voices.json remote ${HF_BASE}. Fetching local`);
+-    return Object.values(LOCAL_VOICES_JSON.default);
+-  }
++  const LOCAL_VOICES_JSON = await import("./voices_static-D_OtJDHM.js");
++  return Object.values(LOCAL_VOICES_JSON.default);
+ }
+ export {
+   HF_BASE,

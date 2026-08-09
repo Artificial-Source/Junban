@@ -4,14 +4,17 @@
  * mobile drawer and bottom nav, task detail panel, command palette, search,
  * quick add, project modals, and Phase 3 planning/focus/reminder surfaces.
  */
-import { useEffect, useRef, useState, useCallback } from "react";
+import { lazy, Suspense, useEffect, useRef, useState, useCallback } from "react";
 import type { NavigateTarget } from "../hooks/useRouting";
 import { useRouting } from "../hooks/useRouting";
+import { AIChatRouteFallback } from "../ai/AIChatRouteFallback";
 import { useWorkspace } from "../context/WorkspaceContext";
 import { useIsMobile } from "../hooks/useIsMobile";
 import {
   useKeyboardShortcuts,
   ChordIndicator,
+  formatShortcutBinding,
+  shortcutBindingFor,
   type ShortcutCommand,
 } from "../hooks/useKeyboardShortcuts";
 import { useMultiSelect } from "../hooks/useMultiSelect";
@@ -51,26 +54,52 @@ import { Matrix } from "../views/Matrix";
 import { Stats } from "../views/Stats";
 import { DopamineMenu } from "../views/DopamineMenu";
 import { Timeblocking } from "../views/Timeblocking";
+import { SettingsDialog } from "../views/settings/SettingsDialog";
 import type { TaskDto } from "../api/client";
 import { getTask, hasStoredToken } from "../api/client";
 import { detailRefreshFromEvent } from "./detailRefresh";
 import { isShellBlocking, isTaskDetailLayerActive, isolateShellSiblings } from "./shellIsolation";
 import { shouldEnableAppShortcuts } from "./shortcutGate";
 import { isVisualFixture } from "../lib/visualFixture";
+import { shouldApplyStartupDefaultView, startScreenFromDefaultView } from "../lib/startupView";
+import { shouldPlaySoundEvent, soundEventForTaskEvent } from "../lib/soundPolicy";
+import { playSound } from "../lib/sounds";
+import { aiChatFocusedTaskUrl } from "../ai/focused-task";
 
 const MOBILE_DRAWER_ID = "junban-mobile-nav-drawer";
 
+/** Lazy AI shell only — no provider/voice/network runtime in the startup graph. */
+const AIChatRoute = lazy(() =>
+  import("../ai/AIChatRoute").then((module) => ({ default: module.AIChatRoute })),
+);
+
 export function AppLayout() {
-  const phase2VisualFixture = isVisualFixture(window.location.search, "phase-2");
-  const phase3VisualFixture = isVisualFixture(window.location.search, "phase-3");
-  const visualFixtureParams = new URLSearchParams(window.location.search);
+  // Route-backed overlays replace the pathname and query. Pin explicit fixture
+  // identity for this app mount so a visual scene cannot start background work
+  // after opening Settings.
+  const visualFixtureSearch = useRef(window.location.search).current;
+  const phase2VisualFixture = isVisualFixture(visualFixtureSearch, "phase-2");
+  const phase3VisualFixture = isVisualFixture(visualFixtureSearch, "phase-3");
+  const phase4VisualFixture = isVisualFixture(visualFixtureSearch, "phase-4");
+  const anyVisualFixture = new URLSearchParams(visualFixtureSearch).has("visual-fixture");
+  const visualFixtureParams = new URLSearchParams(visualFixtureSearch);
   const phase2TaskDetailVisualFixture =
     phase2VisualFixture && visualFixtureParams.get("phase2-detail-fixture") === "1";
   const phase2DetailVisualFixture =
     phase2VisualFixture &&
     (phase2TaskDetailVisualFixture ||
       visualFixtureParams.get("phase2-legacy-today-fixture") === "1");
-  const { route, view, navigate, focusModeOpen, setFocusModeOpen } = useRouting();
+  const {
+    route,
+    view,
+    navigate,
+    settings: settingsLocation,
+    settingsOpen,
+    closeSettings,
+    navigateSettings,
+    focusModeOpen,
+    setFocusModeOpen,
+  } = useRouting();
   const {
     catalog,
     catalogLoading,
@@ -82,9 +111,41 @@ export function AppLayout() {
     redo,
     sseError,
     registerTaskEventHandler,
+    settings,
   } = useWorkspace();
+  const features = settings?.features;
+  // The immutable Phase 3 focus scene predates persisted feature visibility.
+  const focusModeEnabled = phase3VisualFixture || (features?.focus_mode_enabled ?? false);
+  const dailyPlanningEnabled = features?.daily_planning_enabled ?? true;
+  const weeklyReviewEnabled = features?.weekly_review_enabled ?? true;
+  const notifications = settings?.notifications;
+  const notificationChannels = notifications?.channels;
+  const volumePercent = notifications?.volume_percent ?? 70;
+  // Reminder presentation: master + reminder flag; channel gate stays in the delivery hook.
+  const reminderSoundEnabled =
+    (notifications?.sound_enabled ?? false) && (notifications?.reminder_sound ?? true);
   const { completeTask, uncompleteTask, bulkTasks } = useTaskMutations();
-  useSmartNudges({ enabled: !phase2VisualFixture });
+  useSmartNudges({ enabled: !phase2VisualFixture && !phase4VisualFixture });
+  const startupAppliedRef = useRef(false);
+
+  // First authoritative settings load only: bare `/` uses task_defaults.default_view.
+  // Visual fixtures and later navigations (including explicit Today) are left alone.
+  useEffect(() => {
+    if (!settings) return;
+    if (
+      !shouldApplyStartupDefaultView({
+        pathname: window.location.pathname,
+        alreadyApplied: startupAppliedRef.current,
+        visualFixture: anyVisualFixture,
+      })
+    ) {
+      return;
+    }
+    startupAppliedRef.current = true;
+    const start = startScreenFromDefaultView(settings.task_defaults.default_view);
+    if (!start || start === "today") return;
+    navigate(start);
+  }, [settings, anyVisualFixture, navigate]);
 
   const rootRef = useRef<HTMLDivElement>(null);
   const mainRef = useRef<HTMLElement>(null);
@@ -108,7 +169,22 @@ export function AppLayout() {
   const multiSelect = useMultiSelect();
   const selectedTaskIdRef = useRef<string | null>(null);
   const taskDetailOpenerRef = useRef<HTMLElement | null>(null);
+  const settingsOpenerRef = useRef<HTMLElement | null>(null);
+  const settingsWasOpenRef = useRef(settingsOpen);
   selectedTaskIdRef.current = selectedTaskId;
+
+  useEffect(() => {
+    const wasOpen = settingsWasOpenRef.current;
+    settingsWasOpenRef.current = settingsOpen;
+    if (!wasOpen || settingsOpen) return;
+    const target = settingsOpenerRef.current;
+    queueMicrotask(() => {
+      if (!target?.isConnected) return;
+      target.focus({ preventScroll: true });
+      settingsOpenerRef.current = null;
+    });
+  }, [settingsOpen]);
+
   // Isolate only while a real detail overlay/loading cover is up — a bare
   // selectedTaskId after a rejected getTask must not leave the shell locked.
   const taskDetailActive = isTaskDetailLayerActive(selectedTaskId, detailTask, detailLoading);
@@ -123,10 +199,11 @@ export function AppLayout() {
     endOfDayOpen,
     weeklyReviewOpen,
     focusModeOpen,
+    settingsOpen,
   });
 
   useReminderDelivery({
-    enabled: !phase2VisualFixture && hasStoredToken() && !catalogLoading,
+    enabled: !anyVisualFixture && hasStoredToken() && !catalogLoading && !!settings,
     onInApp: (reminder) => {
       showToast("info", reminder.title, {
         inverted: true,
@@ -135,33 +212,37 @@ export function AppLayout() {
         hrefLabel: "Open",
       });
     },
-    playSound: () => {
-      // Optional short beep only after a user gesture has unlocked audio.
-      try {
-        const Ctx =
-          window.AudioContext ||
-          (window as unknown as { webkitAudioContext?: typeof AudioContext }).webkitAudioContext;
-        if (!Ctx) return;
-        const ctx = new Ctx();
-        if (ctx.state !== "running") {
-          void ctx.close();
-          return;
-        }
-        const osc = ctx.createOscillator();
-        const gain = ctx.createGain();
-        osc.frequency.value = 880;
-        gain.gain.value = 0.03;
-        osc.connect(gain);
-        gain.connect(ctx.destination);
-        osc.start();
-        osc.stop(ctx.currentTime + 0.08);
-        void ctx.close();
-      } catch {
-        // Sound is never required for delivery.
-      }
-    },
-    soundEnabled: true,
+    playSound: () => playSound("reminder", volumePercent),
+    soundEnabled: reminderSoundEnabled,
+    allowedChannels: notificationChannels,
   });
+
+  // Task event sounds use the same committed-event fan-out as detail refresh.
+  // Visual fixtures never emit audio.
+  useEffect(() => {
+    if (anyVisualFixture || !notifications) return;
+    return registerTaskEventHandler((event) => {
+      const soundEvent = soundEventForTaskEvent(event.event_type);
+      if (!soundEvent) return;
+      if (
+        !shouldPlaySoundEvent(
+          {
+            sound_enabled: notifications.sound_enabled,
+            volume_percent: notifications.volume_percent,
+            task_completed_sound: notifications.task_completed_sound,
+            task_created_sound: notifications.task_created_sound,
+            task_deleted_sound: notifications.task_deleted_sound,
+            reminder_sound: notifications.reminder_sound,
+            channels: notifications.channels,
+          },
+          soundEvent,
+        )
+      ) {
+        return;
+      }
+      void playSound(soundEvent, notifications.volume_percent);
+    });
+  }, [anyVisualFixture, notifications, registerTaskEventHandler]);
 
   // Keep every background sibling out of the accessibility and focus trees while
   // a drawer, panel, loading cover, or modal owns interaction. Overlay hosts
@@ -247,10 +328,25 @@ export function AppLayout() {
 
   const handleNavigate = useCallback(
     (target: NavigateTarget) => {
+      if (typeof target === "object" && target.name === "settings") {
+        settingsOpenerRef.current =
+          document.activeElement instanceof HTMLElement ? document.activeElement : null;
+      }
       navigate(target);
       setDrawerOpen(false);
     },
     [navigate],
+  );
+
+  /** Thin focused-task AI launch — route authority stays in useRouting; query is attached after. */
+  const handleAskAi = useCallback(
+    (taskId: string) => {
+      setSelectedTaskId(null);
+      setDetailTask(null);
+      handleNavigate("ai-chat");
+      window.history.replaceState(null, "", aiChatFocusedTaskUrl(taskId));
+    },
+    [handleNavigate],
   );
 
   const handleAddTask = useCallback(() => {
@@ -269,11 +365,12 @@ export function AppLayout() {
 
   const handleEnterFocusMode = useCallback(
     (taskId?: string) => {
+      if (!focusModeEnabled) return;
       setFocusStartTaskId(taskId ?? selectedTaskIdRef.current);
       setSelectedTaskId(null);
       setFocusModeOpen(true);
     },
-    [setFocusModeOpen],
+    [focusModeEnabled, setFocusModeOpen],
   );
 
   const handleCloseFocusMode = useCallback(() => {
@@ -346,107 +443,129 @@ export function AppLayout() {
     [multiSelect, bulkTasks],
   );
 
+  // Settings are applied here only after WorkspaceContext receives an
+  // authoritative server snapshot (initial load, save refresh, or SSE resync).
+  const shortcut = (action: string, fallback: string) =>
+    shortcutBindingFor(settings?.keyboard_shortcuts, action, fallback);
+
   // Keyboard shortcuts
   const commands: ShortcutCommand[] = [
     {
       id: "quick-add",
       description: "Quick Add",
-      defaultKey: "cmd+a",
+      binding: shortcut("quick-add", "cmd+a"),
       action: () => setQuickAddOpen(true),
     },
-    { id: "search", description: "Search", defaultKey: "cmd+k", action: () => setSearchOpen(true) },
+    {
+      id: "search",
+      description: "Search",
+      binding: shortcut("search", "cmd+k"),
+      action: () => setSearchOpen(true),
+    },
     {
       id: "command-palette",
       description: "Command Palette",
-      defaultKey: "cmd+shift+p",
+      binding: shortcut("command-palette", "cmd+shift+p"),
       action: () => setPaletteOpen(true),
     },
     {
       id: "new-project",
       description: "New Project",
-      defaultKey: "cmd+shift+n",
+      binding: shortcut("new-project", "g n"),
       action: () => setProjectModalOpen(true),
     },
-    { id: "undo", description: "Undo", defaultKey: "cmd+z", action: () => void undo() },
-    { id: "redo", description: "Redo", defaultKey: "cmd+shift+z", action: () => void redo() },
+    {
+      id: "undo",
+      description: "Undo",
+      binding: shortcut("undo", "cmd+z"),
+      action: () => void undo(),
+    },
+    {
+      id: "redo",
+      description: "Redo",
+      binding: shortcut("redo", "cmd+shift+z"),
+      action: () => void redo(),
+    },
     {
       id: "today",
       description: "Go to Today",
-      chord: "g t",
-      defaultKey: "",
+      binding: shortcut("today", "g t"),
       action: () => handleNavigate("today"),
     },
     {
       id: "inbox",
       description: "Go to Inbox",
-      chord: "g i",
-      defaultKey: "",
+      binding: shortcut("inbox", "g i"),
       action: () => handleNavigate("inbox"),
     },
     {
       id: "upcoming",
       description: "Go to Upcoming",
-      chord: "g u",
-      defaultKey: "",
+      binding: shortcut("upcoming", "g u"),
       action: () => handleNavigate("upcoming"),
     },
     {
       id: "someday",
       description: "Go to Someday",
-      chord: "g s",
-      defaultKey: "",
+      binding: shortcut("someday", "g s"),
       action: () => handleNavigate("someday"),
     },
     {
       id: "completed",
       description: "Go to Completed",
-      chord: "g c",
-      defaultKey: "",
+      binding: shortcut("completed", "g c"),
       action: () => handleNavigate("completed"),
     },
     {
       id: "cancelled",
       description: "Go to Cancelled",
-      chord: "g x",
-      defaultKey: "",
+      binding: shortcut("cancelled", "g x"),
       action: () => handleNavigate("cancelled"),
     },
     {
       id: "filters",
       description: "Go to Filters & Labels",
-      chord: "g f",
-      defaultKey: "",
+      binding: shortcut("filters", "g f"),
       action: () => handleNavigate("filters-labels"),
     },
     ...(!phase2VisualFixture
       ? [
-          {
-            id: "focus-mode",
-            description: "Enter Focus Mode",
-            defaultKey: "cmd+shift+f",
-            action: () => handleEnterFocusMode(),
-          },
-          {
-            id: "plan-my-day",
-            description: "Plan My Day",
-            defaultKey: "",
-            chord: "g p",
-            action: () => setPlanMyDayOpen(true),
-          },
-          {
-            id: "end-of-day",
-            description: "End of Day",
-            defaultKey: "",
-            chord: "g e",
-            action: () => setEndOfDayOpen(true),
-          },
-          {
-            id: "weekly-review",
-            description: "Weekly Review",
-            defaultKey: "",
-            chord: "g w",
-            action: () => setWeeklyReviewOpen(true),
-          },
+          ...(focusModeEnabled
+            ? [
+                {
+                  id: "focus-mode",
+                  description: "Enter Focus Mode",
+                  binding: shortcut("focus-mode", "cmd+shift+f"),
+                  action: () => handleEnterFocusMode(),
+                },
+              ]
+            : []),
+          ...(dailyPlanningEnabled
+            ? [
+                {
+                  id: "plan-my-day",
+                  description: "Plan My Day",
+                  binding: shortcut("plan-my-day", "g p"),
+                  action: () => setPlanMyDayOpen(true),
+                },
+                {
+                  id: "end-of-day",
+                  description: "End of Day",
+                  binding: shortcut("end-of-day", "g e"),
+                  action: () => setEndOfDayOpen(true),
+                },
+              ]
+            : []),
+          ...(weeklyReviewEnabled
+            ? [
+                {
+                  id: "weekly-review",
+                  description: "Weekly Review",
+                  binding: shortcut("weekly-review", "g w"),
+                  action: () => setWeeklyReviewOpen(true),
+                },
+              ]
+            : []),
         ]
       : []),
   ];
@@ -464,6 +583,7 @@ export function AppLayout() {
       endOfDayOpen,
       weeklyReviewOpen,
       focusModeOpen,
+      settingsOpen,
     }),
   );
 
@@ -473,17 +593,32 @@ export function AppLayout() {
       id: "quick-add",
       name: "Quick Add Task",
       callback: () => setQuickAddOpen(true),
-      hotkey: "⌘A",
+      hotkey: formatShortcutBinding(shortcut("quick-add", "cmd+a")),
     },
-    { id: "search", name: "Search Tasks", callback: () => setSearchOpen(true), hotkey: "⌘K" },
+    {
+      id: "search",
+      name: "Search Tasks",
+      callback: () => setSearchOpen(true),
+      hotkey: formatShortcutBinding(shortcut("search", "cmd+k")),
+    },
     {
       id: "new-project",
       name: "New Project",
       callback: () => setProjectModalOpen(true),
-      hotkey: "⌘⇧N",
+      hotkey: formatShortcutBinding(shortcut("new-project", "g n")),
     },
-    { id: "undo", name: "Undo Last Action", callback: () => void undo(), hotkey: "⌘Z" },
-    { id: "redo", name: "Redo Last Action", callback: () => void redo(), hotkey: "⌘⇧Z" },
+    {
+      id: "undo",
+      name: "Undo Last Action",
+      callback: () => void undo(),
+      hotkey: formatShortcutBinding(shortcut("undo", "cmd+z")),
+    },
+    {
+      id: "redo",
+      name: "Redo Last Action",
+      callback: () => void redo(),
+      hotkey: formatShortcutBinding(shortcut("redo", "cmd+shift+z")),
+    },
     { id: "today", name: "Go to Today", callback: () => handleNavigate("today") },
     { id: "inbox", name: "Go to Inbox", callback: () => handleNavigate("inbox") },
     { id: "upcoming", name: "Go to Upcoming", callback: () => handleNavigate("upcoming") },
@@ -511,26 +646,53 @@ export function AppLayout() {
             callback: () => handleNavigate("timeblocking"),
           },
           {
-            id: "focus-mode",
-            name: "Enter Focus Mode",
-            callback: () => handleEnterFocusMode(),
-            hotkey: "⌘⇧F",
+            id: "settings",
+            name: "Go to Settings",
+            callback: () => handleNavigate({ name: "settings" }),
           },
           {
-            id: "plan-my-day",
-            name: "Plan My Day",
-            callback: () => setPlanMyDayOpen(true),
+            id: "settings-data",
+            name: "Go to Data",
+            callback: () => handleNavigate({ name: "settings", tab: "data" }),
           },
           {
-            id: "end-of-day",
-            name: "End of Day",
-            callback: () => setEndOfDayOpen(true),
+            id: "settings-templates",
+            name: "Go to Templates",
+            callback: () => handleNavigate({ name: "settings", tab: "templates" }),
           },
-          {
-            id: "weekly-review",
-            name: "Weekly Review",
-            callback: () => setWeeklyReviewOpen(true),
-          },
+          ...(focusModeEnabled
+            ? [
+                {
+                  id: "focus-mode",
+                  name: "Enter Focus Mode",
+                  callback: () => handleEnterFocusMode(),
+                  hotkey: formatShortcutBinding(shortcut("focus-mode", "cmd+shift+f")),
+                },
+              ]
+            : []),
+          ...(dailyPlanningEnabled
+            ? [
+                {
+                  id: "plan-my-day",
+                  name: "Plan My Day",
+                  callback: () => setPlanMyDayOpen(true),
+                },
+                {
+                  id: "end-of-day",
+                  name: "End of Day",
+                  callback: () => setEndOfDayOpen(true),
+                },
+              ]
+            : []),
+          ...(weeklyReviewEnabled
+            ? [
+                {
+                  id: "weekly-review",
+                  name: "Weekly Review",
+                  callback: () => setWeeklyReviewOpen(true),
+                },
+              ]
+            : []),
         ]
       : []),
   ];
@@ -631,10 +793,20 @@ export function AppLayout() {
                     selectedTaskIds={multiSelect.selectedIds}
                     onMultiSelect={multiSelect.handleSelect}
                     autoFocusTrigger={addTaskTrigger}
-                    onPlanMyDay={phase2VisualFixture ? undefined : () => setPlanMyDayOpen(true)}
-                    onEndOfDay={phase2VisualFixture ? undefined : () => setEndOfDayOpen(true)}
+                    onPlanMyDay={
+                      phase2VisualFixture || !dailyPlanningEnabled
+                        ? undefined
+                        : () => setPlanMyDayOpen(true)
+                    }
+                    onEndOfDay={
+                      phase2VisualFixture || !dailyPlanningEnabled
+                        ? undefined
+                        : () => setEndOfDayOpen(true)
+                    }
                     onWeeklyReview={
-                      phase2VisualFixture ? undefined : () => setWeeklyReviewOpen(true)
+                      phase2VisualFixture || !weeklyReviewEnabled
+                        ? undefined
+                        : () => setWeeklyReviewOpen(true)
                     }
                     phase2DetailVisualFixture={phase2DetailVisualFixture}
                   />
@@ -731,6 +903,15 @@ export function AppLayout() {
                 {route.name === "timeblocking" && (
                   <Timeblocking onSelectTask={handleSelectTask} onToggleTask={handleToggleTask} />
                 )}
+                {route.name === "ai-chat" && (
+                  <Suspense fallback={<AIChatRouteFallback />}>
+                    <AIChatRoute
+                      onOpenSettings={() => handleNavigate({ name: "settings", tab: "ai" })}
+                      onOpenVoiceSettings={() => handleNavigate({ name: "settings", tab: "voice" })}
+                      onSelectTask={handleSelectTask}
+                    />
+                  </Suspense>
+                )}
               </div>
             </ErrorBoundary>
           </div>
@@ -802,7 +983,10 @@ export function AppLayout() {
               onClose={() => setSelectedTaskId(null)}
               onOpenFullPage={handleOpenFullPage}
               returnFocusTo={taskDetailOpenerRef.current}
-              onEnterFocusMode={(taskId) => handleEnterFocusMode(taskId)}
+              onEnterFocusMode={
+                focusModeEnabled ? (taskId) => handleEnterFocusMode(taskId) : undefined
+              }
+              onAskAi={handleAskAi}
               phase3VisualFixture={phase3VisualFixture}
             />
           ))}
@@ -824,7 +1008,7 @@ export function AppLayout() {
         <QuickAddModal
           open={quickAddOpen}
           onClose={() => setQuickAddOpen(false)}
-          onManageTemplates={() => handleNavigate("filters-labels")}
+          onManageTemplates={() => handleNavigate({ name: "settings", tab: "templates" })}
         />
         <SearchModal
           isOpen={searchOpen}
@@ -837,11 +1021,20 @@ export function AppLayout() {
           onClose={() => setPaletteOpen(false)}
         />
         <AddProjectModal open={projectModalOpen} onClose={() => setProjectModalOpen(false)} />
-        <DailyPlanningModal open={planMyDayOpen} onClose={() => setPlanMyDayOpen(false)} />
-        <DailyReviewModal open={endOfDayOpen} onClose={() => setEndOfDayOpen(false)} />
-        <WeeklyReviewModal open={weeklyReviewOpen} onClose={() => setWeeklyReviewOpen(false)} />
+        <DailyPlanningModal
+          open={planMyDayOpen && dailyPlanningEnabled}
+          onClose={() => setPlanMyDayOpen(false)}
+        />
+        <DailyReviewModal
+          open={endOfDayOpen && dailyPlanningEnabled}
+          onClose={() => setEndOfDayOpen(false)}
+        />
+        <WeeklyReviewModal
+          open={weeklyReviewOpen && weeklyReviewEnabled}
+          onClose={() => setWeeklyReviewOpen(false)}
+        />
         <FocusMode
-          open={focusModeOpen}
+          open={focusModeOpen && focusModeEnabled}
           startTaskId={focusStartTaskId}
           onClose={handleCloseFocusMode}
           onPendingChange={(pending) => {
@@ -849,6 +1042,14 @@ export function AppLayout() {
             setFocusMutationPending(pending);
           }}
         />
+        {settingsOpen && (
+          <SettingsDialog
+            tab={settingsLocation.open ? settingsLocation.tab : null}
+            onNavigateTab={navigateSettings}
+            onClose={closeSettings}
+            returnFocusTarget={settingsOpenerRef.current}
+          />
+        )}
       </div>
 
       {/* Toasts stay outside shell isolation so Undo remains usable over detail/modals. */}

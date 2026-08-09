@@ -1,0 +1,152 @@
+# Phase 7 process-memory calibration preflight
+
+Date: 2026-08-05
+
+Status: **cross-platform calibration complete; macOS `RLIMIT_AS` remedy rejected; narrower correction implemented pending recheck**
+
+Protocol: `junban-phase7-process-memory-calibration-v1`
+
+## Blocker and boundary
+
+`P7-PLAN-RUNTIME-001` is open. Wasmtime's default 64-bit configuration reserves approximately 4 GiB of virtual address space for each 32-bit linear memory, plus growth and guard reservations. That default makes a useful Unix `RLIMIT_AS` calibration impossible even though the frozen Junban profiles permit only one 64-MiB Rust memory or one 128-MiB TypeScript memory. A hard child-process ceiling cannot be selected honestly until optimized valid-workload baselines exist on Linux, macOS, and Windows.
+
+This preflight only makes those baselines measurable. It does **not** choose, enforce, or claim a process cap; add `RLIMIT_AS`, a Windows Job Object, spawn restrictions, or unsafe code; close `P7-PLAN-RUNTIME-001` or `P7-RUNTIME-SEC-001`; or authorize Slice 2C.
+
+## Candidate Engine tuning
+
+The child Engine now uses exact constants:
+
+| Wasmtime 36.0.13 setting        |     Value | Reason                                                                                  |
+| ------------------------------- | --------: | --------------------------------------------------------------------------------------- |
+| `memory_reservation`            |   128 MiB | the largest frozen TypeScript linear-memory limit; Rust remains Store-limited to 64 MiB |
+| `memory_guard_size`             |         0 | avoid an unrelated virtual guard reservation                                            |
+| `memory_reservation_for_growth` |         0 | avoid Wasmtime's default post-relocation growth reservation                             |
+| allocation strategy             | on demand | unchanged selected child authority                                                      |
+
+Wasmtime 36 documents that a wasm32 reservation below the 4-GiB addressable range requires generated explicit bounds checks. Zero guard does not remove memory safety; it prevents guard-based bounds-check elision. Growth may relocate because the existing default `memory_may_move = true` remains unchanged, while the Store limiter remains the authoritative 64/128-MiB guest bound. See the exact-version `Config` documentation for [`memory_reservation`](https://docs.rs/wasmtime/36.0.13/wasmtime/struct.Config.html#method.memory_reservation), [`memory_guard_size`](https://docs.rs/wasmtime/36.0.13/wasmtime/struct.Config.html#method.memory_guard_size), and [`memory_reservation_for_growth`](https://docs.rs/wasmtime/36.0.13/wasmtime/struct.Config.html#method.memory_reservation_for_growth).
+
+This is candidate production tuning required to calibrate address-space use, not the process cap. Exact constant tests and the retained launched-child suite keep both components, Store memory-grow denial, bulk memory, stack, table limits, failed-Store destruction, and clean replacement under this configuration.
+
+## Valid maximum-working-set fixtures
+
+No public WIT changed. Each retained test consumer has one private test-only command, `memory-calibration-barrier`:
+
+- Rust allocates and page-touches 48 MiB under its frozen 64-MiB guest limit, then calls the already-imported and granted `host-settings.get-settings` capability.
+- TypeScript allocates and page-touches 64 MiB under its frozen 128-MiB guest limit, then calls the same capability.
+- The launched harness intentionally withholds that callback reply only until it obtains a child sample, then replies immediately. The guest keeps the allocation live across the callback and returns normally.
+
+The barrier is a deterministic valid workload, not the later hostile canonical-lift amplification fixture. It neither allocates outside the frozen guest limits nor increases a runtime limit.
+
+## Exact measurement protocol
+
+The opt-in ignored release test `process_memory_calibration::calibration_campaign` performs one warm-up and five measured runs for Rust, followed by one warm-up and five measured runs for TypeScript. Every run launches a fresh exact `target/release/junban-plugin-host`; profiles and runs are serial.
+
+For each child, the harness:
+
+1. starts an exact-PID sampler immediately after spawn;
+2. samples spawn and Hello;
+3. sends the ordinary hash-bound Load and samples compilation plus initial instantiation;
+4. invokes the valid maximum-working-set barrier, obtains another sample while its granted callback is intentionally held, replies before the one-second command deadline, and requires normal return;
+5. performs one representative successful service invocation;
+6. samples shutdown, receives `ShutdownComplete`, and requires successful reap and empty diagnostics.
+
+The private protocol intentionally exposes one atomic Load response only after compilation and initial instantiation. The JSON therefore reports the honest combined phase `compile_and_instantiate`; it does not invent an unobservable split. Sampling is evidence-only polling. Each phase requires a sample: Linux and macOS allow five seconds for its first sample, while Windows allows thirty seconds because a cold GitHub runner can take longer to start the first `powershell.exe Get-Process`; later polls remain paced. A failed sampling command is retained and reported with its platform diagnostic if that required sample deadline expires. Runtime timeout, cancellation, and containment correctness continue to use the watchdog/condition-variable authorities and never depend on the sampler or a sleep.
+
+Each canonical JSON campaign records:
+
+- schema/protocol/status, exact Git commit and tracked-tree cleanliness;
+- OS and architecture;
+- release executable name and SHA-256;
+- profile, retained component SHA-256, guest memory limit, and barrier allocation;
+- exact Wasmtime line and reservation/guard/growth constants;
+- whole-run duration and exact-child sample count;
+- sample count and maxima for every phase, and whole-run maxima.
+
+A run fails if the release assertion, component inspection, protocol flow, callback reply, invocation, shutdown/reap, empty diagnostics, or any required phase sample fails.
+
+## Cross-platform calibration campaign
+
+GitHub Actions run [`31008905408`](https://github.com/Artificial-Source/Junban/actions/runs/31008905408) ran from exact clean commit `9bb5941e42270d65798d86ec3b652bd1001b0744`. Ubuntu, macOS, and Windows each completed one warm-up plus five serial measured runs for both profiles. The canonical raw results are retained as:
+
+- [`phase-7-process-memory-calibration-linux.json`](phase-7-process-memory-calibration-linux.json)
+- [`phase-7-process-memory-calibration-macos.json`](phase-7-process-memory-calibration-macos.json)
+- [`phase-7-process-memory-calibration-windows.json`](phase-7-process-memory-calibration-windows.json)
+
+Authority maxima and the mechanical 125% minima are:
+
+| Platform/profile   |                    Authority maximum | `ceil(1.25 × maximum)` |
+| ------------------ | -----------------------------------: | ---------------------: |
+| Linux Rust         |     365,305,856-byte virtual address |      456,632,320 bytes |
+| Linux TypeScript   |     880,021,504-byte virtual address |    1,100,026,880 bytes |
+| macOS Rust         | 445,909,827,584-byte virtual address |  557,387,284,480 bytes |
+| macOS TypeScript   | 446,150,574,080-byte virtual address |  557,688,217,600 bytes |
+| Windows Rust       |       57,274,368-byte private commit |       71,592,960 bytes |
+| Windows TypeScript |      456,949,760-byte private commit |      571,187,200 bytes |
+
+The macOS result rejects the proposed `RLIMIT_AS` remedy rather than producing a candidate 519-GiB cap. Modern macOS reported roughly 415 GiB of process virtual address for both otherwise-valid profiles. A process ceiling above 519 GiB would not materially contain a 64/128-MiB typed-lift amplification and therefore fails this protocol's separation rule. No process cap, Windows Job Object, spawn restriction, unsafe code, or new dependency was adopted.
+
+## Approved narrower correction
+
+The approved minimal correction uses Wasmtime 36.0.13's public `Store::set_hostcall_fuel` authority. Every initial and replacement Store is explicitly set to **4,464,640 bytes** before Component instantiation and immediately checked through `Store::hostcall_fuel`; no Store may rely on Wasmtime's implicit 128-MiB default. This is guest-to-host canonical-lift fuel, not wasm execution fuel, and Wasmtime does not charge host-to-guest lowering.
+
+The constant is derived from the current WIT and SDK/private-body bounds: 4,194,304 callback-body bytes + 139,264 bytes for the largest valid nested canonical structure (`256 × (named-value SIZE32 32 + 64 × list-element SIZE32 8)`) + an explicit 131,072-byte margin. A generated-ABI test locks those `ComponentType::SIZE32` values, enumerates all 11 imports and 9 exports, and proves the largest output shape remains below the import maximum. The public WIT, SDK protocol caps, guest memories, wasm execution fuel, wall deadlines, and Wasmtime reservation tuning are unchanged.
+
+Retained Rust fixtures prove both an 8-KiB maximum-valid search and a 4,190,208-byte near-callback-bound canonical transfer reach the generated adapter/callback and return normally, while a 558,081-element empty-ID list (4,464,648 canonical flat bytes) traps before callback publication, returns only normalized `resource-limit`, destroys the Store, and succeeds from a clean replacement in the same child process. The retained TypeScript fixture now uses a fast bulk typed-array import argument instead of the retired oversized-result-string export: the `hostcall-oversized-import` command lowers one named `DataValue::IntegerList` from a fresh `BigInt64Array(558_081)` (4,464,648 canonical flat bytes) through the generated bulk typed-array path, exhausts hostcall fuel during argument lifting on the original healthy Store, publishes no capability request, and proves clean same-process replacement afterward. The replacement [`phase-7-hostcall-transfer-linux.json`](phase-7-hostcall-transfer-linux.json) records five serial optimized direct exact-test TypeScript runs for this fixture. GNU time maximum-resident-set results were 537,692 / 533,684 / 499,392 / 495,416 / 510,052 KiB (537,692 KiB maximum) with durations 18.17 / 18.24 / 18.28 / 18.29 / 18.19 s; the report identifies that its direct-process metric supersedes the retired aggregate sampler and explicitly states each run includes the ordinary load/compile/instantiate/invoke/shutdown test sequence. The TypeScript figure includes its ordinary compile/instantiate peak and is not relabeled as transfer-only allocation.
+
+This correction supersedes the process-cap candidate direction but does not silently close review findings. `P7-PLAN-RUNTIME-001`, `P7-RUNTIME-SEC-001`, and `P7-DEP-001` remain open pending focused recheck; Slice 2C remains unauthorized.
+
+The first campaign run `31007358850` passed Linux/macOS but failed Windows because a cold per-sample PowerShell process did not produce a sample within five seconds and the harness discarded sampling errors. Commit `9bb5941` retained current-generation errors with diagnostics and uses a 30-second first-sample deadline on Windows only; the exact rerun then passed all phases. No failed-run numbers informed this table.
+
+These three hosts establish the planned platform sample shape but do not select a cap or prove ordinary fleet variance. The separate approved hostcall-fuel campaign now runs the hostile amplification fixtures; this historical calibration run itself does not close either finding.
+
+## Platform metrics
+
+Metrics are bytes and remain platform-specific rather than being mislabeled as interchangeable:
+
+- **Linux:** exact-child `/proc/<pid>/status` `VmSize` (virtual address), `VmRSS`, `VmPeak`, and `VmHWM`.
+- **macOS:** exact-child `ps` virtual size and RSS. Peak fields remain null because this standard exact-process interface does not expose them reliably.
+- **Windows:** exact-child PowerShell `Get-Process` private committed bytes (`PrivateMemorySize64`), pagefile bytes (`PagedMemorySize64`), working set, virtual size, and the available pagefile/working-set/virtual peaks.
+
+Under the rejected process-cap candidate protocol, Unix `RLIMIT_AS` would have required the maximum valid **virtual-address** result rather than RSS, while a Windows Job Object process-memory candidate would have required maximum valid **private commit**. Platform values are not compared as if they measured the same resource. These historical rules do not authorize either mechanism now that macOS failed the separation rule.
+
+## Rejected candidate-cap rule and required hostile proof
+
+For each supported platform/profile metric authority, any candidate process cap must satisfy:
+
+```text
+candidate_cap >= ceil(1.25 * maximum_valid_metric_across_all_5_measured_runs)
+```
+
+The maximum includes compile/instantiate, the valid barrier, representative invocation, and shutdown—not only a warm snapshot. The 25% is a minimum calibration margin, not automatic acceptance. A candidate is rejected if ordinary platform variance, loader behavior, or a valid retained component approaches it.
+
+Headroom alone is insufficient. The same candidate must still be triggered by the later canonical-lift amplification fixture required by `P7-RUNTIME-SEC-001`, with bounded child-only failure, failed-Store destruction, parent-observed child replacement, and a successful clean invocation afterward. If no cap separates the valid maximum from hostile amplification on a supported platform/profile, the cap is not frozen; profile or body authority must be reconsidered instead.
+
+## Fail-closed campaign criteria
+
+The campaign is invalid and cannot inform a cap when any of these holds:
+
+- a platform/profile lacks one warm-up plus exactly five serial measured runs;
+- the executable is not an optimized release host, hashes/configuration differ, or the tracked tree is dirty;
+- any phase has no sample, sampling addresses another process, or a metric authority is unavailable;
+- the barrier exceeds guest limits, fails to reach its granted callback, times out, traps, or does not return normally;
+- protocol, representative invocation, shutdown, reap, or diagnostic-empty checks fail;
+- results are aggregated across Unix address space and Windows commit as one metric;
+- only one developer machine is available, or a historical Wasmtime 45 projection is substituted;
+- the later amplification fixture does not reliably hit the candidate while valid maximum workloads retain at least 25% headroom.
+
+No observed number closes either open finding by itself. Cross-platform raw artifacts, cap implementation, hostile amplification/replacement evidence, and focused security recheck are all still required.
+
+## Commands and campaign dispatch
+
+Local Linux preliminary run (approximately twelve fresh release children):
+
+```bash
+cargo build --locked --release -p junban-plugin-host
+JUNBAN_PLUGIN_MEMORY_CALIBRATION=1 \
+JUNBAN_PLUGIN_MEMORY_CALIBRATION_OUTPUT="$PWD/target/phase7-process-memory-calibration.json" \
+  cargo test --locked --release -p junban-plugin-host \
+  --test process_memory_calibration calibration_campaign -- \
+  --ignored --exact --test-threads=1
+```
+
+The temporary workflow `.github/workflows/phase7-process-memory-calibration.yml` is manual and also listens only to branches named `phase7-process-memory-calibration/**`. Push such a temporary branch or dispatch the workflow at that ref. Its Ubuntu, macOS, and Windows jobs each build the exact release host, run the fixed warm-up/five-sample campaign, and upload one raw JSON artifact. It does not run on ordinary `main` pushes or pull requests and makes no acceptance claim.

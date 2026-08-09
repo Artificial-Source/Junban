@@ -8,6 +8,7 @@ import {
   inclusiveDayCount,
   splitDayTasks,
   toCivilDateKey,
+  weekStartToDayNumber,
 } from "./calendarRange";
 
 function task(partial: Partial<TaskDto> & { id: string; title: string }): TaskDto {
@@ -77,5 +78,14 @@ describe("calendar civil-date grouping", () => {
     expect(week.to).toBe("2026-07-25");
     expect(toCivilDateKey(selected)).toBe("2026-07-23");
     expect(addCivilDays("2026-07-23", 1)).toBe("2026-07-24");
+    const saturdayWeek = calendarRequestRange(selected, "week", 6);
+    expect(saturdayWeek.from).toBe("2026-07-18");
+    expect(saturdayWeek.to).toBe("2026-07-24");
+  });
+
+  it("maps week_start enums onto JS day numbers", () => {
+    expect(weekStartToDayNumber("sunday")).toBe(0);
+    expect(weekStartToDayNumber("monday")).toBe(1);
+    expect(weekStartToDayNumber("saturday")).toBe(6);
   });
 });

@@ -1,0 +1,47 @@
+[package]
+name = "junban-ai"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+rust-version.workspace = true
+repository.workspace = true
+description = "Optional provider clients and orchestration for Junban"
+publish = false
+
+[dependencies]
+base64 = "0.22.1"
+bytes = "1.12.1"
+futures-util = { version = "0.3.33", default-features = false }
+# Narrow domain dependency for the single AiProviderPreset settings/runtime authority.
+junban-domain = { path = "../junban-domain", version = "0.1.0" }
+reqwest = { version = "0.12.28", default-features = false, features = [
+  "json",
+  "rustls-tls-native-roots",
+  "stream",
+] }
+serde = { workspace = true }
+serde_json = { workspace = true }
+thiserror = { workspace = true }
+tokio = { workspace = true, features = [
+  "macros",
+  "net",
+  "rt-multi-thread",
+  "sync",
+  "time",
+] }
+tokio-util = { workspace = true }
+url = { version = "2.5.8", default-features = false }
+uuid = { workspace = true }
+
+[dev-dependencies]
+tokio = { workspace = true, features = [
+  "io-util",
+  "macros",
+  "net",
+  "rt-multi-thread",
+  "sync",
+  "time",
+] }
+
+[lints]
+workspace = true

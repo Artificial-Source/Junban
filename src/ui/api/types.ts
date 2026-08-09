@@ -70,6 +70,7 @@ export type ErrorEnvelope = Schemas["ErrorEnvelope"];
 export type ErrorBody = Schemas["ErrorBody"];
 export type HealthResponse = Schemas["HealthResponse"];
 export type ProfileResponse = Schemas["ProfileResponse"];
+export type SyncStateResponse = Schemas["SyncStateResponse"];
 
 export type ParseQuickEntryRequest = Schemas["ParseQuickEntryRequest"];
 export type ParseFilterRequest = Schemas["ParseFilterRequest"];
@@ -153,3 +154,56 @@ export type MarkOwnerLostRemindersResponse = Schemas["MarkOwnerLostRemindersResp
 export type SettleReminderDeliveredRequest = Schemas["SettleReminderDeliveredRequest"];
 export type SettleReminderFailedRequest = Schemas["SettleReminderFailedRequest"];
 export type RescheduleReminderRequest = Schemas["RescheduleReminderRequest"];
+
+// ---------------------------------------------------------------------------
+// Phase 4 settings / transfer / hosted operations
+// ---------------------------------------------------------------------------
+
+export type AppSettingsResponse = Schemas["AppSettingsResponse"];
+export type PatchSettingsRequest = Schemas["PatchSettingsRequest"];
+export type AppearanceSettingsDto = Schemas["AppearanceSettingsDto"];
+export type DateTimeSettingsDto = Schemas["DateTimeSettingsDto"];
+export type TaskDefaultsDto = Schemas["TaskDefaultsDto"];
+export type NotificationSettingsDto = Schemas["NotificationSettingsDto"];
+export type FeatureSettingsDto = Schemas["FeatureSettingsDto"];
+export type PlanningSettingsDto = Schemas["PlanningSettingsDto"];
+export type KeyboardShortcutDto = Schemas["KeyboardShortcutDto"];
+export type NudgeRuleSettingsDto = Schemas["NudgeRuleSettingsDto"];
+export type WorkHoursDto = Schemas["WorkHoursDto"];
+
+export type ThemeDto = Schemas["ThemeDto"];
+export type DensityDto = Schemas["DensityDto"];
+export type FontSizeDto = Schemas["FontSizeDto"];
+export type FontFamilyDto = Schemas["FontFamilyDto"];
+export type CalendarDefaultDto = Schemas["CalendarDefaultDto"];
+export type DateFormatDto = Schemas["DateFormatDto"];
+export type TimeFormatDto = Schemas["TimeFormatDto"];
+
+export type TransferFormatDto = Schemas["TransferFormatDto"];
+export type ImportPreviewRequest = Schemas["ImportPreviewRequest"];
+export type ImportApplyRequest = Schemas["ImportApplyRequest"];
+export type TransferPreviewResponse = Schemas["TransferPreviewResponse"];
+export type ImportDraftDto = Schemas["ImportDraftDto"];
+export type TransferWarningDto = Schemas["TransferWarningDto"];
+export type NameMappingDto = Schemas["NameMappingDto"];
+/** Wire query for task export. OpenAPI currently mis-labels `format` as path; runtime is query. */
+export type ExportTasksParams = {
+  format: "json" | "csv" | "markdown" | (string & {});
+};
+
+export type HostListRequest = Schemas["HostListRequest"];
+export type HostListResponse = Schemas["HostListResponse"];
+export type TokenRotationResponse = Schemas["TokenRotationResponse"];
+
+export type DiagnosticsResponse = Schemas["DiagnosticsResponse"];
+export type DiagnosticEntry = Schemas["DiagnosticEntry"];
+export type DiagnosticSeverity = Schemas["DiagnosticSeverity"];
+
+export type RestoreResponse = Schemas["RestoreResponse"];
+
+/** Downloaded binary/text artifact from export or backup endpoints. */
+export type DownloadArtifact = {
+  blob: Blob;
+  filename: string;
+  contentType: string;
+};

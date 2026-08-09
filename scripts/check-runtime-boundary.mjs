@@ -15,6 +15,14 @@ const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 /** Native / releasable areas that must stay free of Node runtime artifacts. */
 const NATIVE_ROOTS = ["crates", "src-tauri"];
 
+/** Explicit SDK authoring fixture: build-only Node, never a shipped backend. */
+const PLUGIN_SDK_TYPESCRIPT_CONSUMER = path.join(
+  "crates",
+  "junban-plugin-sdk",
+  "consumers",
+  "typescript",
+);
+
 /** Filenames that indicate a Node package or install tree. */
 const FORBIDDEN_NAMES = new Set([
   "package.json",
@@ -52,7 +60,7 @@ const errors = [];
 
 /**
  * @param {string} dir
- * @param {(full: string, entry: fs.Dirent) => void} visit
+ * @param {(full: string, entry: fs.Dirent) => (boolean | void)} visit
  */
 function walk(dir, visit) {
   if (!fs.existsSync(dir)) {
@@ -60,9 +68,9 @@ function walk(dir, visit) {
   }
   for (const entry of fs.readdirSync(dir, { withFileTypes: true })) {
     const full = path.join(dir, entry.name);
-    visit(full, entry);
+    const descend = visit(full, entry);
     if (entry.isDirectory()) {
-      if (entry.name === "target" || entry.name === "dist") {
+      if (descend === false || entry.name === "target" || entry.name === "dist") {
         continue;
       }
       walk(full, visit);
@@ -75,6 +83,15 @@ for (const nativeRoot of NATIVE_ROOTS) {
   walk(abs, (full, entry) => {
     const rel = path.relative(root, full);
     const base = entry.name.toLowerCase();
+
+    if (
+      rel === PLUGIN_SDK_TYPESCRIPT_CONSUMER ||
+      rel.startsWith(`${PLUGIN_SDK_TYPESCRIPT_CONSUMER}${path.sep}`)
+    ) {
+      // Checked-in source, bindings, lock and golden component are SDK build/test
+      // authorities. Never traverse an installed author-tool dependency tree.
+      return entry.isDirectory() && base === "node_modules" ? false : true;
+    }
 
     if (FORBIDDEN_NAMES.has(entry.name) || FORBIDDEN_NAMES.has(base)) {
       errors.push(`${rel}: Node package or install tree is not allowed under ${nativeRoot}/`);
@@ -98,6 +115,24 @@ for (const nativeRoot of NATIVE_ROOTS) {
       }
     }
   });
+}
+
+const consumerPackagePath = path.join(root, PLUGIN_SDK_TYPESCRIPT_CONSUMER, "package.json");
+if (fs.existsSync(consumerPackagePath)) {
+  const pkg = JSON.parse(fs.readFileSync(consumerPackagePath, "utf8"));
+  const expected = {
+    "@bytecodealliance/componentize-js": "0.22.0",
+    "@bytecodealliance/jco": "1.26.1",
+  };
+  if (
+    pkg.private !== true ||
+    Object.keys(pkg.dependencies ?? {}).length !== 0 ||
+    JSON.stringify(pkg.devDependencies ?? {}) !== JSON.stringify(expected)
+  ) {
+    errors.push(
+      `${PLUGIN_SDK_TYPESCRIPT_CONSUMER}/package.json: author tools must remain private, build-only, and exact-pinned`,
+    );
+  }
 }
 
 // Frontend source must stay browser-only even though the development scripts use Node.

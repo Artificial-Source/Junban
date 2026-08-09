@@ -105,7 +105,7 @@ function makeEvent(
     operation_id: "op-test-1",
     revision,
     affected: task ? { task_ids: [task.id] } : {},
-    resync: { tasks: false, catalog: false },
+    resync: { tasks: false, catalog: false, settings: false },
     primary: task ? { resource_type: "task", id: task.id } : null,
     snapshot: task ? { resource_type: "task", task } : null,
     ...overrides,
@@ -210,7 +210,7 @@ describe("applyTaskEventToList", () => {
     const bulk = applyTaskEventToList(
       [task],
       2,
-      makeEvent(null, 3, "task.bulk", { resync: { tasks: true, catalog: false } }),
+      makeEvent(null, 3, "task.bulk", { resync: { tasks: true, catalog: false, settings: false } }),
     );
     expect(bulk.needsRefresh).toBe(true);
   });

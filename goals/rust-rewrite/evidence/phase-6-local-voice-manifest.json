@@ -1,0 +1,228 @@
+{
+  "phase": 6,
+  "wave": 0,
+  "title": "local browser voice dependency and manifest-verification boundary",
+  "base": "00ec002",
+  "capturedAt": "2026-08-02T12:00:00.000Z",
+  "scope": "loader/cache/manifest boundary only — no Whisper/Kokoro/Piper inference claim",
+  "notes": [
+    "Model weights were downloaded in the worktree solely to establish authoritative byte sizes and SHA-256 digests.",
+    "Model weights are not committed. Only this evidence file and the frozen TypeScript manifest are retained.",
+    "Package CDN defaults reachable in browser artifacts are removed via minimal pnpm patches (transformers wasmPaths CDN, kokoro voice root, piper download/CDN bases).",
+    "Verified downloads stream to temporary OPFS objects with incremental SHA-256; admission is marker-gated after size+hash match.",
+    "This wave does not run local inference. Real hash-verified Whisper/Kokoro/Piper inference remains Wave 5 evidence."
+  ],
+  "hfDelivery": {
+    "manifestHost": "huggingface.co",
+    "redirectPolicy": "follow HTTPS redirects; final URL host must be huggingface.co, hf.co, *.hf.co, or *.huggingface.co; no Junban credentials/query on requests; SHA-256 remains trust anchor",
+    "observedFinalHosts": [
+      {
+        "sample": "onnx-community/whisper-tiny.en .../preprocessor_config.json",
+        "status": 307,
+        "finalHost": "huggingface.co",
+        "finalPathPrefix": "/api/resolve-cache/models/",
+        "note": "same-origin HF resolve-cache; may include server-authored etag query"
+      },
+      {
+        "sample": "onnx-community/whisper-tiny.en .../onnx/encoder_model_q4.onnx",
+        "status": 302,
+        "finalHost": "us.aws.cdn.hf.co",
+        "finalPathPrefix": "/xet-bridge-us/",
+        "note": "HF content CDN bridge for large weights; volatile signed path segments are not recorded"
+      },
+      {
+        "sample": "rhasspy/piper-voices .../en_US-ljspeech-medium.onnx",
+        "status": 302,
+        "finalHost": "us.aws.cdn.hf.co",
+        "finalPathPrefix": "/xet-bridge-us/",
+        "note": "same class of HF CDN bridge as Whisper weights"
+      }
+    ],
+    "disallowedExamples": ["evil.example", "cdn.jsdelivr.net", "cdnjs.cloudflare.com"]
+  },
+  "packages": {
+    "@huggingface/transformers": {
+      "version": "3.8.1",
+      "license": "Apache-2.0",
+      "patch": "patches/@huggingface__transformers@3.8.1.patch",
+      "patchScope": "src/backends/onnx.js CDN throw; transformers.web(.min).js CDN wasmPaths host neutralization only"
+    },
+    "@ricky0123/vad-web": {
+      "version": "0.0.30",
+      "license": "ISC"
+    },
+    "kokoro-js": {
+      "version": "1.2.1",
+      "license": "Apache-2.0",
+      "patch": "patches/kokoro-js@1.2.1.patch",
+      "patchScope": "browser voice URL root + embedded CDN wasm default neutralization"
+    },
+    "@mintplex-labs/piper-tts-web": {
+      "version": "1.0.4",
+      "license": "MIT",
+      "patch": "patches/@mintplex-labs__piper-tts-web@1.0.4.patch",
+      "patchScope": "remove CDN bases, block download(), require pre-seeded OPFS, no network getBlob fallback"
+    },
+    "@diffusionstudio/piper-wasm": {
+      "version": "1.0.0",
+      "license": "MIT",
+      "purpose": "same-origin piper phonemize support assets only"
+    }
+  },
+  "models": [
+    {
+      "id": "whisper-tiny.en-q4",
+      "engine": "whisper",
+      "repo": "onnx-community/whisper-tiny.en",
+      "revision": "2575352d61be1bf7225cf8f8b268a4678025fc58",
+      "license": "OpenAI-Whisper-MIT",
+      "engineVersion": "@huggingface/transformers@3.8.1",
+      "cacheKey": "junban-local-voice/whisper-tiny.en-q4/2575352d61be1bf7225cf8f8b268a4678025fc58",
+      "totalBytes": 98968117,
+      "files": [
+        {
+          "path": "config.json",
+          "bytes": 2197,
+          "sha256": "251ea843b5901a99efa58c0b99b8052c6019aa3e7d2baf46693a1128ff606233"
+        },
+        {
+          "path": "generation_config.json",
+          "bytes": 1646,
+          "sha256": "7b2e8451ed5f118e75fdd991409d72119d21d2fef1eba9723f68fb9c57fe5dc9"
+        },
+        {
+          "path": "preprocessor_config.json",
+          "bytes": 339,
+          "sha256": "a6a76d28c93edb273669eb9e0b0636a2bddbb1272c3261e47b7ca6dfdbac1b8d"
+        },
+        {
+          "path": "tokenizer.json",
+          "bytes": 2405679,
+          "sha256": "5eb60cec1e77aeeb6869a2bb5a8e01a84c3fe5d072d75369343021fe6f5310d0"
+        },
+        {
+          "path": "tokenizer_config.json",
+          "bytes": 282662,
+          "sha256": "93879c3dccdd4b976f709acd85b44778873f30c275e67026f30ca1e4c975230c"
+        },
+        {
+          "path": "added_tokens.json",
+          "bytes": 34604,
+          "sha256": "560be47bea388757f8d4cc185c5d82067426cbb6361e38016dd90ddc01ab203a"
+        },
+        {
+          "path": "special_tokens_map.json",
+          "bytes": 2173,
+          "sha256": "98bdf3ec5b32e31575b02f64b0a32bde7c0449075d34484a7df9bdd3cdeb9fb9"
+        },
+        {
+          "path": "merges.txt",
+          "bytes": 456318,
+          "sha256": "1ce1664773c50f3e0cc8842619a93edc4624525b728b188a9e0be33b7726adc5"
+        },
+        {
+          "path": "normalizer.json",
+          "bytes": 52666,
+          "sha256": "bf1c507dc8724ca9cf9903640dacfb69dae2f00edee4f21ceba106a7392f26dd"
+        },
+        {
+          "path": "onnx/encoder_model_q4.onnx",
+          "bytes": 9020667,
+          "sha256": "bb73f790e63906c9e9d02c4e3abf55817dd16fd7ef7c7f4754c1395202191b29"
+        },
+        {
+          "path": "onnx/decoder_model_merged_q4.onnx",
+          "bytes": 86712166,
+          "sha256": "57d4303f3bbc8bb4016273b172285236f5719c75e8a7d23b7265cfa1d71494a4"
+        }
+      ]
+    },
+    {
+      "id": "kokoro-82m-v1-q8",
+      "engine": "kokoro",
+      "repo": "onnx-community/Kokoro-82M-v1.0-ONNX",
+      "revision": "1939ad2a8e416c0acfeecc08a694d14ef25f2231",
+      "license": "Apache-2.0",
+      "engineVersion": "kokoro-js@1.2.1",
+      "cacheKey": "junban-local-voice/kokoro-82m-v1-q8/1939ad2a8e416c0acfeecc08a694d14ef25f2231",
+      "totalBytes": 92887010,
+      "files": [
+        {
+          "path": "config.json",
+          "bytes": 44,
+          "sha256": "df34b4f930b23447cd4dc410fabfb42eb3f24e803e6c3f97d618fb359380a36f"
+        },
+        {
+          "path": "tokenizer.json",
+          "bytes": 3497,
+          "sha256": "77a02c8e164413299b4b4c403b14f8e0e1c1b727db4d46a09d6327b861060a34"
+        },
+        {
+          "path": "tokenizer_config.json",
+          "bytes": 113,
+          "sha256": "be1cb066d6ef6b074b3f15e6a6dd21ac88ff3cdaedf325f0aaed686c70f75d20"
+        },
+        {
+          "path": "onnx/model_quantized.onnx",
+          "bytes": 92361116,
+          "sha256": "fbae9257e1e05ffc727e951ef9b9c98418e6d79f1c9b6b13bd59f5c9028a1478"
+        },
+        {
+          "path": "voices/af_heart.bin",
+          "bytes": 522240,
+          "sha256": "d583ccff3cdca2f7fae535cb998ac07e9fcb90f09737b9a41fa2734ec44a8f0b"
+        }
+      ]
+    },
+    {
+      "id": "piper-en_US-ljspeech-medium",
+      "engine": "piper",
+      "repo": "rhasspy/piper-voices",
+      "revision": "9f967d15e9ccdf43078586d1476ee70f314401bd",
+      "license": "MIT",
+      "sourceDataLicense": "public-domain (LJ Speech per MODEL_CARD)",
+      "licenseDisposition": "Selected over en_US-hfc_female-medium because HFC MODEL_CARD records CC-BY-NC-SA-4.0 source-data terms; LJ Speech is public domain and remains an English female default.",
+      "engineVersion": "@mintplex-labs/piper-tts-web@1.0.4",
+      "cacheKey": "junban-local-voice/piper-en_US-ljspeech-medium/9f967d15e9ccdf43078586d1476ee70f314401bd",
+      "totalBytes": 63536868,
+      "files": [
+        {
+          "path": "en/en_US/ljspeech/medium/en_US-ljspeech-medium.onnx",
+          "bytes": 63531379,
+          "sha256": "6f52a751e2349abe7a76735eb09dc1875298c77ea2342ffd2fef79ff81b87f22",
+          "license": "MIT"
+        },
+        {
+          "path": "en/en_US/ljspeech/medium/en_US-ljspeech-medium.onnx.json",
+          "bytes": 4972,
+          "sha256": "141d612cc0a95ed7efc1ca936b845c2364967f2e9217c5dbfcf69fc4d6c65860",
+          "license": "MIT"
+        },
+        {
+          "path": "en/en_US/ljspeech/medium/MODEL_CARD",
+          "bytes": 517,
+          "sha256": "fbee1529c89d36b3fe76d7e9f3f832dce17f44900a52d76a9bda735654766b4d",
+          "license": "public-domain"
+        }
+      ]
+    }
+  ],
+  "modelByteTotals": {
+    "whisper-tiny.en-q4": 98968117,
+    "kokoro-82m-v1-q8": 92887010,
+    "piper-en_US-ljspeech-medium": 63536868,
+    "allSupportedPackages": 255391995
+  },
+  "supportAssets": {
+    "piper_phonemize.wasm": {
+      "package": "@diffusionstudio/piper-wasm@1.0.0",
+      "bytes": 635212,
+      "sha256": "b777cd107a91d2bcc6a1ea46f2c26a662a7407394fe84589198aeaa83dd7a9d6"
+    },
+    "piper_phonemize.data": {
+      "package": "@diffusionstudio/piper-wasm@1.0.0",
+      "bytes": 18077249,
+      "sha256": "29f1025eb23a5b5c192cd14a6efbce4509402ff265405072ee6f7d1a09b78f8c"
+    }
+  }
+}

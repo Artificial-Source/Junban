@@ -8,3 +8,5 @@ test-results
 *.tsbuildinfo
 dogfood-output
 goals/rust-rewrite/evidence/*.json
+crates/junban-plugin-sdk/consumers/rust/generated
+crates/junban-plugin-sdk/consumers/typescript/generated

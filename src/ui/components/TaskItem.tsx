@@ -79,7 +79,8 @@ export function TaskItem({
 
   return (
     <div
-      className={`group relative flex items-center gap-2 px-3 py-2 border-b border-border/30 border-l-0 transition-all duration-150 ${priorityBorder} ${
+      data-density-row
+      className={`density-row group relative flex items-center gap-2 px-3 border-b border-border/30 border-l-0 transition-all duration-150 ${priorityBorder} ${
         isSelected
           ? "bg-accent-action/5 ring-1 ring-accent-action/50"
           : isMultiSelected

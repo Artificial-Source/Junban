@@ -13,7 +13,7 @@ use junban_domain::{
     next_occurrence, resolve_recurrence_anchor, shift_occurrence_absolutes,
     validate_reorder_permutation, validate_task_tags, validate_unique_bulk_ids,
 };
-use rusqlite::{Connection, OptionalExtension, Transaction, params};
+use rusqlite::{Connection, OptionalExtension, params};
 use serde::Serialize;
 
 use crate::helpers::{
@@ -104,6 +104,8 @@ pub(crate) fn create_task(
     draft: TaskDraft,
     now: Timestamp,
 ) -> Result<CommittedMutation, RepositoryError> {
+    // Canonical request bytes preserve the caller's payload for exact retry replay.
+    // Task-default fill happens only after receipt admission, inside the write txn.
     let request = canonical_json(&Req::CreateTask { draft: &draft })?;
     mutate(
         connection,
@@ -111,6 +113,14 @@ pub(crate) fn create_task(
         request,
         now,
         move |tx, revision| {
+            let settings = crate::settings_ops::load_settings_tx(tx)?;
+            let mut draft = draft;
+            if draft.priority.is_none() {
+                draft.priority = settings.task_defaults.default_priority;
+            }
+            if draft.estimated_minutes.is_none() {
+                draft.estimated_minutes = settings.task_defaults.default_estimated_minutes;
+            }
             let task = Task::from_draft(task_id, draft, now, revision).map_err(validation)?;
             validate_task_refs(tx, &task)?;
             insert_task(tx, &task)?;
@@ -251,7 +261,7 @@ struct CompletePendingResult {
 }
 
 fn complete_pending_set(
-    tx: &Transaction<'_>,
+    tx: &Connection,
     operation_id: OperationId,
     pending_ids: &[TaskId],
     now: Timestamp,
@@ -335,7 +345,7 @@ fn complete_pending_set(
 }
 
 fn expand_complete_targets(
-    tx: &Transaction<'_>,
+    tx: &Connection,
     roots: &[TaskId],
 ) -> Result<Vec<TaskId>, RepositoryError> {
     let mut expanded = Vec::new();
@@ -368,7 +378,7 @@ fn expand_complete_targets(
 }
 
 fn load_completion_material(
-    tx: &Transaction<'_>,
+    tx: &Connection,
     completion_operation_id: OperationId,
 ) -> Result<Option<(Inverse, PostImage)>, RepositoryError> {
     let row = tx
@@ -674,7 +684,7 @@ pub(crate) fn reopen_task(
 }
 
 pub(crate) fn capture_closure(
-    tx: &Transaction<'_>,
+    tx: &Connection,
     root: TaskId,
     now: Timestamp,
 ) -> Result<(Vec<TaskId>, TaskClosure), RepositoryError> {
@@ -763,7 +773,7 @@ pub(crate) fn delete_task(
 }
 
 pub(crate) fn scope_siblings(
-    tx: &Transaction<'_>,
+    tx: &Connection,
     parent_id: Option<TaskId>,
     project_id: Option<junban_domain::ProjectId>,
     section_id: Option<junban_domain::SectionId>,
@@ -790,7 +800,7 @@ pub(crate) fn scope_siblings(
 /// Rewrite target-sibling order. Returns pre-images of every sibling whose order changes.
 #[allow(clippy::too_many_arguments)]
 fn apply_order_anchor(
-    tx: &Transaction<'_>,
+    tx: &Connection,
     task_id: TaskId,
     parent_id: Option<TaskId>,
     project_id: Option<junban_domain::ProjectId>,

@@ -1,11 +1,40 @@
 /**
  * Real-path routing using the History API.
  * The URL fragment remains reserved for access-token bootstrap.
+ *
+ * Settings is a route-backed overlay: the prior non-settings route stays
+ * rendered underneath while the pathname is `/settings` or `/settings/<tab>`.
  */
 
 import { useCallback, useEffect, useMemo, useState } from "react";
 
 const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
+
+/** Closed Settings tab identifiers (URL segments). */
+export type SettingsTabId =
+  | "essentials"
+  | "appearance"
+  | "features"
+  | "ai"
+  | "voice"
+  | "keyboard"
+  | "templates"
+  | "data"
+  | "hosted"
+  | "diagnostics";
+
+export const SETTINGS_TAB_IDS: readonly SettingsTabId[] = [
+  "essentials",
+  "appearance",
+  "features",
+  "ai",
+  "voice",
+  "keyboard",
+  "templates",
+  "data",
+  "hosted",
+  "diagnostics",
+] as const;
 
 /** Simple view names used by chrome and Phase 3 destinations. */
 export type View =
@@ -24,9 +53,10 @@ export type View =
   | "matrix"
   | "stats"
   | "dopamine-menu"
-  | "timeblocking";
+  | "timeblocking"
+  | "ai-chat";
 
-/** Structured application route. */
+/** Structured application route (never the Settings overlay itself). */
 export type AppRoute =
   | { name: "today" }
   | { name: "inbox" }
@@ -43,12 +73,30 @@ export type AppRoute =
   | { name: "matrix" }
   | { name: "stats" }
   | { name: "dopamine-menu" }
-  | { name: "timeblocking" };
+  | { name: "timeblocking" }
+  | { name: "ai-chat" };
 
-export type NavigateTarget = View | AppRoute;
+/** Settings overlay location derived from the URL. */
+export type SettingsLocation =
+  | { open: false }
+  | {
+      open: true;
+      /** null = mobile category index / desktop Essentials default via `/settings`. */
+      tab: SettingsTabId | null;
+    };
+
+export type NavigateTarget = View | AppRoute | { name: "settings"; tab?: SettingsTabId | null };
+
+type HistoryState = {
+  junbanBackground?: string;
+} | null;
 
 function isUuid(value: string): boolean {
   return UUID_RE.test(value);
+}
+
+function isSettingsTabId(value: string): value is SettingsTabId {
+  return (SETTINGS_TAB_IDS as readonly string[]).includes(value);
 }
 
 /** Read the legacy-compatible Focus Mode query flag. */
@@ -67,7 +115,6 @@ export function pathWithFocus(focus: boolean, path?: string, search?: string): s
   );
   if (focus) params.set("focus", "1");
   else params.delete("focus");
-  // Drop empty focus-only noise.
   const qs = params.toString();
   return qs ? `${basePath}?${qs}` : basePath;
 }
@@ -81,12 +128,36 @@ function normalizePath(path: string): string {
   return trimmed || "/";
 }
 
+function todayRoute(): AppRoute {
+  return { name: "today" };
+}
+
+/** Parse a Settings pathname. Returns null when the path is not a settings URL. */
+export function parseSettingsLocation(path: string): SettingsLocation | null {
+  const normalized = normalizePath(path);
+  if (normalized === "/settings") {
+    return { open: true, tab: null };
+  }
+  if (!normalized.startsWith("/settings/")) return null;
+  const rest = normalized.slice("/settings/".length);
+  if (!rest || rest.includes("/")) return null;
+  if (!isSettingsTabId(rest)) return null;
+  return { open: true, tab: rest };
+}
+
+/** Canonical Settings pathname for a tab (null tab → `/settings`). */
+export function settingsToPath(tab: SettingsTabId | null = null): string {
+  return tab ? `/settings/${tab}` : "/settings";
+}
+
 /**
- * Parse a pathname into a route.
- * Returns null for unknown or malformed paths (including invalid UUIDs).
+ * Parse a pathname into a content route.
+ * Returns null for unknown/malformed paths and for Settings overlay paths.
  */
 export function parseRoute(path: string): AppRoute | null {
   const normalized = normalizePath(path);
+
+  if (parseSettingsLocation(normalized)) return null;
 
   switch (normalized) {
     case "/":
@@ -117,6 +188,8 @@ export function parseRoute(path: string): AppRoute | null {
       return { name: "dopamine-menu" };
     case "/timeblocking":
       return { name: "timeblocking" };
+    case "/ai-chat":
+      return { name: "ai-chat" };
     default:
       break;
   }
@@ -156,7 +229,7 @@ export function parseRoute(path: string): AppRoute | null {
   return null;
 }
 
-/** Build the canonical pathname for a route. */
+/** Build the canonical pathname for a content route. */
 export function routeToPath(route: AppRoute): string {
   switch (route.name) {
     case "today":
@@ -193,6 +266,8 @@ export function routeToPath(route: AppRoute): string {
       return "/dopamine-menu";
     case "timeblocking":
       return "/timeblocking";
+    case "ai-chat":
+      return "/ai-chat";
   }
 }
 
@@ -212,6 +287,7 @@ export function viewToRoute(view: View): AppRoute | null {
     case "stats":
     case "dopamine-menu":
     case "timeblocking":
+    case "ai-chat":
       return { name: view };
     case "saved-filter":
     case "project":
@@ -237,9 +313,38 @@ export function viewToPath(view: View): string {
   return route ? routeToPath(route) : "/";
 }
 
-function coerceTarget(target: NavigateTarget): AppRoute | null {
+function readHistoryState(): HistoryState {
+  const state = window.history.state;
+  if (!state || typeof state !== "object") return null;
+  const background = (state as { junbanBackground?: unknown }).junbanBackground;
+  if (typeof background !== "string" || !background) return null;
+  return { junbanBackground: background };
+}
+
+function resolveBackgroundRoute(settingsPath: boolean): AppRoute {
+  if (!settingsPath) {
+    return parseRoute(window.location.pathname) ?? todayRoute();
+  }
+  const fromState = readHistoryState()?.junbanBackground;
+  if (fromState) {
+    const parsed = parseRoute(fromState);
+    if (parsed) return parsed;
+  }
+  return todayRoute();
+}
+
+function resolveSettingsLocation(): SettingsLocation {
+  return parseSettingsLocation(window.location.pathname) ?? { open: false };
+}
+
+function coerceTarget(
+  target: NavigateTarget,
+): AppRoute | { name: "settings"; tab?: SettingsTabId | null } | null {
   if (typeof target === "string") {
     return viewToRoute(target);
+  }
+  if (target.name === "settings") {
+    return target;
   }
   return target;
 }
@@ -247,49 +352,131 @@ function coerceTarget(target: NavigateTarget): AppRoute | null {
 export function useRouting(): {
   route: AppRoute;
   view: View;
+  settings: SettingsLocation;
+  settingsOpen: boolean;
   navigate: (target: NavigateTarget) => void;
+  openSettings: (tab?: SettingsTabId | null) => void;
+  closeSettings: () => void;
+  navigateSettings: (tab: SettingsTabId | null) => void;
   focusModeOpen: boolean;
   setFocusModeOpen: (open: boolean) => void;
 } {
-  const [route, setRoute] = useState<AppRoute>(
-    () =>
-      parseRoute(window.location.pathname) ?? {
-        name: "today",
-      },
+  const [route, setRoute] = useState<AppRoute>(() =>
+    resolveBackgroundRoute(parseSettingsLocation(window.location.pathname) !== null),
   );
+  const [settings, setSettings] = useState<SettingsLocation>(() => resolveSettingsLocation());
   const [focusModeOpen, setFocusModeOpenState] = useState(() => readFocusQuery());
 
   useEffect(() => {
     const handlePopState = () => {
-      setRoute(parseRoute(window.location.pathname) ?? { name: "today" });
+      const settingsLoc = resolveSettingsLocation();
+      setSettings(settingsLoc);
+      setRoute(resolveBackgroundRoute(settingsLoc.open));
       setFocusModeOpenState(readFocusQuery());
     };
     window.addEventListener("popstate", handlePopState);
     return () => window.removeEventListener("popstate", handlePopState);
   }, []);
 
-  const navigate = useCallback((target: NavigateTarget) => {
-    const next = coerceTarget(target);
-    if (!next) return;
-    const path = routeToPath(next);
-    // Preserve focus query across ordinary navigation only when already open.
-    const url = readFocusQuery() ? pathWithFocus(true, path, "") : path;
-    if (`${window.location.pathname}${window.location.search}` !== url) {
-      window.history.pushState(null, "", url);
-      setRoute(next);
-      setFocusModeOpenState(readFocusQuery());
-    }
+  // Direct load of a settings URL: ensure history state carries a Today background.
+  useEffect(() => {
+    const settingsLoc = parseSettingsLocation(window.location.pathname);
+    if (!settingsLoc) return;
+    if (readHistoryState()?.junbanBackground) return;
+    const background = routeToPath(todayRoute());
+    window.history.replaceState(
+      { junbanBackground: background },
+      "",
+      `${window.location.pathname}${window.location.search}`,
+    );
   }, []);
+
+  const openSettings = useCallback((tab: SettingsTabId | null = null) => {
+    const backgroundPath = parseSettingsLocation(window.location.pathname)
+      ? (readHistoryState()?.junbanBackground ?? routeToPath(todayRoute()))
+      : `${window.location.pathname}${window.location.search}` || "/";
+    // Strip query from stored background path for route parsing; focus is not restored via settings.
+    const backgroundRoutePath = backgroundPath.split("?")[0] || "/";
+    const backgroundRoute = parseRoute(backgroundRoutePath) ?? todayRoute();
+    const path = settingsToPath(tab);
+    const state: HistoryState = { junbanBackground: routeToPath(backgroundRoute) };
+    if (window.location.pathname !== path) {
+      window.history.pushState(state, "", path);
+    } else {
+      window.history.replaceState(state, "", path);
+    }
+    setRoute(backgroundRoute);
+    setSettings({ open: true, tab });
+    setFocusModeOpenState(false);
+  }, []);
+
+  const closeSettings = useCallback(() => {
+    const backgroundPath = readHistoryState()?.junbanBackground ?? routeToPath(todayRoute());
+    const backgroundRoute = parseRoute(backgroundPath) ?? todayRoute();
+    const path = routeToPath(backgroundRoute);
+    if (`${window.location.pathname}` !== path) {
+      window.history.pushState(null, "", path);
+    } else {
+      window.history.replaceState(null, "", path);
+    }
+    setRoute(backgroundRoute);
+    setSettings({ open: false });
+  }, []);
+
+  const navigateSettings = useCallback((tab: SettingsTabId | null) => {
+    const background =
+      readHistoryState()?.junbanBackground ?? routeToPath(resolveBackgroundRoute(true));
+    const path = settingsToPath(tab);
+    const state: HistoryState = { junbanBackground: background };
+    if (window.location.pathname !== path) {
+      window.history.pushState(state, "", path);
+    } else {
+      window.history.replaceState(state, "", path);
+    }
+    setSettings({ open: true, tab });
+  }, []);
+
+  const navigate = useCallback(
+    (target: NavigateTarget) => {
+      const next = coerceTarget(target);
+      if (!next) return;
+      if (next.name === "settings") {
+        openSettings(next.tab === undefined ? null : next.tab);
+        return;
+      }
+      const path = routeToPath(next);
+      const url = readFocusQuery() ? pathWithFocus(true, path, "") : path;
+      if (`${window.location.pathname}${window.location.search}` !== url) {
+        window.history.pushState(null, "", url);
+      }
+      setRoute(next);
+      setSettings({ open: false });
+      setFocusModeOpenState(readFocusQuery());
+    },
+    [openSettings],
+  );
 
   const setFocusModeOpen = useCallback((open: boolean) => {
     const url = pathWithFocus(open);
     if (`${window.location.pathname}${window.location.search}` !== url) {
-      window.history.pushState(null, "", url);
+      window.history.pushState(readHistoryState(), "", url);
     }
     setFocusModeOpenState(open);
   }, []);
 
   const view = useMemo(() => routeToView(route), [route]);
+  const settingsOpen = settings.open;
 
-  return { route, view, navigate, focusModeOpen, setFocusModeOpen };
+  return {
+    route,
+    view,
+    settings,
+    settingsOpen,
+    navigate,
+    openSettings,
+    closeSettings,
+    navigateSettings,
+    focusModeOpen,
+    setFocusModeOpen,
+  };
 }

@@ -168,6 +168,144 @@ Quick mode uses one 500-task profile, 25 recurring sources (50 affected tasks), 
 
 The 2026-07-31 authoritative rerun recorded 16.1523 MiB median / 16.5586 MiB maximum warm cgroup memory and an 18.1953 MiB maximum peak. It passed every frozen budget, including Stats p95 24.995 ms (150 ms budget) and Nudges p95 24.868 ms (100 ms budget); see the protocol for the complete result and scheduler evidence.
 
+## Phase 4 data harness (`junban-phase4-data-v1`)
+
+Protocol authority: [`../goals/rust-rewrite/evidence/phase-4-data-benchmark-protocol.md`](../goals/rust-rewrite/evidence/phase-4-data-benchmark-protocol.md).
+
+`--mode phase4` extends the same cgroup harness for streamed JSON export, complete backup, restore cutover, and post-restore warm memory. The seeder writes a deterministic profile outside the measured cgroup; the release server is the only measured process. Driver-side artifact I/O streams to/from temporary files without buffering export/backup payloads in Python.
+
+```bash
+pnpm build
+cargo build --locked --release -p junban-server
+cargo build --locked --release -p junban-storage --features scale-bench --bin junban-scale-seed
+python3 scripts/bench-hosted-server.py \
+  --mode phase4 \
+  --server target/release/junban-server \
+  --seeder target/release/junban-scale-seed \
+  --web-dir dist \
+  --output goals/rust-rewrite/evidence/phase-4-data-bench.json
+```
+
+Or use `pnpm bench:phase4 -- --output goals/rust-rewrite/evidence/phase-4-data-bench.json`.
+
+| Knob       |                                   Authoritative | Quick | Notes                                           |
+| ---------- | ----------------------------------------------: | ----: | ----------------------------------------------- |
+| samples    |                                               3 |     1 | Independent fresh profiles                      |
+| tasks      |                                          10_000 |   500 | Pre-seeded outside the cgroup                   |
+| settle     |                                            2.0s |  2.0s | Same condition-polled readiness/shutdown        |
+| operations | export JSON, backup, restore, post-restore warm |  same | Streamed HTTP; restore restarts in a new cgroup |
+| memory     |                                     24 / 32 MiB |  same | Post-restore warm current / sample peak         |
+
+Throughput and per-operation latency are recorded. Overall `budget_passed` is integrity (exact task counts, valid backup envelope, `restart_required`, cleanup) plus the frozen memory ceilings — not an invented throughput gate.
+
+The accepted three-sample 10,000-task run exported JSON at 506.48 ms p50 / 510.13 ms p95, created complete backups at 199.17 / 223.88 ms, and restored at 1,136.45 / 1,146.49 ms. Post-restore warm memory was 6.6562 MiB median / 6.8516 MiB maximum and the maximum operation peak was 25.2617 MiB, passing the frozen 24/32 MiB ceilings. See `phase-4-data-bench.json`; the retained preceding failed run and its file-cache root cause are documented in the protocol.
+
+### Quick Phase 4 smoke (not evidence)
+
+```bash
+python3 scripts/bench-hosted-server.py --mode phase4 --quick
+pnpm bench:phase4:quick
+```
+
+## Phase 5 automation harness (`junban-phase5-automation-v1`)
+
+Protocol authority: [`../goals/rust-rewrite/evidence/phase-5-automation-benchmark-protocol.md`](../goals/rust-rewrite/evidence/phase-5-automation-benchmark-protocol.md). Cross-surface state parity is measured separately by [`../scripts/check-phase5-conformance.py`](../scripts/check-phase5-conformance.py) under the frozen conformance protocol.
+
+The automation harness measures optimized `junban`, `junban-mcp`, and the owning `junban-server` in transient cgroup-v2 user services. It covers 20 one-shot local CLI reads, 10 attached CLI reads, three 50-call attached MCP sessions, and three 50-mutation local-owner MCP sessions. Every sample records wall latency, cgroup current/peak memory, process count, process-tree commands, owner-memory before/after, profile-lock release, cleanup, binary hashes, and Node-process rejection.
+
+```bash
+cargo build --locked --release -p junban-server -p junban-cli -p junban-mcp
+python3 scripts/check-phase5-conformance.py --authoritative \
+  --output goals/rust-rewrite/evidence/phase-5-conformance.json
+python3 scripts/check-phase5-automation-budget.py \
+  --output goals/rust-rewrite/evidence/phase-5-automation-owner-delta-raw.json
+```
+
+Or use `pnpm conformance:phase5` and `pnpm bench:phase5`. `--quick` is a development smoke only. Authoritative mode requires Linux cgroup v2, `systemd --user`, a clean tracked worktree, optimized binaries built from that tree, and no environment-carried operator token.
+
+The frozen ceilings are active-owner CLI p95 ≤150 ms, no-owner CLI p95 ≤350 ms, persistent MCP create/get p95 ≤100/75 ms, and attached or local-owner MCP warm current ≤24 MiB / peak ≤32 MiB. Owner post-workload growth normally stays within max(15%, 1 MiB). If a state-creating workload exceeds that relative check, the protocol permits an explicit `--accept-explained-owner-delta durable-sqlite-state-growth` only after the harness retains the raw failure, runs a matched idle-host control, proves the absolute 24/32 MiB ceilings still pass, and attributes the bounded delta to durable SQLite/file-cache growth. The raw assertion remains visible; the decision never waives an absolute ceiling.
+
+If, and only if, the raw run fails solely for that explained delta and all required predicates pass, record the explicit decision:
+
+```bash
+python3 scripts/check-phase5-automation-budget.py \
+  --accept-explained-owner-delta durable-sqlite-state-growth \
+  --output goals/rust-rewrite/evidence/phase-5-automation-bench.json
+```
+
+The accepted Phase 5 run measured 22.092 ms active-owner CLI p95, 62.535 ms no-owner CLI p95, 3.729/0.320 ms MCP create/get p95, 20.4648/20.9922 MiB attached MCP maximum warm/peak, and 21.9805/22.7227 MiB local-owner MCP maximum warm/peak.
+
+### Quick Phase 5 smoke (not evidence)
+
+```bash
+python3 scripts/check-phase5-conformance.py --quick
+python3 scripts/check-phase5-automation-budget.py --quick
+pnpm bench:phase5:quick
+```
+
+## Phase 6 schema-v6 conformance rerun (`junban-phase6-conformance-v1`)
+
+Protocol authority: [`../goals/rust-rewrite/evidence/phase-6-conformance-protocol.md`](../goals/rust-rewrite/evidence/phase-6-conformance-protocol.md). This is the same frozen 17-revision Phase 5 corpus and four-surface comparison, rerun against current optimized binaries with schema version 6 as the explicit head authority. It does not regenerate or weaken `phase-5-conformance.json`.
+
+```bash
+cargo build --locked --release -p junban-server -p junban-cli -p junban-mcp
+python3 scripts/check-phase5-conformance.py --phase6 --authoritative \
+  --output goals/rust-rewrite/evidence/phase-6-conformance.json
+```
+
+Or use `pnpm conformance:phase6`. Authoritative mode requires a clean tracked worktree and optimized binaries built from that tree. Runtime Node remains forbidden.
+
+## Phase 6 disabled matched parent/head release
+
+Protocol authority: [`../goals/rust-rewrite/evidence/phase-6-disabled-matched-release-protocol.md`](../goals/rust-rewrite/evidence/phase-6-disabled-matched-release-protocol.md).
+
+Harness: [`../scripts/check-phase6-disabled-matched-release.py`](../scripts/check-phase6-disabled-matched-release.py). Builds or accepts optimized Phase 5 parent-base (`351c842`) and exact-head `junban-server` plus matching `dist/` trees, then runs five interleaved Phase 1 health/UI/idle samples per side in cgroup-v2 user units.
+
+```bash
+python3 scripts/check-phase6-disabled-matched-release.py --self-check
+python3 scripts/check-phase6-disabled-matched-release.py --build \
+  --output goals/rust-rewrite/evidence/phase-6-disabled-matched-release.json
+pnpm bench:phase6-disabled-matched:quick
+```
+
+Acceptance requires head maximum warm ≤24 MiB, head maximum peak ≤32 MiB, head median warm growth versus parent ≤ max(15%, 1 MiB), zero resident Node, and a disabled initial-UI/Phase 1 request proof with no AI/provider/model/media paths. Authoritative status also requires an idle host and a clean worktree. Contended-host numbers may be retained as preliminary only. In-process zero AI client construction is **not** claimed by this external harness; see the protocol’s separate claim section.
+
+Retained JSON/narrative: [`../goals/rust-rewrite/evidence/phase-6-disabled-matched-release.json`](../goals/rust-rewrite/evidence/phase-6-disabled-matched-release.json), [`../goals/rust-rewrite/evidence/phase-6-disabled-matched-release.md`](../goals/rust-rewrite/evidence/phase-6-disabled-matched-release.md).
+
+## Phase 6 enabled local-mock release evidence (`junban-phase6-enabled-local-mock-v1`)
+
+Protocol authority: [`../goals/rust-rewrite/evidence/phase-6-enabled-benchmark-protocol.md`](../goals/rust-rewrite/evidence/phase-6-enabled-benchmark-protocol.md). Measures the exact optimized `junban-server` against a standalone OpenAI-compatible TLS fixture outside the server cgroup. The production `api.openai.com` origin is preserved via an ephemeral CA (`SSL_CERT_FILE`) and a benchmark-only `LD_PRELOAD` resolver/connect shim; no privileged bind, system trust, `/etc/hosts`, proxy, or shipped binary change is used. Authoritative acceptance requires an idle host and is not claimed from contended preliminary runs.
+
+```bash
+python3 scripts/check-phase6-enabled-benchmark.py --self-check
+cargo build --locked --release -p junban-server
+pnpm build
+python3 scripts/check-phase6-enabled-benchmark.py \
+  --build \
+  --authoritative \
+  --idle-host-confirmed \
+  --output goals/rust-rewrite/evidence/phase-6-enabled-bench.json
+```
+
+Or use `pnpm bench:phase6-enabled:self-check` for the interception preflight. Do not retain contended-host result JSON as accepted evidence.
+
+## Phase 7 SDK matched release (`junban-phase7-sdk-matched-release-v1`)
+
+Protocol authority: [`../goals/rust-rewrite/evidence/phase-7-sdk-matched-release-protocol.md`](../goals/rust-rewrite/evidence/phase-7-sdk-matched-release-protocol.md). Harness: [`../scripts/check-phase7-sdk-matched-release.py`](../scripts/check-phase7-sdk-matched-release.py).
+
+The harness builds optimized `junban-server` binaries into separate default and `--no-default-features` target roots, proves the SDK marker exists only in default and Wasmtime exists in neither Cargo tree/binary, then runs five interleaved copies of the exact frozen Phase 1 workload through `bench-hosted-server.py`. It records current/peak cgroup memory, RSS/PSS, one-process tree, binary size/hash, startup, latency, cleanup, and host cleanliness.
+
+```bash
+python3 scripts/check-phase7-sdk-matched-release.py --self-check
+pnpm build # creates dist/ before host cleanliness sampling
+# Preliminary smoke only:
+python3 scripts/check-phase7-sdk-matched-release.py --quick --output /tmp/phase7-sdk-quick.json
+# Clean parent-run candidate only:
+python3 scripts/check-phase7-sdk-matched-release.py --idle-host-confirmed
+```
+
+The default build must remain within 24/32 MiB warm/peak, within `max(15%, 1 MiB)` median warm growth versus feature-off, and within 1.255665 MiB of the frozen Phase 6 8.3711-MiB median. No authoritative report is claimed by the SDK implementation worktree; Wave 1 remains blocked on the clean parent-run report and package security review.
+
 ## Measurement rules
 
 - Optimized release binaries are authoritative. Development servers are not.
@@ -178,7 +316,7 @@ The 2026-07-31 authoritative rerun recorded 16.1523 MiB median / 16.5586 MiB max
 ## Default-path discipline
 
 - Do not initialize AI provider clients, local voice engines, or Wasmtime during ordinary task-server startup.
-- Plugin runtime stays unloaded when no plugin is active.
+- Plugin runtime stays unloaded when no plugin is active. Ordinary `junban-server` must not link Wasmtime; the accepted Wave 0 child-process placement evidence/ADR lives under `goals/rust-rewrite/evidence/phase-7-host-placement*`, and the superseded probe crate is deleted.
 - Avoid eager dependency aggregation that quietly reintroduces idle cost.
 
 ## Phase expectations

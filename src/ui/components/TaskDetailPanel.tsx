@@ -32,6 +32,7 @@ import {
   History,
   Pencil,
   Check,
+  Bot,
 } from "lucide-react";
 import type { TaskDto, TagDto, CommentDto, TaskActivityDto, RelationDto } from "../api/client";
 import {
@@ -85,6 +86,11 @@ interface TaskDetailPanelProps {
   returnFocusTo?: HTMLElement | null;
   /** Enter Focus Mode for this task (`?focus=1`). */
   onEnterFocusMode?: (taskId: string) => void;
+  /**
+   * Launch AI chat focused on this task.
+   * Callback-only seam — does not import routing or AI modules.
+   */
+  onAskAi?: (taskId: string) => void;
   /** Preserve the pinned legacy presentation only for the explicit Phase 3 visual fixture. */
   phase3VisualFixture?: boolean;
 }
@@ -95,9 +101,12 @@ export function TaskDetailPanel({
   onOpenFullPage,
   returnFocusTo,
   onEnterFocusMode,
+  onAskAi,
   phase3VisualFixture = false,
 }: TaskDetailPanelProps) {
-  const { catalog, mutationPhase, mutationError, revision } = useWorkspace();
+  const { catalog, mutationPhase, mutationError, revision, settings } = useWorkspace();
+  const confirmBeforeDelete = settings?.task_defaults.confirm_before_delete ?? true;
+  const focusModeEnabled = settings?.features.focus_mode_enabled ?? false;
   const {
     patchTask,
     deleteTask,
@@ -746,7 +755,7 @@ export function TaskDetailPanel({
               {section && <span className="text-on-surface-muted">/ {section.name}</span>}
             </span>
             <div className="ml-auto flex shrink-0 items-center gap-0.5">
-              {onEnterFocusMode && committed.status === "pending" && (
+              {focusModeEnabled && onEnterFocusMode && committed.status === "pending" && (
                 <button
                   type="button"
                   onClick={() => onEnterFocusMode(committed.id)}
@@ -755,6 +764,17 @@ export function TaskDetailPanel({
                 >
                   <Focus size={14} aria-hidden="true" />
                   Focus
+                </button>
+              )}
+              {onAskAi && (
+                <button
+                  type="button"
+                  onClick={() => onAskAi(committed.id)}
+                  aria-label="Ask AI"
+                  title="Ask AI"
+                  className="min-h-7 min-w-7 rounded-md p-1.5 text-on-surface-muted transition-colors hover:bg-surface-tertiary hover:text-on-surface"
+                >
+                  <Bot size={16} aria-hidden="true" />
                 </button>
               )}
               <button
@@ -1973,7 +1993,10 @@ export function TaskDetailPanel({
                 <div className="order-6 rounded-2xl border border-error/20 bg-error/5 px-4 py-3 shadow-[0_8px_24px_-22px_rgba(0,0,0,0.4)]">
                   <button
                     type="button"
-                    onClick={() => setConfirmDelete(true)}
+                    onClick={() => {
+                      if (confirmBeforeDelete) setConfirmDelete(true);
+                      else void handleDeleteConfirmed();
+                    }}
                     disabled={pending}
                     aria-label="Delete task"
                     className="flex w-full items-center gap-2 rounded-xl px-1 py-1 text-sm text-error transition-colors hover:text-error/80 disabled:opacity-50"

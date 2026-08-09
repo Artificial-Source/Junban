@@ -31,6 +31,7 @@ const replaceTimeSlotTasks = vi.fn();
 const appendTimeSlotTask = vi.fn();
 const removeTimeSlotTask = vi.fn();
 const runMutation = vi.fn();
+let configuredWorkHours: { start_minute: number; end_minute: number } | null = null;
 
 vi.mock("../api/client", async () => {
   const actual = await vi.importActual<typeof import("../api/client")>("../api/client");
@@ -95,6 +96,7 @@ vi.mock("../context/WorkspaceContext", () => ({
     registerTaskEventHandler: () => () => {},
     registerTaskResyncHandler: () => () => {},
     runMutation,
+    settings: { planning: { work_hours: configuredWorkHours } },
     revision: 1,
   }),
 }));
@@ -164,7 +166,7 @@ function mutationResponse(): MutationResponse {
       revision: 2,
       occurred_at: "2026-07-23T12:00:00Z",
       affected: {},
-      resync: { catalog: false, tasks: false },
+      resync: { catalog: false, tasks: false, settings: false },
     },
   };
 }
@@ -234,6 +236,7 @@ beforeEach(() => {
   container = document.createElement("div");
   document.body.appendChild(container);
   root = createRoot(container);
+  configuredWorkHours = null;
 
   listTimeBlocks.mockReset();
   listTimeSlots.mockReset();
@@ -653,6 +656,17 @@ describe("Timeblocking view", () => {
       { task_ids: ["task-1", "task-2"] },
       "op-test",
     );
+  });
+
+  it("uses confirmed planning work hours for the timeline bounds", async () => {
+    configuredWorkHours = { start_minute: 10 * 60, end_minute: 16 * 60 };
+    render(createElement(Timeblocking, {}));
+    await flush();
+
+    expect(container.textContent).toContain("10 AM");
+    expect(container.textContent).toContain("3 PM");
+    expect(container.textContent).not.toContain("9 AM");
+    expect(container.textContent).not.toContain("4 PM");
   });
 
   it("exposes keyboard-equivalent selection controls for move/resize/delete", async () => {

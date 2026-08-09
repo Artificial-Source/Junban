@@ -65,7 +65,7 @@ describe("OpenAPI TypeScript contract surface", () => {
       event_type: "task.created",
       occurred_at: "2026-07-28T00:00:00Z",
       affected: {},
-      resync: { tasks: false, catalog: false },
+      resync: { tasks: false, catalog: false, settings: false },
     };
 
     expect(createProbe).not.toHaveProperty("id");

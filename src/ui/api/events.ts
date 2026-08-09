@@ -39,6 +39,7 @@ export const KNOWN_EVENT_TYPES = new Set<string>([
   "relation.added",
   "relation.removed",
   "operation.undone",
+  "settings.updated",
   "sync.resync_required",
 ]);
 
@@ -71,7 +72,11 @@ export function isCommittedEvent(data: unknown): data is CommittedEventDto {
     return false;
   }
   const resync = event.resync as Record<string, unknown>;
-  return typeof resync.tasks === "boolean" && typeof resync.catalog === "boolean";
+  return (
+    typeof resync.tasks === "boolean" &&
+    typeof resync.catalog === "boolean" &&
+    (resync.settings === undefined || typeof resync.settings === "boolean")
+  );
 }
 
 export function taskSnapshotFrom(snapshot: ResourceSnapshotDto | null | undefined): TaskDto | null {

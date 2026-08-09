@@ -18,12 +18,54 @@ const getCatalog = vi.fn(async (): Promise<CatalogResponse> => ({
   saved_filters: [],
   revision: 1,
 }));
+const getSettings = vi.fn(async () => ({
+  appearance: {
+    theme: "dark" as const,
+    accent: "#3b82f6",
+    density: "comfortable" as const,
+    font_size: "medium" as const,
+    font_family: "outfit" as const,
+    reduced_motion: false,
+  },
+  date_time: {
+    week_start: "sunday" as const,
+    calendar_default: "week" as const,
+    date_format: "iso" as const,
+    time_format: "h24" as const,
+  },
+  task_defaults: {
+    default_priority: null,
+    default_view: "today" as const,
+    default_estimated_minutes: null,
+    confirm_before_delete: true,
+  },
+  notifications: {
+    channels: ["in_app" as const],
+    sound_enabled: true,
+    volume_percent: 70,
+    task_completed_sound: true,
+    task_created_sound: true,
+    task_deleted_sound: true,
+    reminder_sound: true,
+  },
+  features: {
+    nudges_enabled: true,
+    eat_the_frog_enabled: false,
+    task_jar_enabled: false,
+    focus_mode_enabled: true,
+    daily_planning_enabled: true,
+    weekly_review_enabled: true,
+  },
+  planning: { capacity_minutes: 480, work_hours: null, nudge_rules: [] },
+  keyboard_shortcuts: [],
+}));
 const hasStoredToken = vi.fn(() => true);
 vi.mock("../api/client", async () => {
   const actual = await vi.importActual<typeof import("../api/client")>("../api/client");
   return {
     ...actual,
     getCatalog: () => getCatalog(),
+    getSettings: () => getSettings(),
     hasStoredToken: () => hasStoredToken(),
     subscribeToEvents: () => () => {},
   };
@@ -53,7 +95,7 @@ function mutationWithTask(task: TaskDto, revision = 2): MutationResponse {
       event_type: "task.created",
       occurred_at: "2026-07-23T10:00:00Z",
       affected: { task_ids: [task.id] },
-      resync: { tasks: false, catalog: false },
+      resync: { tasks: false, catalog: false, settings: false },
       snapshot: { resource_type: "task", task },
       primary: { resource_type: "task", id: task.id },
     },
@@ -68,6 +110,7 @@ beforeEach(() => {
   document.body.appendChild(container);
   root = createRoot(container);
   getCatalog.mockClear();
+  getSettings.mockClear();
   hasStoredToken.mockReturnValue(true);
 });
 

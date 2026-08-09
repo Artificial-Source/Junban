@@ -1,0 +1,42 @@
+[package]
+name = "junban-cli"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+rust-version.workspace = true
+repository.workspace = true
+description = "Native Junban command-line client"
+publish = false
+
+[[bin]]
+name = "junban"
+path = "src/main.rs"
+
+[dependencies]
+clap = { workspace = true, features = ["derive", "error-context", "help", "std", "usage"] }
+futures-util = { version = "0.3.31", default-features = false, features = ["std"] }
+jiff = { workspace = true }
+junban-server = { path = "../junban-server", version = "0.1.0" }
+junban-storage = { path = "../junban-storage", version = "0.1.0" }
+reqwest = { version = "0.12.28", default-features = false, features = [
+  "json",
+  "rustls-tls-native-roots",
+  "stream",
+] }
+serde = { workspace = true }
+serde_json = { workspace = true }
+thiserror = { workspace = true }
+tokio = { workspace = true, features = ["fs", "io-util", "macros", "rt-multi-thread", "signal", "sync", "time"] }
+url = { version = "2.5.8", default-features = false }
+uuid = { workspace = true }
+
+[target.'cfg(windows)'.dependencies]
+windows-sys = { workspace = true, features = ["Win32_Foundation", "Win32_Security", "Win32_Security_Authorization", "Win32_Storage_FileSystem"] }
+
+[dev-dependencies]
+reqwest = { version = "0.12.28", default-features = false, features = ["json", "rustls-tls-native-roots"] }
+tokio = { workspace = true, features = ["macros", "rt-multi-thread", "sync", "time"] }
+uuid = { workspace = true }
+
+[lints]
+workspace = true

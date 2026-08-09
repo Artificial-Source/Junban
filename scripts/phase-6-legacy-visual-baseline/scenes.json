@@ -1,0 +1,148 @@
+[
+  {
+    "id": "ai-not-configured-panel-desktop-light",
+    "file": "ai-not-configured-panel-desktop-light.png",
+    "theme": "light",
+    "width": 320,
+    "height": 720,
+    "componentAuthority": "src/ui/components/chat/AIChatNotConfigured.tsx",
+    "testAuthority": "tests/ui/components/AIChatPanel.test.tsx"
+  },
+  {
+    "id": "ai-welcome-briefing-desktop-light",
+    "file": "ai-welcome-briefing-desktop-light.png",
+    "theme": "light",
+    "width": 1440,
+    "height": 900,
+    "componentAuthority": "src/ui/components/chat/WelcomeScreen.tsx",
+    "testAuthority": "tests/ui/components/AIChatPanel.test.tsx"
+  },
+  {
+    "id": "ai-conversation-tools-desktop-light",
+    "file": "ai-conversation-tools-desktop-light.png",
+    "theme": "light",
+    "width": 1440,
+    "height": 900,
+    "componentAuthority": "src/ui/components/chat/MessageBubble.tsx + ChatToolResultCard.tsx + ToolCallBadge.tsx",
+    "testAuthority": "tests/ui/components/chat/MessageBubble.test.tsx + ChatToolResultCard.test.tsx"
+  },
+  {
+    "id": "ai-chat-history-desktop-light",
+    "file": "ai-chat-history-desktop-light.png",
+    "theme": "light",
+    "width": 1440,
+    "height": 900,
+    "componentAuthority": "src/ui/components/chat/ChatHistory.tsx",
+    "testAuthority": "tests/ui/components/chat/ChatHistory.test.tsx"
+  },
+  {
+    "id": "ai-mobile-view-nav-light",
+    "file": "ai-mobile-view-nav-light.png",
+    "theme": "light",
+    "width": 390,
+    "height": 844,
+    "componentAuthority": "src/ui/components/chat/AIChatNotConfigured.tsx + BottomNavBar.tsx",
+    "testAuthority": "tests/ui/BottomNavBar.test.tsx + AIChatPanel.test.tsx"
+  },
+  {
+    "id": "settings-ai-unconfigured-desktop-light",
+    "file": "settings-ai-unconfigured-desktop-light.png",
+    "theme": "light",
+    "width": 1280,
+    "height": 900,
+    "componentAuthority": "src/ui/views/settings/AITab.tsx",
+    "testAuthority": "tests/ui/settings/AITab.test.tsx"
+  },
+  {
+    "id": "settings-ai-configured-masked-desktop-light",
+    "file": "settings-ai-configured-masked-desktop-light.png",
+    "theme": "light",
+    "width": 1280,
+    "height": 900,
+    "componentAuthority": "src/ui/views/settings/AITab.tsx",
+    "testAuthority": "tests/ui/settings/AITab.test.tsx"
+  },
+  {
+    "id": "settings-voice-defaults-desktop-light",
+    "file": "settings-voice-defaults-desktop-light.png",
+    "theme": "light",
+    "width": 1280,
+    "height": 900,
+    "componentAuthority": "src/ui/views/settings/VoiceTab.tsx",
+    "testAuthority": "tests/ui/settings/VoiceTab.test.tsx"
+  },
+  {
+    "id": "settings-voice-cloud-desktop-dark",
+    "file": "settings-voice-cloud-desktop-dark.png",
+    "theme": "dark",
+    "width": 1280,
+    "height": 900,
+    "componentAuthority": "src/ui/views/settings/VoiceTab.tsx + voice/ProviderApiKeyInput.tsx",
+    "testAuthority": "tests/ui/settings/VoiceTab.test.tsx"
+  },
+  {
+    "id": "ptt-listening-desktop-light",
+    "file": "ptt-listening-desktop-light.png",
+    "theme": "light",
+    "width": 480,
+    "height": 320,
+    "componentAuthority": "src/ui/components/chat/VoiceButton.tsx",
+    "testAuthority": "tests/ui/components/chat/VoiceButton.test.tsx",
+    "pttClick": true
+  },
+  {
+    "id": "ptt-transcribing-desktop-light",
+    "file": "ptt-transcribing-desktop-light.png",
+    "theme": "light",
+    "width": 480,
+    "height": 320,
+    "componentAuthority": "src/ui/components/chat/VoiceButton.tsx",
+    "testAuthority": "tests/ui/components/chat/VoiceButton.test.tsx"
+  },
+  {
+    "id": "ptt-error-desktop-light",
+    "file": "ptt-error-desktop-light.png",
+    "theme": "light",
+    "width": 480,
+    "height": 320,
+    "componentAuthority": "src/ui/components/chat/VoiceButton.tsx",
+    "testAuthority": "tests/ui/components/chat/VoiceButton.test.tsx",
+    "pttClick": true
+  },
+  {
+    "id": "vad-grace-desktop-light",
+    "file": "vad-grace-desktop-light.png",
+    "theme": "light",
+    "width": 480,
+    "height": 420,
+    "componentAuthority": "src/ui/components/VoiceCallOverlay.tsx (+ useVAD grace props)",
+    "testAuthority": "tests/ui/components/AIChatPanel.test.tsx"
+  },
+  {
+    "id": "voice-call-states-desktop-light",
+    "file": "voice-call-states-desktop-light.png",
+    "theme": "light",
+    "width": 1280,
+    "height": 900,
+    "componentAuthority": "src/ui/components/VoiceCallOverlay.tsx",
+    "testAuthority": "tests/ui/components/AIChatPanel.test.tsx"
+  },
+  {
+    "id": "focused-task-launch-desktop-light",
+    "file": "focused-task-launch-desktop-light.png",
+    "theme": "light",
+    "width": 1440,
+    "height": 900,
+    "componentAuthority": "src/ui/views/AIChat.tsx + AIChatPanel focusedTaskId wiring",
+    "testAuthority": "tests/ui/components/AIChatPanel.test.tsx"
+  },
+  {
+    "id": "onboarding-step-ai-desktop-light",
+    "file": "onboarding-step-ai-desktop-light.png",
+    "theme": "light",
+    "width": 720,
+    "height": 720,
+    "componentAuthority": "src/ui/components/onboarding/StepAI.tsx",
+    "testAuthority": "tests/ui/components/OnboardingModal.test.tsx"
+  }
+]

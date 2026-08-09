@@ -9,8 +9,10 @@ import { subscribeToEvents, hasStoredToken, type CommittedEventDto } from "../ap
 export interface SseFanOut {
   onTaskEvent: (event: CommittedEventDto) => void;
   onCatalogEvent: (event: CommittedEventDto) => void;
-  onTaskResync: () => void;
-  onCatalogResync: () => void;
+  onSettingsEvent?: (event: CommittedEventDto) => void;
+  onTaskResync: () => void | Promise<void>;
+  onCatalogResync: () => void | Promise<void>;
+  onSettingsResync?: () => void | Promise<void>;
   onReconnect: () => void;
   onTerminalError: (message: string) => void;
 }
@@ -31,6 +33,7 @@ export function useSseSubscription(
         const event = sseEvent.data;
         fanOutRef.current.onTaskEvent(event);
         fanOutRef.current.onCatalogEvent(event);
+        fanOutRef.current.onSettingsEvent?.(event);
       },
       () => {
         fanOutRef.current.onReconnect();
@@ -39,9 +42,12 @@ export function useSseSubscription(
         fanOutRef.current.onTerminalError(error.message);
       },
       initialRevision,
-      (scope, _reason) => {
-        if (scope.tasks) fanOutRef.current.onTaskResync();
-        if (scope.catalog) fanOutRef.current.onCatalogResync();
+      async (scope, _reason) => {
+        await Promise.all([
+          scope.tasks ? fanOutRef.current.onTaskResync() : undefined,
+          scope.catalog ? fanOutRef.current.onCatalogResync() : undefined,
+          scope.settings ? fanOutRef.current.onSettingsResync?.() : undefined,
+        ]);
       },
     );
 

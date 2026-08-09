@@ -7,6 +7,7 @@ import { CheckCircle2 } from "lucide-react";
 import { EmptyState } from "../components/Skeleton";
 import { useViewTasks } from "../hooks/useViewTasks";
 import { useWorkspace } from "../context/WorkspaceContext";
+import { formatTimestampTime } from "../lib/dates";
 import { groupCompletedHistory, historyTimestamp } from "./completedHistory";
 
 interface CompletedProps {
@@ -19,7 +20,7 @@ function formatGroupDate(dateStr: string): string {
 }
 
 function formatTime(isoStr: string): string {
-  return new Date(isoStr).toLocaleTimeString(undefined, { hour: "numeric", minute: "2-digit" });
+  return formatTimestampTime(isoStr);
 }
 
 export function Completed({ onSelectTask }: CompletedProps) {

@@ -5,7 +5,10 @@ use std::{
     fs::{self, File},
     path::{Path, PathBuf},
     process::{Command, Stdio},
-    sync::{Arc, Mutex, atomic::AtomicBool},
+    sync::{
+        Arc, Mutex,
+        atomic::{AtomicBool, AtomicU64},
+    },
     time::Duration,
 };
 
@@ -16,11 +19,16 @@ use junban_app::{
 use junban_plugin_sdk::{
     Capability, CommandDeclaration, Dependency, Permission, PermissionScope, Publisher,
     RuntimeManifest, RuntimeProfile, ServiceConsumeScope, ServiceDeclaration, ServiceReference,
-    WitAuthority, canonical_permission_hash,
+    UnscopedPermission, WitAuthority, canonical_permission_hash, permission_set_hash,
     private_body_types::{CommandCall, PluginOutcome, WitResult},
+    scope_hash,
 };
+use junban_storage::ProfileOwner;
+use rusqlite::{Connection, params};
 use serde_json::{Value, json};
 use tokio::sync::Semaphore;
+
+use crate::{BroadcastEventSink, reminder_wake::ReminderWakeHub};
 
 use super::*;
 use crate::plugin_host_process::ProcessDeadlines;
@@ -188,6 +196,7 @@ struct MockService {
     root: PathBuf,
     state: Arc<Mutex<MockState>>,
     fence_events: Arc<Semaphore>,
+    reservation_events: Arc<Semaphore>,
     completion_events: Arc<Semaphore>,
     failure_events: Arc<Semaphore>,
 }
@@ -216,6 +225,7 @@ impl MockService {
                 fence_saw_reaped: Vec::new(),
             })),
             fence_events: Arc::new(Semaphore::new(0)),
+            reservation_events: Arc::new(Semaphore::new(0)),
             completion_events: Arc::new(Semaphore::new(0)),
             failure_events: Arc::new(Semaphore::new(0)),
         })
@@ -244,6 +254,14 @@ impl MockService {
             .await
             .expect("fence deadline")
             .expect("fence semaphore")
+            .forget();
+    }
+
+    async fn wait_reservation(&self) {
+        tokio::time::timeout(Duration::from_secs(3), self.reservation_events.acquire())
+            .await
+            .expect("reservation deadline")
+            .expect("reservation semaphore")
             .forget();
     }
 
@@ -442,6 +460,7 @@ impl RuntimeServicePort for MockService {
             state.counts.reservations += 1;
             state.reserve_gate.clone()
         };
+        self.reservation_events.add_permits(1);
         Box::pin(async move {
             if let Some(gate) = gate {
                 gate.acquire()
@@ -480,9 +499,9 @@ impl RuntimeServicePort for MockService {
             state.counts.completions += 1;
             state.fail_completion
         };
-        self.completion_events.add_permits(1);
+        let completion_events = Arc::clone(&self.completion_events);
         Box::pin(async move {
-            if fail {
+            let result = if fail {
                 Err(AppError::Conflict)
             } else {
                 Ok(CommittedPluginInvocation {
@@ -491,7 +510,9 @@ impl RuntimeServicePort for MockService {
                     cursor: None,
                     replayed: false,
                 })
-            }
+            };
+            completion_events.add_permits(1);
+            result
         })
     }
 
@@ -501,22 +522,28 @@ impl RuntimeServicePort for MockService {
         request: RecordPluginAttemptFailureRequest,
         _now: Timestamp,
     ) -> ServiceFuture<()> {
-        {
-            let mut state = self.lock();
-            state.counts.failures += 1;
-            state.failure_requests.push(request.clone());
-            if let Some(plugin) = state
-                .profile
-                .plugins
-                .iter_mut()
-                .find(|plugin| plugin.plugin_id == request.plugin_id)
+        let state = Arc::clone(&self.state);
+        let failure_events = Arc::clone(&self.failure_events);
+        Box::pin(async move {
             {
-                plugin.runtime_state = PluginRuntimeState::Degraded;
-                plugin.failure_count += 1;
+                let mut state = state
+                    .lock()
+                    .unwrap_or_else(std::sync::PoisonError::into_inner);
+                state.counts.failures += 1;
+                state.failure_requests.push(request.clone());
+                if let Some(plugin) = state
+                    .profile
+                    .plugins
+                    .iter_mut()
+                    .find(|plugin| plugin.plugin_id == request.plugin_id)
+                {
+                    plugin.runtime_state = PluginRuntimeState::Degraded;
+                    plugin.failure_count += 1;
+                }
             }
-        }
-        self.failure_events.add_permits(1);
-        Box::pin(async { Ok(()) })
+            failure_events.add_permits(1);
+            Ok(())
+        })
     }
 
     fn fence_graph(&self, request: PluginGraphFenceRequest, _now: Timestamp) -> ServiceFuture<()> {
@@ -545,6 +572,11 @@ impl RuntimeServicePort for MockService {
                     };
                     if plugin.package_generation != entry.package_generation
                         || plugin.activation_epoch != entry.activation_epoch
+                        || !plugin.desired_enabled
+                        || !matches!(
+                            plugin.runtime_state,
+                            PluginRuntimeState::Starting | PluginRuntimeState::Active
+                        )
                     {
                         return Box::pin(async { Err(AppError::Conflict) });
                     }
@@ -558,6 +590,304 @@ impl RuntimeServicePort for MockService {
         self.fence_events.add_permits(1);
         Box::pin(async move { result })
     }
+}
+
+struct SqliteRuntimeService {
+    service: AppService,
+    source_root: PathBuf,
+    source_counter: Arc<AtomicU64>,
+    completion_gate: Arc<Semaphore>,
+    completion_started: Arc<Semaphore>,
+    completion_committed: Arc<Semaphore>,
+    failure_started: Arc<Semaphore>,
+    failure_committed: Arc<Semaphore>,
+    fence_committed: Arc<Semaphore>,
+    durable_order: Arc<Mutex<Vec<&'static str>>>,
+    fence_requests: Arc<Mutex<Vec<PluginGraphFenceRequest>>>,
+}
+
+impl SqliteRuntimeService {
+    fn new(service: AppService, source_root: PathBuf) -> Arc<Self> {
+        fs::create_dir_all(&source_root).expect("SQLite source fixture root");
+        Arc::new(Self {
+            service,
+            source_root,
+            source_counter: Arc::new(AtomicU64::new(0)),
+            completion_gate: Arc::new(Semaphore::new(0)),
+            completion_started: Arc::new(Semaphore::new(0)),
+            completion_committed: Arc::new(Semaphore::new(0)),
+            failure_started: Arc::new(Semaphore::new(0)),
+            failure_committed: Arc::new(Semaphore::new(0)),
+            fence_committed: Arc::new(Semaphore::new(0)),
+            durable_order: Arc::new(Mutex::new(Vec::new())),
+            fence_requests: Arc::new(Mutex::new(Vec::new())),
+        })
+    }
+
+    async fn wait(semaphore: &Semaphore, label: &str) {
+        tokio::time::timeout(Duration::from_secs(3), semaphore.acquire())
+            .await
+            .unwrap_or_else(|_| panic!("{label} deadline"))
+            .unwrap_or_else(|_| panic!("{label} semaphore"))
+            .forget();
+    }
+}
+
+impl RuntimeServicePort for SqliteRuntimeService {
+    fn profile(&self) -> ServiceFuture<InstalledPluginProfile> {
+        let service = self.service.clone();
+        Box::pin(async move { service.get_installed_plugin_profile().await })
+    }
+
+    fn open_sources(
+        &self,
+        selected: Vec<PluginComponentSelection>,
+    ) -> ServiceFuture<Vec<OpenedPluginComponentSource>> {
+        let service = self.service.clone();
+        let root = self.source_root.clone();
+        let counter = Arc::clone(&self.source_counter);
+        Box::pin(async move {
+            let profile = service.get_installed_plugin_profile().await?;
+            let mut opened = Vec::with_capacity(selected.len());
+            for selection in selected {
+                let plugin = profile
+                    .plugins
+                    .iter()
+                    .find(|plugin| {
+                        plugin.plugin_id == selection.plugin_id
+                            && plugin.package_generation == selection.package_generation
+                            && plugin.activation_epoch == selection.activation_epoch
+                    })
+                    .ok_or(AppError::Conflict)?;
+                let index = counter.fetch_add(1, Ordering::Relaxed);
+                let path = root.join(format!("source-{index}.bin"));
+                let component = [u8::try_from(plugin.package_generation).unwrap_or(1)];
+                fs::write(&path, [0_u8, component[0]]).map_err(|_| AppError::Storage)?;
+                let file = File::open(path).map_err(|_| AppError::Storage)?;
+                let grants = plugin.manifest.permissions.clone();
+                let permission_hash =
+                    canonical_permission_hash(&grants).ok_or(AppError::Storage)?;
+                opened.push(
+                    OpenedPluginComponentSource::from_verified_package_file(
+                        file,
+                        plugin.plugin_id.clone(),
+                        plugin.package_generation,
+                        plugin.activation_epoch,
+                        1,
+                        1,
+                        Sha256Digest::of(&component),
+                        plugin.manifest.runtime_profile,
+                        Sha256Digest::parse("2".repeat(64)).map_err(|_| AppError::Storage)?,
+                        Sha256Digest::parse(permission_hash).map_err(|_| AppError::Storage)?,
+                        grants,
+                    )
+                    .map_err(|_| AppError::Storage)?,
+                );
+            }
+            Ok(opened)
+        })
+    }
+
+    fn reconcile_packages(&self, now: Timestamp) -> ServiceFuture<PluginPackageReconciliation> {
+        let service = self.service.clone();
+        Box::pin(async move { service.reconcile_plugin_packages(now).await })
+    }
+
+    fn retry_due(
+        &self,
+        operation_id: OperationId,
+        request: DuePluginRetryRequest,
+        now: Timestamp,
+    ) -> ServiceFuture<()> {
+        let service = self.service.clone();
+        Box::pin(async move {
+            service.retry_due_plugin(operation_id, request, now).await?;
+            Ok(())
+        })
+    }
+
+    fn complete_activation(
+        &self,
+        operation_id: OperationId,
+        request: CompletePluginActivationRequest,
+        now: Timestamp,
+    ) -> ServiceFuture<()> {
+        let service = self.service.clone();
+        Box::pin(async move {
+            service
+                .complete_plugin_activation(operation_id, request, now)
+                .await?;
+            Ok(())
+        })
+    }
+
+    fn cursor(&self, plugin_id: PluginId) -> ServiceFuture<PluginEventCursor> {
+        let service = self.service.clone();
+        Box::pin(async move { service.get_plugin_cursor(plugin_id).await })
+    }
+
+    fn reserve_invocation(
+        &self,
+        request: ReservePluginInvocationRequest,
+        now: Timestamp,
+    ) -> ServiceFuture<ReservedPluginInvocation> {
+        let service = self.service.clone();
+        Box::pin(async move { service.reserve_plugin_invocation(request, now).await })
+    }
+
+    fn complete_invocation(
+        &self,
+        operation_id: OperationId,
+        plugin_id: PluginId,
+        package_generation: u64,
+        activation_epoch: u64,
+        now: Timestamp,
+    ) -> ServiceFuture<CommittedPluginInvocation> {
+        let service = self.service.clone();
+        let gate = Arc::clone(&self.completion_gate);
+        let started = Arc::clone(&self.completion_started);
+        let committed = Arc::clone(&self.completion_committed);
+        let order = Arc::clone(&self.durable_order);
+        Box::pin(async move {
+            started.add_permits(1);
+            gate.acquire()
+                .await
+                .map_err(|_| AppError::Storage)?
+                .forget();
+            let result = service
+                .complete_plugin_invocation(
+                    operation_id,
+                    plugin_id,
+                    package_generation,
+                    activation_epoch,
+                    now,
+                )
+                .await;
+            if result.is_ok() {
+                order.lock().unwrap().push("complete");
+                committed.add_permits(1);
+            }
+            result
+        })
+    }
+
+    fn record_failure(
+        &self,
+        operation_id: OperationId,
+        request: RecordPluginAttemptFailureRequest,
+        now: Timestamp,
+    ) -> ServiceFuture<()> {
+        let service = self.service.clone();
+        let started = Arc::clone(&self.failure_started);
+        let committed = Arc::clone(&self.failure_committed);
+        let order = Arc::clone(&self.durable_order);
+        Box::pin(async move {
+            started.add_permits(1);
+            let result = service
+                .record_plugin_attempt_failure(operation_id, request, now)
+                .await;
+            if result.is_ok() {
+                order.lock().unwrap().push("failure");
+                committed.add_permits(1);
+            }
+            result.map(|_| ())
+        })
+    }
+
+    fn fence_graph(&self, request: PluginGraphFenceRequest, now: Timestamp) -> ServiceFuture<()> {
+        let service = self.service.clone();
+        let requests = Arc::clone(&self.fence_requests);
+        let committed = Arc::clone(&self.fence_committed);
+        Box::pin(async move {
+            requests.lock().unwrap().push(request.clone());
+            let result = service.fence_plugin_graph(request, now).await;
+            if result.is_ok() {
+                committed.add_permits(1);
+            }
+            result.map(|_| ())
+        })
+    }
+}
+
+fn seed_sqlite_active_plugins(profile_dir: &Path, count: usize) {
+    let mut connection = Connection::open(profile_dir.join("junban.sqlite3")).unwrap();
+    let transaction = connection.transaction().unwrap();
+    let now = "2020-01-01T00:00:00Z";
+    transaction
+        .execute(
+            "INSERT INTO plugin_publisher_trust(
+                key_id, public_key, status, trusted_at, revoked_at
+             ) VALUES (?1, ?2, 'active', ?3, NULL)",
+            params!["1".repeat(64), vec![0_u8; 32], now],
+        )
+        .unwrap();
+    for index in 0..count {
+        let id = format!("plugin-{index:02}");
+        let generation = u64::try_from(index + 1).unwrap();
+        let component = [u8::try_from(generation).unwrap_or(1)];
+        let mut manifest = manifest(&id, Vec::new());
+        let permission = Permission {
+            capability: Capability::Commands,
+            scope: PermissionScope::Unscoped(UnscopedPermission {}),
+        };
+        manifest.permissions = vec![permission.clone()];
+        manifest.component_sha256 = Sha256Digest::of(&component).to_string();
+        let permission_hash = Sha256Digest::from_bytes(
+            permission_set_hash(&manifest.permissions).expect("permission set hash"),
+        );
+        transaction
+            .execute(
+                "INSERT INTO plugins(
+                    plugin_id, package_generation, activation_epoch, package_sha256,
+                    component_sha256, publisher_key_id, version, manifest_json,
+                    permission_hash, compatibility, desired_enabled, runtime_state,
+                    failure_count, last_error_code, next_retry_at, installed_at, updated_at
+                 ) VALUES (?1, ?2, 10, ?3, ?4, ?5, '1.0.0', ?6, ?7, '^0.1.0',
+                           1, 'active', 0, NULL, NULL, ?8, ?8)",
+                params![
+                    id,
+                    i64::try_from(generation).unwrap(),
+                    Sha256Digest::of(format!("package-{index}").as_bytes()).to_string(),
+                    manifest.component_sha256,
+                    "1".repeat(64),
+                    serde_json::to_string(&manifest).unwrap(),
+                    permission_hash.to_string(),
+                    now,
+                ],
+            )
+            .unwrap();
+        transaction
+            .execute(
+                "INSERT INTO plugin_grants(
+                    plugin_id, package_generation, capability, scope_json, scope_hash,
+                    permission_hash, granted_at
+                 ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7)",
+                params![
+                    id,
+                    i64::try_from(generation).unwrap(),
+                    permission.capability.as_str(),
+                    serde_json::to_string(&permission.scope).unwrap(),
+                    Sha256Digest::from_bytes(scope_hash(&permission).unwrap()).to_string(),
+                    permission_hash.to_string(),
+                    now,
+                ],
+            )
+            .unwrap();
+        transaction
+            .execute(
+                "INSERT INTO plugin_event_cursors(
+                    plugin_id, event_epoch, revision, resync_required, updated_at
+                 ) VALUES (?1, ?2, 0, 0, ?3)",
+                params![id, Uuid::nil().to_string(), now],
+            )
+            .unwrap();
+    }
+    transaction.commit().unwrap();
+}
+
+fn sqlite_app_service(owner: &ProfileOwner) -> AppService {
+    let sink = BroadcastEventSink::new(16, Arc::new(ReminderWakeHub::new()));
+    junban_app::TaskService::new(Arc::new(owner.repository()), Arc::new(sink))
 }
 
 fn test_deadlines() -> ProcessDeadlines {
@@ -801,6 +1131,9 @@ for _ in range(load_count):
         sys.exit(2)
     if CFG.get("load_failure") == frame["fence"]["plugin_id"]:
         send({"type": "failed", "fence": frame["fence"], "code": "invalid_component"})
+        # Keep EOF from racing the acknowledged failure frame. The parent
+        # closes stdin while performing its bounded kill/reap.
+        stdin.read(1)
         sys.exit(0)
     send({
         "type": "loaded",
@@ -889,6 +1222,42 @@ async fn wait_pids_reaped(path: &Path) {
     })
     .await
     .expect("process reap deadline");
+}
+
+async fn wait_active_invocations(
+    supervisor: &PluginRuntimeSupervisor,
+    expected: usize,
+) -> PluginRuntimeSnapshot {
+    tokio::time::timeout(Duration::from_secs(3), async {
+        loop {
+            let snapshot = supervisor.snapshot().await.expect("runtime snapshot");
+            if snapshot.active_invocations == expected {
+                return snapshot;
+            }
+            tokio::task::yield_now().await;
+        }
+    })
+    .await
+    .expect("invocation release deadline")
+}
+
+#[cfg(unix)]
+async fn wait_for_captured_frame(fixture: &HostFixture, frame_type: &str) {
+    tokio::time::timeout(Duration::from_secs(3), async {
+        loop {
+            let captured = fs::read(&fixture.capture_file).unwrap_or_default();
+            if captured.split(|byte| *byte == b'\n').any(|line| {
+                serde_json::from_slice::<Value>(line)
+                    .ok()
+                    .is_some_and(|capture| capture["frame"]["type"] == frame_type)
+            }) {
+                return;
+            }
+            tokio::task::yield_now().await;
+        }
+    })
+    .await
+    .expect("fixture frame acknowledgement deadline");
 }
 
 fn process_is_absent(pid: u32) -> bool {
@@ -1194,6 +1563,7 @@ async fn parent_admission_enforces_four_per_plugin_cycles_and_depth_eight() {
                 next_callback_id: 1,
                 expected_callback: None,
                 deadline: None,
+                awaiting_child_terminal: false,
                 cancel_requested: Arc::new(AtomicBool::new(false)),
                 terminal: None,
                 nested_parent: None,
@@ -1325,6 +1695,113 @@ async fn reconfigure_reaps_the_old_graph_before_spawning_its_replacement() {
     assert!(!fixture.violation_file.exists());
     supervisor.shutdown().await.unwrap();
     assert!(process_is_absent(pids[1]));
+}
+
+#[cfg(unix)]
+#[tokio::test]
+async fn stopping_actor_blocks_reconcile_until_the_child_is_reaped() {
+    let fixture = HostFixture::new("stop-reconcile", json!({"loads": 1, "shutdown": "forced"}));
+    let service = MockService::new(
+        "stop-reconcile",
+        chain_profile(1, PluginRuntimeState::Active),
+    );
+    let pids = Arc::new(Mutex::new(Vec::new()));
+    let supervisor = Arc::new(PluginRuntimeSupervisor::for_test(
+        service,
+        fixture.policy(vec![session(45)], Arc::clone(&pids)),
+        Arc::new(DenyCallbacks),
+    ));
+    supervisor.reconcile().await.unwrap();
+
+    let stopping = Arc::clone(&supervisor);
+    let stop = tokio::spawn(async move { stopping.shutdown().await });
+    wait_for_captured_frame(&fixture, "shutdown").await;
+    assert_eq!(
+        supervisor.reconcile().await,
+        Err(PluginRuntimeError::Closed)
+    );
+    assert_eq!(pids.lock().unwrap().len(), 1);
+    assert_eq!(stop.await.unwrap(), Err(PluginRuntimeError::Closed));
+    assert!(process_is_absent(pids.lock().unwrap()[0]));
+    assert!(!fixture.violation_file.exists());
+}
+
+#[cfg(unix)]
+#[tokio::test]
+async fn retained_invocation_handle_cannot_own_the_actor_or_child_lifetime() {
+    let fixture = HostFixture::new(
+        "retained-handle",
+        json!({"loads": 1, "invoke": "hold", "cancel": "cancelled"}),
+    );
+    let service = MockService::new(
+        "retained-handle",
+        chain_profile(1, PluginRuntimeState::Active),
+    );
+    let plugin = service.lock().profile.plugins[0].clone();
+    let pids = Arc::new(Mutex::new(Vec::new()));
+    let supervisor = PluginRuntimeSupervisor::for_test(
+        service,
+        fixture.policy(vec![session(46)], Arc::clone(&pids)),
+        Arc::new(DenyCallbacks),
+    );
+    supervisor.reconcile().await.unwrap();
+    let handle = supervisor.invoke(dispatch(&plugin, 46)).await.unwrap();
+
+    drop(supervisor);
+    wait_pids_reaped(&fixture.pid_file).await;
+    assert!(matches!(
+        handle.outcome().await.unwrap(),
+        InvocationOutcome::Cancelled
+    ));
+    assert!(process_is_absent(pids.lock().unwrap()[0]));
+}
+
+#[cfg(unix)]
+#[tokio::test]
+async fn duplicate_operation_id_is_rejected_across_two_plugins() {
+    let fixture = HostFixture::new(
+        "duplicate-operation",
+        json!({"loads": 2, "invoke": "hold", "cancel": "cancelled"}),
+    );
+    let service = MockService::new(
+        "duplicate-operation",
+        chain_profile(2, PluginRuntimeState::Active),
+    );
+    let gate = Arc::new(Semaphore::new(0));
+    service.set_reserve_gate(Arc::clone(&gate));
+    let plugins = service.lock().profile.plugins.clone();
+    let pids = Arc::new(Mutex::new(Vec::new()));
+    let supervisor = PluginRuntimeSupervisor::for_test(
+        service.clone(),
+        fixture.policy(vec![session(47)], Arc::clone(&pids)),
+        Arc::new(DenyCallbacks),
+    );
+    supervisor.reconcile().await.unwrap();
+    let first = supervisor.invoke(dispatch(&plugins[0], 47)).await.unwrap();
+    service.wait_reservation().await;
+    let mut live_collision = dispatch(&plugins[1], 48);
+    live_collision.reservation.operation_id = operation(47);
+    assert!(matches!(
+        supervisor.invoke(live_collision).await,
+        Err(PluginRuntimeError::AuthorityRejected)
+    ));
+    first.cancel();
+    assert!(matches!(
+        first.outcome().await.unwrap(),
+        InvocationOutcome::Cancelled
+    ));
+    let mut cancelled_collision = dispatch(&plugins[1], 49);
+    cancelled_collision.reservation.operation_id = operation(47);
+    assert!(matches!(
+        supervisor.invoke(cancelled_collision).await,
+        Err(PluginRuntimeError::AuthorityRejected)
+    ));
+    assert_eq!(service.lock().counts.reservations, 1);
+    gate.add_permits(1);
+    service.wait_completion().await;
+    wait_active_invocations(&supervisor, 0).await;
+    supervisor.shutdown().await.unwrap();
+    assert!(process_is_absent(pids.lock().unwrap()[0]));
 }
 
 #[cfg(unix)]
@@ -1498,6 +1975,163 @@ async fn plugin_local_failure_keeps_the_sibling_and_process_alive() {
 
 #[cfg(unix)]
 #[tokio::test]
+async fn sqlite_local_failure_terminalizes_before_health_and_later_fences_only_active_graph() {
+    let profile_dir = unique_root("sqlite-local-failure");
+    let owner = ProfileOwner::open(&profile_dir).unwrap();
+    seed_sqlite_active_plugins(&profile_dir, 2);
+    let runtime = SqliteRuntimeService::new(
+        sqlite_app_service(&owner),
+        profile_dir.join("runtime-sources"),
+    );
+    let initial = runtime
+        .service
+        .get_installed_plugin_profile()
+        .await
+        .unwrap();
+    let failing = initial
+        .plugins
+        .iter()
+        .find(|plugin| plugin.plugin_id.as_str() == "plugin-00")
+        .unwrap()
+        .clone();
+    let sibling = initial
+        .plugins
+        .iter()
+        .find(|plugin| plugin.plugin_id.as_str() == "plugin-01")
+        .unwrap()
+        .clone();
+    let fixture = HostFixture::new(
+        "sqlite-local-failure",
+        json!({
+            "loads": 2,
+            "invoke_modes": {"plugin-00": "guest_error", "plugin-01": "hold"}
+        }),
+    );
+    let pids = Arc::new(Mutex::new(Vec::new()));
+    let supervisor = PluginRuntimeSupervisor::for_test(
+        runtime.clone(),
+        fixture.policy(vec![session(74)], Arc::clone(&pids)),
+        Arc::new(DenyCallbacks),
+    );
+    supervisor.reconcile().await.unwrap();
+
+    let handle = supervisor.invoke(dispatch(&failing, 340)).await.unwrap();
+    SqliteRuntimeService::wait(&runtime.completion_started, "completion start").await;
+    assert!(
+        tokio::time::timeout(
+            Duration::from_millis(100),
+            runtime.failure_started.acquire()
+        )
+        .await
+        .is_err(),
+        "health transition started before terminal durability completed"
+    );
+    runtime.completion_gate.add_permits(1);
+    assert!(matches!(
+        handle.outcome().await.unwrap(),
+        InvocationOutcome::Failed(InvocationFailure::GuestTrap)
+    ));
+    SqliteRuntimeService::wait(&runtime.completion_committed, "completion commit").await;
+    SqliteRuntimeService::wait(&runtime.failure_committed, "failure commit").await;
+    assert_eq!(
+        *runtime.durable_order.lock().unwrap(),
+        ["complete", "failure"]
+    );
+
+    {
+        let connection = Connection::open(profile_dir.join("junban.sqlite3")).unwrap();
+        let receipt: i64 = connection
+            .query_row(
+                "SELECT COUNT(*) FROM operation_receipts WHERE operation_id = ?1",
+                [operation(340).to_string()],
+                |row| row.get(0),
+            )
+            .unwrap();
+        let invocation: i64 = connection
+            .query_row(
+                "SELECT COUNT(*) FROM plugin_invocations WHERE operation_id = ?1",
+                [operation(340).to_string()],
+                |row| row.get(0),
+            )
+            .unwrap();
+        assert_eq!(receipt, 1);
+        assert_eq!(invocation, 0);
+    }
+    let degraded = runtime
+        .service
+        .get_installed_plugin_profile()
+        .await
+        .unwrap();
+    assert_eq!(
+        degraded
+            .plugins
+            .iter()
+            .find(|plugin| plugin.plugin_id == failing.plugin_id)
+            .unwrap()
+            .runtime_state,
+        PluginRuntimeState::Degraded
+    );
+    assert_eq!(
+        degraded
+            .plugins
+            .iter()
+            .find(|plugin| plugin.plugin_id == sibling.plugin_id)
+            .unwrap()
+            .runtime_state,
+        PluginRuntimeState::Active
+    );
+
+    let pid = pids.lock().unwrap()[0];
+    assert!(
+        Command::new("/bin/kill")
+            .args(["-KILL", &pid.to_string()])
+            .status()
+            .unwrap()
+            .success()
+    );
+    SqliteRuntimeService::wait(&runtime.fence_committed, "graph fence commit").await;
+    assert!(process_is_absent(pid));
+    {
+        let requests = runtime.fence_requests.lock().unwrap();
+        assert_eq!(requests.len(), 1);
+        assert_eq!(requests[0].entries.len(), 1);
+        assert_eq!(requests[0].entries[0].plugin_id, sibling.plugin_id);
+        assert_eq!(
+            requests[0].entries[0].disposition,
+            PluginGraphFenceDisposition::LoadedSibling
+        );
+    }
+    let fenced = runtime
+        .service
+        .get_installed_plugin_profile()
+        .await
+        .unwrap();
+    let still_degraded = fenced
+        .plugins
+        .iter()
+        .find(|plugin| plugin.plugin_id == failing.plugin_id)
+        .unwrap();
+    let fenced_sibling = fenced
+        .plugins
+        .iter()
+        .find(|plugin| plugin.plugin_id == sibling.plugin_id)
+        .unwrap();
+    assert_eq!(still_degraded.activation_epoch, failing.activation_epoch);
+    assert_eq!(still_degraded.runtime_state, PluginRuntimeState::Degraded);
+    assert_eq!(
+        fenced_sibling.activation_epoch,
+        sibling.activation_epoch + 1
+    );
+    assert_eq!(fenced_sibling.runtime_state, PluginRuntimeState::Degraded);
+
+    drop(supervisor);
+    drop(runtime);
+    drop(owner);
+    fs::remove_dir_all(profile_dir).unwrap();
+}
+
+#[cfg(unix)]
+#[tokio::test]
 async fn callbacks_are_staged_and_default_denied_without_slice_two_d_authority() {
     let fixture = HostFixture::new("callback", json!({"loads": 1, "invoke": "callback"}));
     let service = MockService::new("callback", chain_profile(1, PluginRuntimeState::Active));
@@ -1663,11 +2297,87 @@ fn handle_drop_sets_atomic_cancellation_when_actor_queue_is_full() {
         invocation_id: operation(398),
         terminal: Some(terminal),
         cancel_requested: Arc::clone(&cancel_requested),
-        commands: sender,
+        commands: sender.downgrade(),
         completed: false,
     };
     drop(handle);
     assert!(cancel_requested.load(Ordering::Acquire));
+}
+
+#[cfg(unix)]
+#[tokio::test]
+async fn cancelled_reservations_hold_all_permits_until_durable_cleanup() {
+    let fixture = HostFixture::new(
+        "cancel-saturation",
+        json!({"loads": 5, "invoke": "hold", "cancel": "cancelled"}),
+    );
+    let service = MockService::new(
+        "cancel-saturation",
+        chain_profile(5, PluginRuntimeState::Active),
+    );
+    let gate = Arc::new(Semaphore::new(0));
+    service.set_reserve_gate(Arc::clone(&gate));
+    let plugins = service.lock().profile.plugins.clone();
+    let pids = Arc::new(Mutex::new(Vec::new()));
+    let supervisor = PluginRuntimeSupervisor::for_test(
+        service.clone(),
+        fixture.policy(vec![session(78)], Arc::clone(&pids)),
+        Arc::new(DenyCallbacks),
+    );
+    supervisor.reconcile().await.unwrap();
+
+    for (index, plugin) in plugins.iter().take(ACTIVE_INVOCATIONS_MAX).enumerate() {
+        let handle = supervisor
+            .invoke(dispatch(plugin, 380 + u64::try_from(index).unwrap()))
+            .await
+            .unwrap();
+        service.wait_reservation().await;
+        handle.cancel();
+        assert!(matches!(
+            handle.outcome().await.unwrap(),
+            InvocationOutcome::Cancelled
+        ));
+        if index == 0 {
+            assert!(matches!(
+                supervisor.invoke(dispatch(plugin, 390)).await,
+                Err(PluginRuntimeError::PluginBusy)
+            ));
+        }
+    }
+    assert_eq!(
+        wait_active_invocations(&supervisor, ACTIVE_INVOCATIONS_MAX)
+            .await
+            .active_invocations,
+        ACTIVE_INVOCATIONS_MAX
+    );
+    assert!(matches!(
+        supervisor.invoke(dispatch(&plugins[4], 395)).await,
+        Err(PluginRuntimeError::InvocationLimit)
+    ));
+    assert_eq!(service.lock().counts.reservations, ACTIVE_INVOCATIONS_MAX);
+
+    gate.add_permits(ACTIVE_INVOCATIONS_MAX);
+    for _ in 0..ACTIVE_INVOCATIONS_MAX {
+        service.wait_completion().await;
+    }
+    wait_active_invocations(&supervisor, 0).await;
+
+    let released = supervisor.invoke(dispatch(&plugins[4], 396)).await.unwrap();
+    service.wait_reservation().await;
+    released.cancel();
+    assert!(matches!(
+        released.outcome().await.unwrap(),
+        InvocationOutcome::Cancelled
+    ));
+    gate.add_permits(1);
+    service.wait_completion().await;
+    wait_active_invocations(&supervisor, 0).await;
+    assert_eq!(
+        service.lock().counts.reservations,
+        ACTIVE_INVOCATIONS_MAX + 1
+    );
+    supervisor.shutdown().await.unwrap();
+    assert!(process_is_absent(pids.lock().unwrap()[0]));
 }
 
 #[cfg(unix)]
@@ -1727,26 +2437,24 @@ async fn cancellation_drop_and_late_outcome_publish_once_and_hold_one_permit() {
     let terminal = handle.outcome().await.unwrap();
     assert!(matches!(terminal, InvocationOutcome::Cancelled));
     service.wait_completion().await;
-    for _ in 0..100 {
-        if supervisor.snapshot().await.unwrap().active_invocations == 0 {
-            break;
-        }
-        tokio::task::yield_now().await;
-    }
-    assert_eq!(supervisor.snapshot().await.unwrap().active_invocations, 0);
+    assert_eq!(
+        wait_active_invocations(&supervisor, 0)
+            .await
+            .active_invocations,
+        0
+    );
     assert_eq!(service.lock().counts.completions, 1);
     assert!(service.lock().fence_requests.is_empty());
 
     let dropped = supervisor.invoke(dispatch(&plugin, 401)).await.unwrap();
     drop(dropped);
     service.wait_completion().await;
-    for _ in 0..100 {
-        if supervisor.snapshot().await.unwrap().active_invocations == 0 {
-            break;
-        }
-        tokio::task::yield_now().await;
-    }
-    assert_eq!(supervisor.snapshot().await.unwrap().active_invocations, 0);
+    assert_eq!(
+        wait_active_invocations(&supervisor, 0)
+            .await
+            .active_invocations,
+        0
+    );
     assert_eq!(service.lock().counts.completions, 2);
     supervisor.shutdown().await.unwrap();
     assert!(process_is_absent(pids.lock().unwrap()[0]));
@@ -1785,13 +2493,12 @@ async fn watchdog_timeout_has_one_terminal_one_receipt_and_no_orphan() {
     ));
     service.wait_failure().await;
     service.wait_completion().await;
-    for _ in 0..100 {
-        if supervisor.snapshot().await.unwrap().active_invocations == 0 {
-            break;
-        }
-        tokio::task::yield_now().await;
-    }
-    assert_eq!(supervisor.snapshot().await.unwrap().active_invocations, 0);
+    assert_eq!(
+        wait_active_invocations(&supervisor, 0)
+            .await
+            .active_invocations,
+        0
+    );
     assert_eq!(service.lock().counts.failures, 1);
     assert_eq!(service.lock().counts.completions, 1);
     assert!(service.lock().fence_requests.is_empty());
@@ -1877,11 +2584,19 @@ async fn valid_staged_body_completes_but_every_fence_mismatch_fences_after_reap(
                 ),
             "{mode}: {terminal:?}"
         );
-        service.wait_fence().await;
-        let state = service.lock();
-        assert_eq!(state.fence_requests.len(), 1, "{mode}");
-        assert_eq!(state.fence_saw_reaped, [true], "{mode}");
-        drop(state);
+        if mode == "partial_body" {
+            // The watchdog durably degrades the only plugin before the child
+            // misses its cancellation deadline, leaving no Starting/Active
+            // authority for the later triggerless loss to fence.
+            wait_pids_reaped(&fixture.pid_file).await;
+            assert!(service.lock().fence_requests.is_empty());
+        } else {
+            service.wait_fence().await;
+            let state = service.lock();
+            assert_eq!(state.fence_requests.len(), 1, "{mode}");
+            assert_eq!(state.fence_saw_reaped, [true], "{mode}");
+            drop(state);
+        }
         assert!(
             read_pids(&fixture.pid_file)
                 .iter()

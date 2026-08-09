@@ -6,7 +6,7 @@
 //! capabilities and concrete effects remain outside this slice.
 
 use std::{
-    collections::{BTreeMap, BTreeSet, HashMap},
+    collections::{BTreeMap, BTreeSet, HashMap, hash_map::Entry},
     future::Future,
     io::Read as _,
     pin::Pin,
@@ -38,7 +38,7 @@ use junban_plugin_sdk::{
     validate_capability_reply, validate_capability_request_authority,
 };
 use thiserror::Error;
-use tokio::sync::{mpsc, oneshot};
+use tokio::sync::{mpsc, oneshot, watch};
 use uuid::Uuid;
 
 use crate::{
@@ -148,7 +148,7 @@ pub struct PluginInvocationHandle {
     invocation_id: OperationId,
     terminal: Option<oneshot::Receiver<InvocationOutcome>>,
     cancel_requested: Arc<AtomicBool>,
-    commands: mpsc::Sender<ActorCommand>,
+    commands: mpsc::WeakSender<ActorCommand>,
     completed: bool,
 }
 
@@ -162,9 +162,11 @@ impl PluginInvocationHandle {
 
     pub fn cancel(&self) {
         self.cancel_requested.store(true, Ordering::Release);
-        let _ = self.commands.try_send(ActorCommand::Cancel {
-            invocation_id: self.invocation_id,
-        });
+        if let Some(commands) = self.commands.upgrade() {
+            let _ = commands.try_send(ActorCommand::Cancel {
+                invocation_id: self.invocation_id,
+            });
+        }
     }
 }
 
@@ -434,13 +436,18 @@ struct ActorOwner {
     join: tokio::task::JoinHandle<()>,
 }
 
+enum ActorLifecycle {
+    Running(ActorOwner),
+    Stopping(watch::Receiver<Option<Result<(), PluginRuntimeError>>>),
+}
+
 /// Lazy owner. Construction does not inspect the executable, allocate a host
 /// session, open a package source, spawn a process, or start an actor task.
 pub struct PluginRuntimeSupervisor {
     service: Arc<dyn RuntimeServicePort>,
     launch_policy: PluginHostLaunchPolicy,
     callback_dispatcher: Arc<dyn PluginCallbackDispatcher>,
-    actor: Mutex<Option<ActorOwner>>,
+    actor: Arc<Mutex<Option<ActorLifecycle>>>,
     fenced: Arc<AtomicBool>,
 }
 
@@ -458,7 +465,7 @@ impl PluginRuntimeSupervisor {
             service,
             launch_policy,
             callback_dispatcher,
-            actor: Mutex::new(None),
+            actor: Arc::new(Mutex::new(None)),
             fenced: Arc::new(AtomicBool::new(false)),
         }
     }
@@ -468,11 +475,14 @@ impl PluginRuntimeSupervisor {
             return Err(PluginRuntimeError::Fenced);
         }
         let plan = sanitize_profile(Arc::clone(&self.service), Timestamp::now()).await?;
-        let existing = self.actor_sender();
+        let existing = self.actor_sender()?;
         if plan.selected.is_empty() && existing.is_none() {
             return Ok(PluginRuntimeSnapshot::dormant());
         }
-        let commands = existing.unwrap_or_else(|| self.start_actor());
+        let commands = match existing {
+            Some(commands) => commands,
+            None => self.start_actor()?,
+        };
         let (reply, response) = oneshot::channel();
         commands
             .send(ActorCommand::Reconcile { plan, reply })
@@ -490,7 +500,7 @@ impl PluginRuntimeSupervisor {
         if self.fenced.load(Ordering::Acquire) {
             return Err(PluginRuntimeError::Fenced);
         }
-        let commands = self.actor_sender().ok_or(PluginRuntimeError::Dormant)?;
+        let commands = self.actor_sender()?.ok_or(PluginRuntimeError::Dormant)?;
         let invocation_id = dispatch.reservation.operation_id;
         let cancel_requested = Arc::new(AtomicBool::new(false));
         let (terminal_sender, terminal) = oneshot::channel();
@@ -514,7 +524,7 @@ impl PluginRuntimeSupervisor {
             invocation_id,
             terminal: Some(terminal),
             cancel_requested,
-            commands,
+            commands: commands.downgrade(),
             completed: false,
         })
     }
@@ -526,7 +536,7 @@ impl PluginRuntimeSupervisor {
                 ..PluginRuntimeSnapshot::dormant()
             });
         }
-        let Some(commands) = self.actor_sender() else {
+        let Some(commands) = self.actor_sender()? else {
             return Ok(PluginRuntimeSnapshot::dormant());
         };
         let (reply, response) = oneshot::channel();
@@ -553,26 +563,35 @@ impl PluginRuntimeSupervisor {
         self.stop_actor(StopReason::Shutdown).await
     }
 
-    fn actor_sender(&self) -> Option<mpsc::Sender<ActorCommand>> {
-        let actor = self
-            .actor
-            .lock()
-            .unwrap_or_else(std::sync::PoisonError::into_inner);
-        actor
-            .as_ref()
-            .filter(|owner| !owner.join.is_finished())
-            .map(|owner| owner.commands.clone())
-    }
-
-    fn start_actor(&self) -> mpsc::Sender<ActorCommand> {
+    fn actor_sender(&self) -> Result<Option<mpsc::Sender<ActorCommand>>, PluginRuntimeError> {
         let mut actor = self
             .actor
             .lock()
             .unwrap_or_else(std::sync::PoisonError::into_inner);
-        if let Some(owner) = actor.as_ref()
-            && !owner.join.is_finished()
-        {
-            return owner.commands.clone();
+        match actor.as_ref() {
+            Some(ActorLifecycle::Running(owner)) if !owner.join.is_finished() => {
+                Ok(Some(owner.commands.clone()))
+            }
+            Some(ActorLifecycle::Running(_)) => {
+                actor.take();
+                Ok(None)
+            }
+            Some(ActorLifecycle::Stopping(_)) => Err(PluginRuntimeError::Closed),
+            None => Ok(None),
+        }
+    }
+
+    fn start_actor(&self) -> Result<mpsc::Sender<ActorCommand>, PluginRuntimeError> {
+        let mut actor = self
+            .actor
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
+        match actor.as_ref() {
+            Some(ActorLifecycle::Running(owner)) if !owner.join.is_finished() => {
+                return Ok(owner.commands.clone());
+            }
+            Some(ActorLifecycle::Stopping(_)) => return Err(PluginRuntimeError::Closed),
+            Some(ActorLifecycle::Running(_)) | None => {}
         }
         actor.take();
         let (commands, receiver) = mpsc::channel(ACTOR_COMMAND_CAPACITY);
@@ -584,11 +603,11 @@ impl PluginRuntimeSupervisor {
             receiver,
         );
         let join = tokio::spawn(state.run());
-        *actor = Some(ActorOwner {
+        *actor = Some(ActorLifecycle::Running(ActorOwner {
             commands: commands.clone(),
             join,
-        });
-        commands
+        }));
+        Ok(commands)
     }
 
     fn clear_finished_actor(&self) {
@@ -596,33 +615,64 @@ impl PluginRuntimeSupervisor {
             .actor
             .lock()
             .unwrap_or_else(std::sync::PoisonError::into_inner);
-        if actor.as_ref().is_some_and(|owner| owner.join.is_finished()) {
+        if matches!(actor.as_ref(), Some(ActorLifecycle::Running(owner)) if owner.join.is_finished())
+        {
             actor.take();
         }
     }
 
     async fn stop_actor(&self, reason: StopReason) -> Result<(), PluginRuntimeError> {
-        let owner = self
-            .actor
-            .lock()
-            .unwrap_or_else(std::sync::PoisonError::into_inner)
-            .take();
-        let Some(owner) = owner else {
-            return Ok(());
+        let mut completion = {
+            let mut actor = self
+                .actor
+                .lock()
+                .unwrap_or_else(std::sync::PoisonError::into_inner);
+            match actor.take() {
+                None => return Ok(()),
+                Some(ActorLifecycle::Stopping(completion)) => {
+                    *actor = Some(ActorLifecycle::Stopping(completion.clone()));
+                    completion
+                }
+                Some(ActorLifecycle::Running(owner)) => {
+                    let (completed, completion) = watch::channel(None);
+                    *actor = Some(ActorLifecycle::Stopping(completion.clone()));
+                    let lifecycle = Arc::clone(&self.actor);
+                    tokio::spawn(async move {
+                        let (reply, response) = oneshot::channel();
+                        let sent = owner
+                            .commands
+                            .send(ActorCommand::Stop { reason, reply })
+                            .await
+                            .is_ok();
+                        let result = if sent {
+                            response.await.unwrap_or(Err(PluginRuntimeError::Closed))
+                        } else {
+                            Ok(())
+                        };
+                        let _ = owner.join.await;
+                        {
+                            let mut actor = lifecycle
+                                .lock()
+                                .unwrap_or_else(std::sync::PoisonError::into_inner);
+                            if matches!(actor.as_ref(), Some(ActorLifecycle::Stopping(_))) {
+                                actor.take();
+                            }
+                        }
+                        let _ = completed.send(Some(result));
+                    });
+                    completion
+                }
+            }
         };
-        let (reply, response) = oneshot::channel();
-        if owner
-            .commands
-            .send(ActorCommand::Stop { reason, reply })
-            .await
-            .is_err()
-        {
-            let _ = owner.join.await;
-            return Ok(());
+        loop {
+            if let Some(result) = *completion.borrow() {
+                return result;
+            }
+            completion
+                .changed()
+                .await
+                .map_err(|_| PluginRuntimeError::Closed)?;
         }
-        let result = response.await.map_err(|_| PluginRuntimeError::Closed)?;
-        let _ = owner.join.await;
-        result
     }
 
     #[cfg(test)]
@@ -637,15 +687,15 @@ impl PluginRuntimeSupervisor {
 
 impl Drop for PluginRuntimeSupervisor {
     fn drop(&mut self) {
-        let owner = self
+        let lifecycle = self
             .actor
-            .get_mut()
+            .lock()
             .unwrap_or_else(std::sync::PoisonError::into_inner)
             .take();
-        if let Some(owner) = owner {
+        if let Some(ActorLifecycle::Running(owner)) = lifecycle {
             drop(owner.commands);
-            // Dropping the command sender wakes the actor. The actor then owns
-            // deterministic driver close/reap before its bounded task exits.
+            // Invocation handles hold only weak wakeup senders, so closing the
+            // supervisor owner always wakes the actor for bounded reap.
             drop(owner.join);
         }
     }
@@ -858,6 +908,11 @@ enum InvocationPhase {
     Running,
     Cancelling,
     Completing(InvocationOutcome),
+    CompletingFailure {
+        outcome: InvocationOutcome,
+        cause: PluginAttemptFailureCause,
+    },
+    RecordingFailure(Option<InvocationOutcome>),
 }
 
 struct InvocationRecord {
@@ -875,6 +930,7 @@ struct InvocationRecord {
     next_callback_id: u32,
     expected_callback: Option<ExpectedCallback>,
     deadline: Option<tokio::time::Instant>,
+    awaiting_child_terminal: bool,
     cancel_requested: Arc<AtomicBool>,
     terminal: Option<oneshot::Sender<InvocationOutcome>>,
     nested_parent: Option<NestedParent>,
@@ -902,7 +958,7 @@ enum InternalEvent {
         result: Result<CommittedPluginInvocation, AppError>,
     },
     FailureRecorded {
-        plugin_id: PluginId,
+        invocation_id: OperationId,
         result: Result<(), AppError>,
     },
     Callback {
@@ -913,10 +969,17 @@ enum InternalEvent {
     },
 }
 
+#[derive(Clone, Copy, Eq, PartialEq)]
+enum CancelledReservationPhase {
+    AwaitingReservation,
+    Completing,
+}
+
 struct CancelledReservation {
     plugin_id: PluginId,
     package_generation: u64,
     activation_epoch: u64,
+    phase: CancelledReservationPhase,
 }
 
 struct PendingReconfigure {
@@ -1031,7 +1094,6 @@ impl RuntimeActor {
 
             if let Some(deadline) = next_deadline {
                 tokio::select! {
-                    biased;
                     command = self.commands.recv() => {
                         if !self.handle_command_option(command).await { break; }
                     }
@@ -1057,7 +1119,6 @@ impl RuntimeActor {
                 }
             } else {
                 tokio::select! {
-                    biased;
                     command = self.commands.recv() => {
                         if !self.handle_command_option(command).await { break; }
                     }
@@ -1397,6 +1458,13 @@ impl RuntimeActor {
             }
         };
         let plugin_id = dispatch.reservation.plugin_id.clone();
+        let operation_id = dispatch.reservation.operation_id;
+        if self.invocations.contains_key(&operation_id)
+            || self.cancelled_reservations.contains_key(&operation_id)
+        {
+            reject(PluginRuntimeError::AuthorityRejected, accepted);
+            return;
+        }
         let resync = dispatch.request.kind() == InvocationKind::Resync;
         if let Err(error) =
             self.check_invocation_admission(&plugin_id, resync, &ancestry, service_depth)
@@ -1457,35 +1525,41 @@ impl RuntimeActor {
             return;
         }
         ancestry.push(plugin_id.clone());
-        let operation_id = dispatch.reservation.operation_id;
         let durable = nested_parent.is_none();
-        self.invocations.insert(
+        let record = InvocationRecord {
             operation_id,
-            InvocationRecord {
-                operation_id,
-                plugin_id,
-                package_generation: node.plugin.package_generation,
-                activation_epoch: node.plugin.activation_epoch,
-                fence,
-                kind: dispatch.request.kind(),
-                invoke_frame,
-                body,
-                phase: if durable {
-                    InvocationPhase::Reserving
-                } else {
-                    InvocationPhase::Running
-                },
-                ancestry,
-                service_depth,
-                next_callback_id: 1,
-                expected_callback: None,
-                deadline: None,
-                cancel_requested,
-                terminal,
-                nested_parent,
-                durable,
+            plugin_id,
+            package_generation: node.plugin.package_generation,
+            activation_epoch: node.plugin.activation_epoch,
+            fence,
+            kind: dispatch.request.kind(),
+            invoke_frame,
+            body,
+            phase: if durable {
+                InvocationPhase::Reserving
+            } else {
+                InvocationPhase::Running
             },
-        );
+            ancestry,
+            service_depth,
+            next_callback_id: 1,
+            expected_callback: None,
+            deadline: None,
+            awaiting_child_terminal: false,
+            cancel_requested,
+            terminal,
+            nested_parent,
+            durable,
+        };
+        match self.invocations.entry(operation_id) {
+            Entry::Vacant(entry) => {
+                entry.insert(record);
+            }
+            Entry::Occupied(_) => {
+                reject(PluginRuntimeError::AuthorityRejected, accepted);
+                return;
+            }
+        }
         if let Some(accepted) = accepted {
             let _ = accepted.send(Ok(()));
         }
@@ -1566,8 +1640,13 @@ impl RuntimeActor {
         }
         if matches!(
             phase,
-            InvocationPhase::Reserving | InvocationPhase::Completing(_)
+            InvocationPhase::Completing(_)
+                | InvocationPhase::CompletingFailure { .. }
+                | InvocationPhase::RecordingFailure(_)
         ) {
+            return;
+        }
+        if matches!(phase, InvocationPhase::Reserving) {
             let mut record = self
                 .invocations
                 .remove(&invocation_id)
@@ -1577,13 +1656,14 @@ impl RuntimeActor {
             {
                 task.abort();
             }
-            if record.durable && matches!(record.phase, InvocationPhase::Reserving) {
+            if record.durable {
                 self.cancelled_reservations.insert(
                     record.operation_id,
                     CancelledReservation {
                         plugin_id: record.plugin_id.clone(),
                         package_generation: record.package_generation,
                         activation_epoch: record.activation_epoch,
+                        phase: CancelledReservationPhase::AwaitingReservation,
                     },
                 );
             }
@@ -1623,6 +1703,7 @@ impl RuntimeActor {
                 return;
             }
             record.phase = InvocationPhase::Cancelling;
+            record.awaiting_child_terminal = true;
             record.deadline = Some(tokio::time::Instant::now() + DRAIN_DEADLINE);
             record.durable.then(|| {
                 (
@@ -1649,6 +1730,36 @@ impl RuntimeActor {
         generation: u64,
         epoch: u64,
     ) {
+        let should_spawn = match self.cancelled_reservations.entry(operation_id) {
+            Entry::Vacant(entry) => {
+                entry.insert(CancelledReservation {
+                    plugin_id: plugin_id.clone(),
+                    package_generation: generation,
+                    activation_epoch: epoch,
+                    phase: CancelledReservationPhase::Completing,
+                });
+                true
+            }
+            Entry::Occupied(mut entry) => {
+                let pending = entry.get_mut();
+                if pending.plugin_id != plugin_id
+                    || pending.package_generation != generation
+                    || pending.activation_epoch != epoch
+                {
+                    self.begin_graph_fatal(None);
+                    return;
+                }
+                if pending.phase == CancelledReservationPhase::Completing {
+                    false
+                } else {
+                    pending.phase = CancelledReservationPhase::Completing;
+                    true
+                }
+            }
+        };
+        if !should_spawn {
+            return;
+        }
         let service = Arc::clone(&self.service);
         let sender = self.internal_sender.clone();
         self.background.spawn(async move {
@@ -1670,7 +1781,13 @@ impl RuntimeActor {
             .invocations
             .iter()
             .filter(|(_, record)| record.deadline.is_some_and(|deadline| deadline <= now))
-            .map(|(id, record)| (*id, matches!(record.phase, InvocationPhase::Cancelling)))
+            .map(|(id, record)| {
+                (
+                    *id,
+                    record.awaiting_child_terminal
+                        || matches!(record.phase, InvocationPhase::Cancelling),
+                )
+            })
             .collect();
         for (invocation_id, cancelling) in expired {
             if cancelling {
@@ -1712,13 +1829,11 @@ impl RuntimeActor {
                     self.begin_drain(DrainPurpose::Fenced).await;
                 }
             }
-            InternalEvent::FailureRecorded { plugin_id, result } => {
-                if result.is_err() {
-                    self.enter_fenced();
-                    self.begin_drain(DrainPurpose::Fenced).await;
-                } else if let Some(node) = self.nodes.get_mut(&plugin_id) {
-                    node.admitting = false;
-                }
+            InternalEvent::FailureRecorded {
+                invocation_id,
+                result,
+            } => {
+                self.handle_failure_recorded(invocation_id, result).await;
             }
             InternalEvent::Callback {
                 invocation_id,
@@ -1735,14 +1850,23 @@ impl RuntimeActor {
         result: Result<ReservedPluginInvocation, AppError>,
     ) {
         if let Some(cancelled) = self.cancelled_reservations.get(&invocation_id) {
+            if cancelled.phase != CancelledReservationPhase::AwaitingReservation {
+                self.begin_graph_fatal(None);
+                return;
+            }
+            let authority = (
+                cancelled.plugin_id.clone(),
+                cancelled.package_generation,
+                cancelled.activation_epoch,
+            );
             match result {
                 Ok(ReservedPluginInvocation::Reserved(_))
                 | Ok(ReservedPluginInvocation::InFlightReplay(_)) => {
                     self.spawn_cancellation_completion(
                         invocation_id,
-                        cancelled.plugin_id.clone(),
-                        cancelled.package_generation,
-                        cancelled.activation_epoch,
+                        authority.0,
+                        authority.1,
+                        authority.2,
                     );
                 }
                 Ok(ReservedPluginInvocation::TerminalReplay(_)) | Err(_) => {
@@ -1781,22 +1905,102 @@ impl RuntimeActor {
         let Some(mut record) = self.invocations.remove(&invocation_id) else {
             return;
         };
-        match result {
-            Ok(_) => {
-                let outcome = match std::mem::replace(&mut record.phase, InvocationPhase::Running) {
-                    InvocationPhase::Completing(outcome) => outcome,
-                    _ => InvocationOutcome::Failed(InvocationFailure::AuthorityRejected),
-                };
-                self.publish_terminal(&mut record, outcome);
-            }
-            Err(_) => {
+        if result.is_err() {
+            if matches!(record.phase, InvocationPhase::Completing(_)) {
                 self.publish_terminal(
                     &mut record,
                     InvocationOutcome::Failed(InvocationFailure::AuthorityRejected),
                 );
+            }
+            // A failed durable completion keeps its invocation row and exact
+            // operation identity for startup recovery. Do not publish the
+            // plugin-local terminal that failed to become durable.
+            self.enter_fenced();
+            self.begin_drain(DrainPurpose::Fenced).await;
+            return;
+        }
+        match std::mem::replace(&mut record.phase, InvocationPhase::Running) {
+            InvocationPhase::Completing(outcome) => {
+                self.publish_terminal(&mut record, outcome);
+            }
+            InvocationPhase::CompletingFailure { outcome, cause } => {
+                self.publish_terminal(&mut record, outcome);
+                let plugin_id = record.plugin_id.clone();
+                let package_generation = record.package_generation;
+                let activation_epoch = record.activation_epoch;
+                record.phase = InvocationPhase::RecordingFailure(None);
+                self.invocations.insert(invocation_id, record);
+                self.spawn_failure_record(
+                    invocation_id,
+                    plugin_id,
+                    package_generation,
+                    activation_epoch,
+                    cause,
+                );
+            }
+            _ => {
+                self.publish_terminal(
+                    &mut record,
+                    InvocationOutcome::Failed(InvocationFailure::AuthorityRejected),
+                );
+            }
+        }
+    }
+
+    async fn handle_failure_recorded(
+        &mut self,
+        invocation_id: OperationId,
+        result: Result<(), AppError>,
+    ) {
+        let Some(mut record) = self.invocations.remove(&invocation_id) else {
+            return;
+        };
+        if result.is_err() {
+            self.publish_terminal(
+                &mut record,
+                InvocationOutcome::Failed(InvocationFailure::SessionLost),
+            );
+            self.enter_fenced();
+            self.begin_drain(DrainPurpose::Fenced).await;
+            return;
+        }
+        let pending_outcome = match std::mem::replace(&mut record.phase, InvocationPhase::Running) {
+            InvocationPhase::RecordingFailure(outcome) => outcome,
+            _ => {
+                self.invocations.insert(invocation_id, record);
                 self.enter_fenced();
                 self.begin_drain(DrainPurpose::Fenced).await;
+                return;
             }
+        };
+        let profile = self.service.profile().await;
+        let refreshed = profile.ok().and_then(|profile| {
+            profile.plugins.into_iter().find(|plugin| {
+                plugin.plugin_id == record.plugin_id
+                    && plugin.package_generation == record.package_generation
+                    && plugin.activation_epoch == record.activation_epoch
+                    && plugin.runtime_state == PluginRuntimeState::Degraded
+            })
+        });
+        let Some(plugin) = refreshed else {
+            self.publish_terminal(
+                &mut record,
+                InvocationOutcome::Failed(InvocationFailure::SessionLost),
+            );
+            self.enter_fenced();
+            self.begin_drain(DrainPurpose::Fenced).await;
+            return;
+        };
+        if let Some(node) = self.nodes.get_mut(&record.plugin_id) {
+            node.plugin = plugin;
+            node.admitting = false;
+        }
+        if let Some(outcome) = pending_outcome {
+            self.publish_terminal(&mut record, outcome);
+        }
+        if record.awaiting_child_terminal {
+            record.phase = InvocationPhase::Cancelling;
+            self.invocations.insert(invocation_id, record);
         }
     }
 
@@ -1946,10 +2150,10 @@ impl RuntimeActor {
                 };
                 if fence != &record.fence
                     || *kind != record.kind
-                    || !matches!(
+                    || (!matches!(
                         record.phase,
                         InvocationPhase::Running | InvocationPhase::Cancelling
-                    )
+                    ) && !record.awaiting_child_terminal)
                 {
                     self.begin_graph_fatal(Some((
                         record.plugin_id.clone(),
@@ -1986,14 +2190,14 @@ impl RuntimeActor {
                     );
                     return;
                 };
-                if fence != &record.fence || !matches!(record.phase, InvocationPhase::Cancelling) {
+                if fence != &record.fence || !record.awaiting_child_terminal {
                     self.begin_graph_fatal(Some((
                         record.plugin_id.clone(),
                         PluginGraphFenceCause::ChildFatal,
                     )));
                     return;
                 }
-                self.invocations.remove(&invocation_id);
+                self.handle_child_terminal(invocation_id);
             }
             ChildFrame::Failed { fence, code } => {
                 if pending_body.is_some() {
@@ -2015,8 +2219,8 @@ impl RuntimeActor {
                     )));
                     return;
                 }
-                if matches!(record.phase, InvocationPhase::Cancelling) {
-                    self.invocations.remove(&invocation_id);
+                if record.awaiting_child_terminal {
+                    self.handle_child_terminal(invocation_id);
                     return;
                 }
                 if !matches!(record.phase, InvocationPhase::Running) {
@@ -2099,7 +2303,10 @@ impl RuntimeActor {
                 if self
                     .invocations
                     .get(&pending.invocation_id)
-                    .is_some_and(|record| matches!(record.phase, InvocationPhase::Cancelling))
+                    .is_some_and(|record| {
+                        record.awaiting_child_terminal
+                            || matches!(record.phase, InvocationPhase::Cancelling)
+                    })
                 {
                     self.send_immediate_callback_reply(
                         pending.invocation_id,
@@ -2286,13 +2493,19 @@ impl RuntimeActor {
         if ancestry.contains(plugin_id) {
             return Err(PluginRuntimeError::ServiceCycle);
         }
-        if self.invocations.len() >= ACTIVE_INVOCATIONS_MAX {
+        let mut cancelled_only = self
+            .cancelled_reservations
+            .iter()
+            .filter(|(operation_id, _)| !self.invocations.contains_key(operation_id))
+            .map(|(_, reservation)| reservation);
+        if self.invocations.len() + cancelled_only.clone().count() >= ACTIVE_INVOCATIONS_MAX {
             return Err(PluginRuntimeError::InvocationLimit);
         }
         if self
             .invocations
             .values()
             .any(|record| record.plugin_id == *plugin_id)
+            || cancelled_only.any(|reservation| reservation.plugin_id == *plugin_id)
         {
             return Err(PluginRuntimeError::PluginBusy);
         }
@@ -2308,6 +2521,11 @@ impl RuntimeActor {
         service_depth: u8,
         nested_parent: NestedParent,
     ) -> Result<(), PluginRuntimeError> {
+        if self.invocations.contains_key(&operation_id)
+            || self.cancelled_reservations.contains_key(&operation_id)
+        {
+            return Err(PluginRuntimeError::AuthorityRejected);
+        }
         self.check_invocation_admission(&plugin_id, false, &ancestry, service_depth)
             .map_err(|error| match error {
                 PluginRuntimeError::NotAdmitting => PluginRuntimeError::ServiceUnavailable,
@@ -2340,29 +2558,33 @@ impl RuntimeActor {
             .map_err(|_| PluginRuntimeError::AuthorityRejected)?
             .into_parts();
         ancestry.push(plugin_id.clone());
-        self.invocations.insert(
+        let record = InvocationRecord {
             operation_id,
-            InvocationRecord {
-                operation_id,
-                plugin_id,
-                package_generation: fence.package_generation,
-                activation_epoch: fence.activation_epoch,
-                fence,
-                kind: request.kind(),
-                invoke_frame,
-                body,
-                phase: InvocationPhase::Running,
-                ancestry,
-                service_depth,
-                next_callback_id: 1,
-                expected_callback: None,
-                deadline: None,
-                cancel_requested: Arc::new(AtomicBool::new(false)),
-                terminal: None,
-                nested_parent: Some(nested_parent),
-                durable: false,
-            },
-        );
+            plugin_id,
+            package_generation: fence.package_generation,
+            activation_epoch: fence.activation_epoch,
+            fence,
+            kind: request.kind(),
+            invoke_frame,
+            body,
+            phase: InvocationPhase::Running,
+            ancestry,
+            service_depth,
+            next_callback_id: 1,
+            expected_callback: None,
+            deadline: None,
+            awaiting_child_terminal: false,
+            cancel_requested: Arc::new(AtomicBool::new(false)),
+            terminal: None,
+            nested_parent: Some(nested_parent),
+            durable: false,
+        };
+        match self.invocations.entry(operation_id) {
+            Entry::Vacant(entry) => {
+                entry.insert(record);
+            }
+            Entry::Occupied(_) => return Err(PluginRuntimeError::AuthorityRejected),
+        }
         self.send_invocation(operation_id);
         Ok(())
     }
@@ -2392,8 +2614,8 @@ impl RuntimeActor {
             self.begin_graph_fatal(None);
             return;
         };
-        if matches!(record.phase, InvocationPhase::Cancelling) {
-            self.invocations.remove(&invocation_id);
+        if record.awaiting_child_terminal {
+            self.handle_child_terminal(invocation_id);
             return;
         }
         if record.nested_parent.is_some() {
@@ -2426,6 +2648,20 @@ impl RuntimeActor {
                 })
                 .await;
         });
+    }
+
+    fn handle_child_terminal(&mut self, invocation_id: OperationId) {
+        let remove = self
+            .invocations
+            .get_mut(&invocation_id)
+            .is_some_and(|record| {
+                record.awaiting_child_terminal = false;
+                record.deadline = None;
+                matches!(record.phase, InvocationPhase::Cancelling)
+            });
+        if remove {
+            self.invocations.remove(&invocation_id);
+        }
     }
 
     fn finish_nested(&mut self, invocation_id: OperationId, outcome: GuestInvocationOutcome) {
@@ -2486,35 +2722,11 @@ impl RuntimeActor {
             self.begin_graph_fatal(None);
             return;
         }
-        record.phase = InvocationPhase::Cancelling;
+        record.awaiting_child_terminal = true;
         record.deadline = Some(tokio::time::Instant::now() + DRAIN_DEADLINE);
-        let durable = record.durable;
-        let operation_id = record.operation_id;
-        let plugin_id = record.plugin_id.clone();
-        let package_generation = record.package_generation;
-        let activation_epoch = record.activation_epoch;
-        if let Some(node) = self.nodes.get_mut(&plugin_id) {
-            node.admitting = false;
-        }
-        if durable {
-            self.spawn_cancellation_completion(
-                operation_id,
-                plugin_id.clone(),
-                package_generation,
-                activation_epoch,
-            );
-        }
-        if let Some(mut record) = self.invocations.remove(&invocation_id) {
-            self.publish_terminal(
-                &mut record,
-                InvocationOutcome::Failed(InvocationFailure::Timeout),
-            );
-            self.invocations.insert(invocation_id, record);
-        }
-        self.spawn_failure_record(
-            plugin_id,
-            package_generation,
-            activation_epoch,
+        self.fail_plugin_invocation(
+            invocation_id,
+            InvocationFailure::Timeout,
             PluginAttemptFailureCause::Timeout,
         );
     }
@@ -2528,7 +2740,8 @@ impl RuntimeActor {
         let Some(mut record) = self.invocations.remove(&invocation_id) else {
             return;
         };
-        if matches!(record.phase, InvocationPhase::Cancelling) {
+        if !matches!(record.phase, InvocationPhase::Running) {
+            self.invocations.insert(invocation_id, record);
             return;
         }
         if let Some(expected) = record.expected_callback.as_mut()
@@ -2539,25 +2752,49 @@ impl RuntimeActor {
         if let Some(node) = self.nodes.get_mut(&record.plugin_id) {
             node.admitting = false;
         }
+        let plugin_id = record.plugin_id.clone();
+        let package_generation = record.package_generation;
+        let activation_epoch = record.activation_epoch;
+        let outcome = InvocationOutcome::Failed(failure);
         if record.durable {
-            self.spawn_cancellation_completion(
-                record.operation_id,
-                record.plugin_id.clone(),
-                record.package_generation,
-                record.activation_epoch,
+            record.phase = InvocationPhase::CompletingFailure { outcome, cause };
+            let service = Arc::clone(&self.service);
+            let sender = self.internal_sender.clone();
+            let operation_id = record.operation_id;
+            self.invocations.insert(invocation_id, record);
+            self.background.spawn(async move {
+                let result = service
+                    .complete_invocation(
+                        operation_id,
+                        plugin_id,
+                        package_generation,
+                        activation_epoch,
+                        Timestamp::now(),
+                    )
+                    .await;
+                let _ = sender
+                    .send(InternalEvent::Completion {
+                        invocation_id,
+                        result,
+                    })
+                    .await;
+            });
+        } else {
+            record.phase = InvocationPhase::RecordingFailure(Some(outcome));
+            self.invocations.insert(invocation_id, record);
+            self.spawn_failure_record(
+                invocation_id,
+                plugin_id,
+                package_generation,
+                activation_epoch,
+                cause,
             );
         }
-        self.publish_terminal(&mut record, InvocationOutcome::Failed(failure));
-        self.spawn_failure_record(
-            record.plugin_id,
-            record.package_generation,
-            record.activation_epoch,
-            cause,
-        );
     }
 
     fn spawn_failure_record(
         &mut self,
+        invocation_id: OperationId,
         plugin_id: PluginId,
         package_generation: u64,
         activation_epoch: u64,
@@ -2566,7 +2803,7 @@ impl RuntimeActor {
         let service = Arc::clone(&self.service);
         let sender = self.internal_sender.clone();
         let request = RecordPluginAttemptFailureRequest {
-            plugin_id: plugin_id.clone(),
+            plugin_id,
             package_generation,
             activation_epoch,
             cause,
@@ -2576,7 +2813,10 @@ impl RuntimeActor {
                 .record_failure(OperationId::new(), request, Timestamp::now())
                 .await;
             let _ = sender
-                .send(InternalEvent::FailureRecorded { plugin_id, result })
+                .send(InternalEvent::FailureRecorded {
+                    invocation_id,
+                    result,
+                })
                 .await;
         });
     }
@@ -2768,20 +3008,28 @@ impl RuntimeActor {
                 host_session_id,
                 completion,
             } => {
-                let entries = graph_fence_entries(&graph, trigger);
-                let fenced = !entries.is_empty()
-                    && self
-                        .service
-                        .fence_graph(
-                            PluginGraphFenceRequest {
-                                operation_id: OperationId::new(),
-                                host_session_id,
-                                entries,
-                            },
-                            Timestamp::now(),
-                        )
-                        .await
-                        .is_ok();
+                let current_graph = self.current_fence_graph(&graph).await;
+                let fenced = match current_graph {
+                    Ok(graph) if graph.is_empty() => true,
+                    Ok(graph) => {
+                        let trigger = trigger.filter(|(plugin_id, _)| {
+                            graph.iter().any(|plugin| plugin.plugin_id == *plugin_id)
+                        });
+                        let entries = graph_fence_entries(&graph, trigger);
+                        self.service
+                            .fence_graph(
+                                PluginGraphFenceRequest {
+                                    operation_id: OperationId::new(),
+                                    host_session_id,
+                                    entries,
+                                },
+                                Timestamp::now(),
+                            )
+                            .await
+                            .is_ok()
+                    }
+                    Err(_) => false,
+                };
                 if !fenced {
                     self.enter_fenced();
                 } else {
@@ -2811,6 +3059,31 @@ impl RuntimeActor {
                 self.exit_when_idle = true;
             }
         }
+    }
+
+    async fn current_fence_graph(
+        &self,
+        loaded_graph: &[InstalledPlugin],
+    ) -> Result<Vec<InstalledPlugin>, PluginRuntimeError> {
+        let profile = self
+            .service
+            .profile()
+            .await
+            .map_err(|_| PluginRuntimeError::AuthorityRejected)?;
+        let plan = RuntimePlan::from_profile(profile)?;
+        let loaded: BTreeMap<_, _> = loaded_graph
+            .iter()
+            .map(|plugin| (plugin.plugin_id.clone(), plugin))
+            .collect();
+        if plan.selected.iter().any(|plugin| {
+            loaded.get(&plugin.plugin_id).is_none_or(|selected| {
+                selected.package_generation != plugin.package_generation
+                    || selected.activation_epoch != plugin.activation_epoch
+            })
+        }) {
+            return Err(PluginRuntimeError::AuthorityRejected);
+        }
+        Ok(plan.selected)
     }
 
     async fn handle_stop(
@@ -2857,7 +3130,12 @@ impl RuntimeActor {
         PluginRuntimeSnapshot {
             lifecycle: self.lifecycle,
             graph_size: self.nodes.len(),
-            active_invocations: self.invocations.len(),
+            active_invocations: self.invocations.len()
+                + self
+                    .cancelled_reservations
+                    .keys()
+                    .filter(|operation_id| !self.invocations.contains_key(operation_id))
+                    .count(),
             admitting_plugins: self
                 .nodes
                 .iter()

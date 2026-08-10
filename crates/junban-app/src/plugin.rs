@@ -23,9 +23,9 @@ use serde::{Deserialize, Serialize};
 
 use crate::{
     BulkAction, CommittedMutation, MarkPluginInvalidatingEventRequest,
-    MarkPluginRetentionLossRequest, PluginOperatorRequestIdentity,
-    ProjectDraft, ProjectPatch, RepositoryError, RepositoryFuture, TagDraft, TagPatch, TaskPatch,
-    TemporalContext, VerifiedPluginCursorSkipRequest,
+    MarkPluginRetentionLossRequest, PluginOperatorRequestIdentity, ProjectDraft, ProjectPatch,
+    RepositoryError, RepositoryFuture, TagDraft, TagPatch, TaskPatch, TemporalContext,
+    VerifiedPluginCursorSkipRequest,
 };
 
 pub const PLUGINS_INSTALLED_MAX: usize = 64;

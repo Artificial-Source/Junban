@@ -19,7 +19,11 @@ AUTHORITY = SDK / "wit" / "plugin.wit"
 DEPENDENCIES = [RUST / "wit/deps/junban-plugin/plugin.wit", TS / "wit/deps/junban-plugin/plugin.wit"]
 RUST_ARTIFACT = RUST / "rust-consumer.wasm"
 TS_ARTIFACT = TS / "artifacts/typescript-consumer.wasm"
+TS_STANDALONE_ARTIFACT = TS / "artifacts/typescript-standalone-calibration.wasm"
+TS_STANDALONE_PROVENANCE = TS / "standalone-calibration-provenance.json"
 PROVENANCE = SDK / "consumers" / "artifact-provenance.json"
+FULL_TS_FROZEN_SHA256 = "78abc3d8e07de4a6e399f12da523c2e52b76236416171b82bd7fbbf26b66d6c4"
+STANDALONE_TS_FROZEN_SHA256 = "8616e64e1152ad6f2915107745201ac1888c15124132c9c1fffba0cbd165d8e7"
 EXPECTED_RUST = {
     "junban:plugin/types@0.1.0",
     "junban:plugin/host-tasks@0.1.0",
@@ -35,6 +39,7 @@ EXPECTED_RUST = {
 EXPECTED_TS = {name for name in EXPECTED_RUST if not name.startswith("wasi:")} | {
     "junban:plugin/host-services@0.1.0",
 }
+EXPECTED_TS_STANDALONE = {"junban:plugin/types@0.1.0"}
 
 
 def run(args: list[str], cwd: Path, capture: bool = False) -> str:
@@ -133,13 +138,38 @@ def main() -> int:
     run([str(tsc), "-p", "tsconfig.json", "--pretty", "false"], TS)
 
     run(["node", "build.mjs", "--build" if options.regenerate else "--check"], TS)
+    run(
+        [
+            "node",
+            "build-standalone-calibration.mjs",
+            "--build" if options.regenerate else "--check",
+        ],
+        TS,
+    )
 
+    if digest(TS_ARTIFACT) != FULL_TS_FROZEN_SHA256:
+        raise SystemExit("retained full TypeScript consumer bytes drifted")
+    if digest(TS_STANDALONE_ARTIFACT) != STANDALONE_TS_FROZEN_SHA256:
+        raise SystemExit("retained standalone TypeScript calibration bytes drifted")
     if imports(jco, RUST_ARTIFACT) != EXPECTED_RUST:
         raise SystemExit("Rust import set drifted")
     if imports(jco, TS_ARTIFACT) != EXPECTED_TS:
         raise SystemExit("TypeScript import set/WASI-zero authority drifted")
+    if imports(jco, TS_STANDALONE_ARTIFACT) != EXPECTED_TS_STANDALONE:
+        raise SystemExit("standalone TypeScript calibration component gained a capability import")
     if TS_ARTIFACT.stat().st_size > 32 * 1024 * 1024:
         raise SystemExit("TypeScript component exceeds the 32 MiB JBP1 component ceiling")
+    if TS_STANDALONE_ARTIFACT.stat().st_size > 32 * 1024 * 1024:
+        raise SystemExit("standalone TypeScript component exceeds the 32 MiB JBP1 component ceiling")
+    standalone = json.loads(TS_STANDALONE_PROVENANCE.read_text(encoding="utf-8"))
+    if (
+        standalone.get("sha256") != digest(TS_STANDALONE_ARTIFACT)
+        or standalone.get("sizeBytes") != TS_STANDALONE_ARTIFACT.stat().st_size
+        or standalone.get("imports") != sorted(EXPECTED_TS_STANDALONE)
+        or standalone.get("calibrationOnly") is not True
+        or standalone.get("shipped") is not False
+    ):
+        raise SystemExit("standalone TypeScript calibration provenance drifted")
 
     expected = json.dumps(provenance(), indent=2) + "\n"
     if options.regenerate:

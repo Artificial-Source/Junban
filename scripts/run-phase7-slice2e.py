@@ -16,6 +16,7 @@ ROOT = Path(__file__).resolve().parents[1]
 CHECKER = ROOT / "scripts/check-phase7-slice2e.py"
 RUST_ARTIFACT = ROOT / "crates/junban-plugin-sdk/consumers/rust/rust-consumer.wasm"
 TYPESCRIPT_ARTIFACT = ROOT / "crates/junban-plugin-sdk/consumers/typescript/artifacts/typescript-consumer.wasm"
+TYPESCRIPT_STANDALONE_ARTIFACT = ROOT / "crates/junban-plugin-sdk/consumers/typescript/artifacts/typescript-standalone-calibration.wasm"
 CONFORMANCE_ARTIFACT = ROOT / "crates/junban-plugin-sdk/consumers/slice2e-rust/slice2e-consumer.wasm"
 TEST_NAME = "plugin_runtime::slice2e_tests::phase7_slice2e_real_production_composition"
 RESULT_PREFIX = "SLICE2E_RESULT_JSON="
@@ -114,6 +115,10 @@ def target_os() -> str:
 def run_harness(host: Path) -> dict[str, Any]:
     rust = regular_absolute(RUST_ARTIFACT, "retained Rust component")
     typescript = regular_absolute(TYPESCRIPT_ARTIFACT, "retained TypeScript component")
+    typescript_standalone = regular_absolute(
+        TYPESCRIPT_STANDALONE_ARTIFACT,
+        "retained standalone TypeScript calibration component",
+    )
     conformance = regular_absolute(CONFORMANCE_ARTIFACT, "Slice 2E conformance component")
     environment = os.environ.copy()
     environment.update(
@@ -122,6 +127,7 @@ def run_harness(host: Path) -> dict[str, Any]:
             "JUNBAN_SLICE2E_HOST": str(host),
             "JUNBAN_SLICE2E_RUST_COMPONENT": str(rust),
             "JUNBAN_SLICE2E_TYPESCRIPT_COMPONENT": str(typescript),
+            "JUNBAN_SLICE2E_TYPESCRIPT_STANDALONE_COMPONENT": str(typescript_standalone),
             "JUNBAN_SLICE2E_CONFORMANCE_COMPONENT": str(conformance),
         }
     )
@@ -172,6 +178,7 @@ def run_harness(host: Path) -> dict[str, Any]:
                 "host": artifact_record(host),
                 "rust": artifact_record(rust),
                 "typescript": artifact_record(typescript),
+                "typescript_standalone_calibration": artifact_record(typescript_standalone),
                 "conformance": artifact_record(conformance),
             },
         }

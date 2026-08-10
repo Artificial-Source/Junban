@@ -57,6 +57,7 @@ const ENABLE_ENV: &str = "JUNBAN_SLICE2E_RUN";
 const HOST_ENV: &str = "JUNBAN_SLICE2E_HOST";
 const RUST_ENV: &str = "JUNBAN_SLICE2E_RUST_COMPONENT";
 const TYPESCRIPT_ENV: &str = "JUNBAN_SLICE2E_TYPESCRIPT_COMPONENT";
+const TYPESCRIPT_STANDALONE_ENV: &str = "JUNBAN_SLICE2E_TYPESCRIPT_STANDALONE_COMPONENT";
 const CONFORMANCE_ENV: &str = "JUNBAN_SLICE2E_CONFORMANCE_COMPONENT";
 const TEST_WAIT: Duration = Duration::from_secs(30);
 const SIGNING_KEY_BYTES: [u8; 32] = [0x2e; 32];
@@ -93,6 +94,7 @@ struct FixturePaths {
     host: PathBuf,
     rust: PathBuf,
     typescript: PathBuf,
+    typescript_standalone: PathBuf,
     conformance: PathBuf,
 }
 
@@ -105,6 +107,7 @@ impl FixturePaths {
             host: required_absolute_file(HOST_ENV),
             rust: required_absolute_file(RUST_ENV),
             typescript: required_absolute_file(TYPESCRIPT_ENV),
+            typescript_standalone: required_absolute_file(TYPESCRIPT_STANDALONE_ENV),
             conformance: required_absolute_file(CONFORMANCE_ENV),
         })
     }
@@ -378,6 +381,13 @@ fn typescript_manifest(
     manifest
 }
 
+fn typescript_standalone_manifest(id: &str, component: &[u8], key: &SigningKey) -> RuntimeManifest {
+    let mut manifest = manifest_base(id, RuntimeProfile::Typescript, component, key);
+    manifest.permissions = vec![unscoped(Capability::Commands)];
+    manifest.commands = vec![command("normal", Vec::new())];
+    manifest
+}
+
 async fn initialize_plugin_policy(service: &AppService, key: &SigningKey) {
     service
         .set_community_plugin_policy(OperationId::new(), true, Timestamp::now())
@@ -432,11 +442,15 @@ fn assert_fixture_imports(paths: &FixturePaths) {
     let key = SigningKey::from_bytes(&SIGNING_KEY_BYTES);
     let rust = fs::read(&paths.rust).expect("read Rust fixture for import audit");
     let typescript = fs::read(&paths.typescript).expect("read TypeScript fixture for import audit");
+    let typescript_standalone = fs::read(&paths.typescript_standalone)
+        .expect("read standalone TypeScript fixture for import audit");
     let conformance =
         fs::read(&paths.conformance).expect("read conformance fixture for import audit");
     let rust_manifest = root_manifest("audit-root", &rust, &key);
     let typescript_manifest =
         typescript_manifest("audit-typescript", "audit-root", &typescript, &key);
+    let typescript_standalone_manifest =
+        typescript_standalone_manifest("audit-typescript-standalone", &typescript_standalone, &key);
     let conformance_manifest = conformance_manifest(
         "audit-conformance",
         "audit-root",
@@ -464,6 +478,15 @@ fn assert_fixture_imports(paths: &FixturePaths) {
     .imports
     .into_iter()
     .collect();
+    let actual_typescript_standalone: BTreeSet<_> = inspect_component_for_runtime(
+        &typescript_standalone,
+        RuntimeProfile::Typescript,
+        &typescript_standalone_manifest.permissions,
+    )
+    .expect("inspect standalone TypeScript fixture")
+    .imports
+    .into_iter()
+    .collect();
     let actual_conformance: BTreeSet<_> = inspect_component_for_runtime(
         &conformance,
         RuntimeProfile::Rust,
@@ -478,6 +501,11 @@ fn assert_fixture_imports(paths: &FixturePaths) {
         actual_typescript,
         expected_imports(TYPESCRIPT),
         "TypeScript fixture import drift"
+    );
+    assert_eq!(
+        actual_typescript_standalone,
+        expected_imports(&["junban:plugin/types@0.1.0"]),
+        "standalone TypeScript fixture gained a capability import"
     );
     assert_eq!(
         actual_conformance, expected_conformance,
@@ -1748,7 +1776,6 @@ async fn phase7_slice2e_linux_cgroup_calibration_probe() {
         return;
     }
     let paths = FixturePaths::from_environment().expect("calibration fixture paths");
-    assert_fixture_imports(&paths);
     let profile_name = env::var("JUNBAN_SLICE2E_CALIBRATION_PROFILE")
         .expect("JUNBAN_SLICE2E_CALIBRATION_PROFILE is required");
     let scale: usize = env::var("JUNBAN_SLICE2E_CALIBRATION_SCALE")
@@ -1774,6 +1801,8 @@ async fn phase7_slice2e_linux_cgroup_calibration_probe() {
         let rust_component = fs::read(&paths.rust).expect("read calibration Rust fixture");
         let typescript_component =
             fs::read(&paths.typescript).expect("read calibration TypeScript fixture");
+        let typescript_standalone_component = fs::read(&paths.typescript_standalone)
+            .expect("read standalone calibration TypeScript fixture");
         let pids = Arc::new(Mutex::new(Vec::new()));
         let runtime = PluginRuntimeSupervisor::for_test(
             Arc::new(service.clone()),
@@ -1802,32 +1831,47 @@ async fn phase7_slice2e_linux_cgroup_calibration_probe() {
                 profile_name, "typescript",
                 "unsupported calibration profile"
             );
-            install_plugin(
-                &service,
-                profile.path(),
-                root_manifest("calibration-root", &rust_component, &key),
-                &rust_component,
-                &key,
-            )
-            .await;
-            assert_eq!(
-                runtime
-                    .reconcile()
-                    .await
-                    .expect("load calibration support root")
-                    .graph_size,
-                1
-            );
-            for index in 0..scale {
-                let id = format!("calibration-typescript-{index:02}");
+            if scale == 1 {
                 install_plugin(
                     &service,
                     profile.path(),
-                    typescript_manifest(&id, "calibration-root", &typescript_component, &key),
-                    &typescript_component,
+                    typescript_standalone_manifest(
+                        "calibration-typescript-standalone",
+                        &typescript_standalone_component,
+                        &key,
+                    ),
+                    &typescript_standalone_component,
                     &key,
                 )
                 .await;
+            } else {
+                install_plugin(
+                    &service,
+                    profile.path(),
+                    root_manifest("calibration-root", &rust_component, &key),
+                    &rust_component,
+                    &key,
+                )
+                .await;
+                assert_eq!(
+                    runtime
+                        .reconcile()
+                        .await
+                        .expect("load calibration support root")
+                        .graph_size,
+                    1
+                );
+                for index in 0..(scale - 1) {
+                    let id = format!("calibration-typescript-{index:02}");
+                    install_plugin(
+                        &service,
+                        profile.path(),
+                        typescript_manifest(&id, "calibration-root", &typescript_component, &key),
+                        &typescript_component,
+                        &key,
+                    )
+                    .await;
+                }
             }
             graph_size = runtime
                 .reconcile()
@@ -1835,15 +1879,15 @@ async fn phase7_slice2e_linux_cgroup_calibration_probe() {
                 .expect("load TypeScript calibration graph")
                 .graph_size;
         }
-        let expected_graph = scale + usize::from(profile_name == "typescript");
-        assert_eq!(graph_size, expected_graph);
+        assert_eq!(graph_size, scale, "plugin_scale is the total loaded graph");
         supervisor = Some(runtime);
     } else {
         assert_eq!(scale, 0, "baseline scale must be zero");
     }
 
+    let support_plugins = usize::from(profile_name == "typescript" && scale > 1);
     println!(
-        "SLICE2E_CALIBRATION_READY={{\"profile\":\"{profile_name}\",\"scale\":{scale},\"graph_size\":{graph_size}}}"
+        "SLICE2E_CALIBRATION_READY={{\"profile\":\"{profile_name}\",\"scale\":{scale},\"graph_size\":{graph_size},\"support_plugins\":{support_plugins}}}"
     );
     std::io::Write::flush(&mut std::io::stdout()).expect("flush calibration marker");
     let mut release = String::new();

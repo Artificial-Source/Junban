@@ -8,3 +8,8 @@ world typescript-consumer {
   import junban:plugin/host-log@0.1.0;
   import junban:plugin/host-services@0.1.0;
 }
+
+/// Non-shipped pure guest used only by the Slice 2E memory calibration.
+world typescript-standalone-calibration {
+  include junban:plugin/plugin@0.1.0;
+}

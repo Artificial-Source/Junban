@@ -56,6 +56,9 @@ pub const PLUGIN_LOG_INVOCATION_BYTES_MAX: usize =
     junban_plugin_sdk::GUEST_LOG_INVOCATION_BYTES_MAX as usize;
 pub const PLUGIN_SERVICE_DEPTH_MAX: u8 = 8;
 
+const PLUGIN_SERVICE_LIST_ELEMENTS_MAX: usize = 100;
+const PLUGIN_SERVICE_STRING_BYTES_MAX: usize = 8 * 1024;
+
 const EFFECT_ID_DOMAIN: &[u8] = b"junban.plugin.effect.v1\0";
 const KV_CURSOR_DOMAIN: &[u8] = b"junban.plugin.invocation-kv-cursor.v1\0";
 
@@ -267,11 +270,6 @@ pub struct PluginLogRecord {
 
 #[derive(Clone)]
 struct RetainedHttp {
-    canonical_request: Vec<u8>,
-    request: wit::HttpRequest,
-    delivery_id: String,
-    resend_used: bool,
-    resend_allowed: bool,
     process_lost: bool,
 }
 
@@ -340,7 +338,6 @@ impl PluginInvocationCallbackState {
     pub fn mark_process_lost(&mut self) {
         if let Some(retained) = &mut self.http {
             retained.process_lost = true;
-            retained.canonical_request.clear();
         }
     }
 
@@ -433,7 +430,7 @@ impl PluginCallbackAdapter {
             .next_callback_id
             .checked_add(1)
             .ok_or(PluginCallbackError::OperationTooLarge)?;
-        self.dispatch(state, callback.clone(), request, body).await
+        self.dispatch(state, callback.clone(), request).await
     }
 
     async fn dispatch(
@@ -441,7 +438,6 @@ impl PluginCallbackAdapter {
         state: &mut PluginInvocationCallbackState,
         callback: CallbackFence,
         request: HostCallRequest,
-        canonical_body: &[u8],
     ) -> Result<PluginCallbackDispatch, PluginCallbackError> {
         let live = self
             .port
@@ -495,7 +491,7 @@ impl PluginCallbackAdapter {
                 PendingPluginCallbackDispatch::Reply(HostCallReply::Log(()))
             }
             HostCallRequest::HttpRequest(request) => {
-                let reply = self.http(state, request, canonical_body).await;
+                let reply = self.http(state, request).await;
                 PendingPluginCallbackDispatch::Reply(HostCallReply::HttpRequest(reply))
             }
             HostCallRequest::CallService(call) => {
@@ -548,54 +544,23 @@ impl PluginCallbackAdapter {
         &self,
         state: &mut PluginInvocationCallbackState,
         request: wit::HttpRequest,
-        canonical_body: &[u8],
     ) -> wit::WitResult<wit::HttpResponse, wit::HttpError> {
-        let scope = http_scope(&state.authority.grants).cloned();
-        let Some(scope) = scope else {
+        if state.http.is_some() {
+            return wit::WitResult::Err(http_denied("plugin HTTP callback was already consumed"));
+        }
+        let Some(scope) = http_scope(&state.authority.grants).cloned() else {
             return wit::WitResult::Err(http_denied("plugin HTTP scope is unavailable"));
         };
 
-        let resend = if let Some(retained) = &mut state.http {
-            if retained.process_lost
-                || retained.resend_used
-                || !retained.resend_allowed
-                || retained.canonical_request != canonical_body
-                || retained.request != request
-            {
-                return wit::WitResult::Err(http_denied(
-                    "plugin HTTP callback was already consumed",
-                ));
-            }
-            retained.resend_used = true;
-            retained.resend_allowed = false;
-            true
-        } else {
-            let delivery_id = derive_delivery_id(&state.authority.delivery);
-            state.http = Some(RetainedHttp {
-                canonical_request: canonical_body.to_vec(),
-                request: request.clone(),
-                delivery_id,
-                resend_used: false,
-                resend_allowed: false,
-                process_lost: false,
-            });
-            false
-        };
-
-        let Some(retained) = state.http.as_ref() else {
-            return wit::WitResult::Err(http_denied("plugin HTTP state is unavailable"));
-        };
-        let delivery_id = retained.delivery_id.clone();
-        let expected_state = if resend {
-            PluginInvocationState::AmbiguousHttp
-        } else {
-            PluginInvocationState::Reserved
-        };
+        state.http = Some(RetainedHttp {
+            process_lost: false,
+        });
+        let delivery_id = derive_delivery_id(&state.authority.delivery);
         if self
             .port
             .transition_invocation(http_transition(
                 &state.authority,
-                expected_state,
+                PluginInvocationState::Reserved,
                 PluginInvocationState::DispatchingHttp,
             ))
             .await
@@ -614,27 +579,74 @@ impl PluginCallbackAdapter {
             ));
         }
 
+        // Clones go to the first transport attempt so these original values stay
+        // immutable for the one host-owned resend while this callback is pending.
+        let first_error = match self
+            .http
+            .send(scope.clone(), request.clone(), delivery_id.clone())
+            .await
+        {
+            Ok(response) => return wit::WitResult::Ok(response),
+            Err(error) => error,
+        };
+        if first_error.delivery != wit::DeliveryState::MayHaveBeenSent {
+            return wit::WitResult::Err(first_error);
+        }
+        if self
+            .port
+            .transition_invocation(http_transition(
+                &state.authority,
+                PluginInvocationState::DispatchingHttp,
+                PluginInvocationState::AmbiguousHttp,
+            ))
+            .await
+            .is_err()
+            || state
+                .http
+                .as_ref()
+                .is_some_and(|retained| retained.process_lost)
+        {
+            return wit::WitResult::Err(first_error);
+        }
+
+        let authority_current = self
+            .port
+            .authority(state.authority.plugin.plugin_id.clone())
+            .await
+            .and_then(|live| state.verify_live(&live));
+        if authority_current.is_err()
+            || self
+                .port
+                .transition_invocation(http_transition(
+                    &state.authority,
+                    PluginInvocationState::AmbiguousHttp,
+                    PluginInvocationState::DispatchingHttp,
+                ))
+                .await
+                .is_err()
+        {
+            return wit::WitResult::Err(first_error);
+        }
         match self.http.send(scope, request, delivery_id).await {
             Ok(response) => wit::WitResult::Ok(response),
             Err(error) => {
-                if error.delivery == wit::DeliveryState::MayHaveBeenSent {
-                    let recorded = self
+                // A not-sent retry cannot erase the first attempt's ambiguity.
+                let retained_error = if error.delivery == wit::DeliveryState::NotSent {
+                    first_error
+                } else {
+                    error
+                };
+                if retained_error.delivery == wit::DeliveryState::MayHaveBeenSent {
+                    let _ = self
                         .port
                         .transition_invocation(http_transition(
                             &state.authority,
                             PluginInvocationState::DispatchingHttp,
                             PluginInvocationState::AmbiguousHttp,
                         ))
-                        .await
-                        .is_ok();
-                    if recorded
-                        && !resend
-                        && let Some(retained) = state.http.as_mut()
-                    {
-                        retained.resend_allowed = true;
-                    }
+                        .await;
                 }
-                wit::WitResult::Err(error)
+                wit::WitResult::Err(retained_error)
             }
         }
     }
@@ -1257,6 +1269,9 @@ fn validate_data_value(
     use junban_plugin_sdk::DataKind as K;
     use wit::{DataValue as V, ScalarValue as S};
 
+    if !service_value_within_element_bounds(value) {
+        return Err(PluginCallbackError::OperationTooLarge);
+    }
     let valid = match (value, kind) {
         (V::Scalar(S::StringValue(_)), K::String)
         | (V::Scalar(S::IntegerValue(_)), K::Integer)
@@ -1295,6 +1310,39 @@ fn validate_data_value(
         Ok(())
     } else {
         Err(PluginCallbackError::InvalidInput)
+    }
+}
+
+fn service_value_within_element_bounds(value: &wit::DataValue) -> bool {
+    use wit::{DataValue as V, ScalarValue as S};
+
+    match value {
+        V::Scalar(
+            S::StringValue(value)
+            | S::DateValue(value)
+            | S::TimestampValue(value)
+            | S::TaskId(value)
+            | S::ProjectId(value)
+            | S::TagId(value)
+            | S::PluginId(value)
+            | S::OptionId(value),
+        ) => value.len() <= PLUGIN_SERVICE_STRING_BYTES_MAX,
+        V::Scalar(S::IntegerValue(_) | S::BooleanValue(_)) => true,
+        V::StringList(values)
+        | V::DateList(values)
+        | V::TimestampList(values)
+        | V::TaskIdList(values)
+        | V::ProjectIdList(values)
+        | V::TagIdList(values)
+        | V::PluginIdList(values)
+        | V::OptionIdList(values) => {
+            values.len() <= PLUGIN_SERVICE_LIST_ELEMENTS_MAX
+                && values
+                    .iter()
+                    .all(|value| value.len() <= PLUGIN_SERVICE_STRING_BYTES_MAX)
+        }
+        V::IntegerList(values) => values.len() <= PLUGIN_SERVICE_LIST_ELEMENTS_MAX,
+        V::BooleanList(values) => values.len() <= PLUGIN_SERVICE_LIST_ELEMENTS_MAX,
     }
 }
 
@@ -1778,14 +1826,20 @@ fn parse_unique_ids<T>(
     parse: impl Fn(&str) -> Result<T, junban_domain::ValidationError>,
 ) -> Result<Vec<T>, PluginCallbackError>
 where
-    T: Copy + Ord,
+    T: Copy + Ord + ToString,
 {
     if values.len() > junban_domain::MAX_BULK_IDS {
         return Err(PluginCallbackError::OperationTooLarge);
     }
     let parsed = values
         .iter()
-        .map(|value| parse(value).map_err(invalid))
+        .map(|value| {
+            let parsed = parse(value).map_err(invalid)?;
+            if parsed.to_string() != *value {
+                return Err(PluginCallbackError::InvalidInput);
+            }
+            Ok(parsed)
+        })
         .collect::<Result<Vec<_>, _>>()?;
     if parsed.iter().copied().collect::<BTreeSet<_>>().len() != parsed.len() {
         return Err(PluginCallbackError::InvalidInput);
@@ -1874,22 +1928,44 @@ fn convert_due_time(value: wit::LocalDueTime) -> Result<LocalDueTime, PluginCall
     LocalDueTime::parse(&value.time, &value.time_zone).map_err(invalid)
 }
 fn parse_date(value: String) -> Result<Date, PluginCallbackError> {
-    value.parse().map_err(|_| PluginCallbackError::InvalidInput)
+    let parsed = value
+        .parse::<Date>()
+        .map_err(|_| PluginCallbackError::InvalidInput)?;
+    if parsed.to_string() != value {
+        return Err(PluginCallbackError::InvalidInput);
+    }
+    Ok(parsed)
 }
 fn parse_timestamp(value: String) -> Result<Timestamp, PluginCallbackError> {
-    value.parse().map_err(|_| PluginCallbackError::InvalidInput)
+    let parsed = value
+        .parse::<Timestamp>()
+        .map_err(|_| PluginCallbackError::InvalidInput)?;
+    if parsed.to_string() != value {
+        return Err(PluginCallbackError::InvalidInput);
+    }
+    Ok(parsed)
 }
 fn parse_task(value: &str) -> Result<TaskId, PluginCallbackError> {
-    TaskId::parse(value).map_err(invalid)
+    parse_canonical_id(value, TaskId::parse)
 }
 fn parse_project(value: &str) -> Result<ProjectId, PluginCallbackError> {
-    ProjectId::parse(value).map_err(invalid)
+    parse_canonical_id(value, ProjectId::parse)
 }
 fn parse_section(value: &str) -> Result<SectionId, PluginCallbackError> {
-    SectionId::parse(value).map_err(invalid)
+    parse_canonical_id(value, SectionId::parse)
 }
 fn parse_tag(value: &str) -> Result<TagId, PluginCallbackError> {
-    TagId::parse(value).map_err(invalid)
+    parse_canonical_id(value, TagId::parse)
+}
+fn parse_canonical_id<T: ToString>(
+    value: &str,
+    parse: impl Fn(&str) -> Result<T, junban_domain::ValidationError>,
+) -> Result<T, PluginCallbackError> {
+    let parsed = parse(value).map_err(invalid)?;
+    if parsed.to_string() != value {
+        return Err(PluginCallbackError::InvalidInput);
+    }
+    Ok(parsed)
 }
 fn invalid(_: junban_domain::ValidationError) -> PluginCallbackError {
     PluginCallbackError::InvalidInput
@@ -2115,29 +2191,33 @@ mod tests {
         .expect("callback state")
     }
 
+    fn task_draft(title: &str) -> wit::TaskDraft {
+        wit::TaskDraft {
+            title: title.to_owned(),
+            description: String::new(),
+            priority: None,
+            due_date: None,
+            due_time: None,
+            deadline: None,
+            someday: false,
+            estimated_minutes: None,
+            actual_minutes: None,
+            dread: None,
+            project_id: None,
+            section_id: None,
+            parent_id: None,
+            tag_ids: Vec::new(),
+            sort_order: 0,
+            recurrence_rule: None,
+            remind_at: None,
+            recurrence_anchor_day: None,
+        }
+    }
+
     fn create_task_outcome(title: &str) -> InvocationOutcome {
         InvocationOutcome::InvokeCommand(WitResult::Ok(PluginOutcome {
             effect: Some(wit::PluginEffect::DomainMutation(
-                wit::DomainMutation::CreateTask(wit::TaskDraft {
-                    title: title.to_owned(),
-                    description: String::new(),
-                    priority: None,
-                    due_date: None,
-                    due_time: None,
-                    deadline: None,
-                    someday: false,
-                    estimated_minutes: None,
-                    actual_minutes: None,
-                    dread: None,
-                    project_id: None,
-                    section_id: None,
-                    parent_id: None,
-                    tag_ids: Vec::new(),
-                    sort_order: 0,
-                    recurrence_rule: None,
-                    remind_at: None,
-                    recurrence_anchor_day: None,
-                }),
+                wit::DomainMutation::CreateTask(task_draft(title)),
             )),
         }))
     }
@@ -2435,6 +2515,86 @@ mod tests {
     }
 
     #[test]
+    fn plugin_effect_rejects_noncanonical_uuid_date_and_timestamp_text() {
+        let temporal = TemporalContext::sample_now();
+        let canonical_uuid = "abcdefab-cdef-4abc-8def-abcdefabcdef".to_owned();
+
+        let mut signed_year = task_draft("Task");
+        signed_year.due_date = Some("+002026-01-01".to_owned());
+        let mut lowercase_timestamp = task_draft("Task");
+        lowercase_timestamp.deadline = Some("2026-01-01t00:00:00z".to_owned());
+        let mut braced_section = task_draft("Task");
+        braced_section.section_id = Some(format!("{{{canonical_uuid}}}"));
+
+        let mut offset_patch = unchanged_task_patch();
+        offset_patch.remind_at =
+            wit::OptionalTimestampChange::Set("2026-01-01T01:00:00+01:00".to_owned());
+        let noncanonical = vec![
+            wit::DomainMutation::CompleteTask(canonical_uuid.to_uppercase()),
+            wit::DomainMutation::PatchProject(wit::PatchProject {
+                project_id: canonical_uuid.replace('-', ""),
+                patch: unchanged_project_patch(),
+            }),
+            wit::DomainMutation::CreateTask(braced_section),
+            wit::DomainMutation::DeleteTag(format!("urn:uuid:{canonical_uuid}")),
+            wit::DomainMutation::BulkTasks(wit::BulkTasks {
+                task_ids: vec![canonical_uuid.to_uppercase()],
+                action: wit::BulkAction::Complete(()),
+            }),
+            wit::DomainMutation::CreateTask(signed_year),
+            wit::DomainMutation::CreateTask(lowercase_timestamp),
+            wit::DomainMutation::PatchTask(wit::PatchTask {
+                task_id: canonical_uuid.clone(),
+                patch: offset_patch,
+            }),
+            wit::DomainMutation::BulkTasks(wit::BulkTasks {
+                task_ids: vec![canonical_uuid.clone()],
+                action: wit::BulkAction::Schedule(wit::BulkSchedule {
+                    due_date: wit::OptionalDateChange::Unchanged(()),
+                    due_time: wit::OptionalLocalDueTimeChange::Unchanged(()),
+                    deadline: wit::OptionalTimestampChange::Set(
+                        "2026-01-01T00:00:00.000Z".to_owned(),
+                    ),
+                    someday: wit::BoolChange::Unchanged(()),
+                }),
+            }),
+        ];
+        for (index, mutation) in noncanonical.into_iter().enumerate() {
+            assert!(
+                matches!(
+                    convert_domain_mutation(
+                        mutation,
+                        operation(100 + u64::try_from(index).expect("effect index")),
+                        &temporal,
+                    ),
+                    Err(PluginCallbackError::InvalidInput)
+                ),
+                "noncanonical effect {index}"
+            );
+        }
+
+        let mut canonical = task_draft("Task");
+        canonical.due_date = Some("2026-01-01".to_owned());
+        canonical.deadline = Some("2026-01-01T00:00:00Z".to_owned());
+        assert!(
+            convert_domain_mutation(
+                wit::DomainMutation::CreateTask(canonical),
+                operation(200),
+                &temporal,
+            )
+            .is_ok()
+        );
+        assert!(
+            convert_domain_mutation(
+                wit::DomainMutation::CompleteTask(canonical_uuid),
+                operation(201),
+                &temporal,
+            )
+            .is_ok()
+        );
+    }
+
+    #[test]
     fn plugin_effect_adapter_covers_every_frozen_domain_mutation_family() {
         let task = operation(20).to_string();
         let project = operation(21).to_string();
@@ -2575,17 +2735,6 @@ mod tests {
             permission(Capability::TasksWrite),
         ]);
         state.http = Some(RetainedHttp {
-            canonical_request: vec![1],
-            request: wit::HttpRequest {
-                method: wit::HttpMethod::Get,
-                origin: "https://example.com".to_owned(),
-                path_and_query: "/".to_owned(),
-                headers: Vec::new(),
-                body: wit::ByteList::new(Vec::new()).expect("empty body"),
-            },
-            delivery_id: "delivery".to_owned(),
-            resend_used: false,
-            resend_allowed: false,
             process_lost: false,
         });
         assert!(matches!(
@@ -2681,17 +2830,22 @@ mod tests {
     struct FixtureHttp {
         outcomes: Mutex<VecDeque<Result<wit::HttpResponse, wit::HttpError>>>,
         sends: AtomicUsize,
+        sent: Mutex<Vec<(HttpScope, wit::HttpRequest, String)>>,
     }
 
     impl PluginCallbackHttp for FixtureHttp {
         fn send(
             &self,
-            _grant: HttpScope,
-            _request: wit::HttpRequest,
-            _delivery_id: String,
+            grant: HttpScope,
+            request: wit::HttpRequest,
+            delivery_id: String,
         ) -> Pin<Box<dyn Future<Output = Result<wit::HttpResponse, wit::HttpError>> + Send + 'static>>
         {
             self.sends.fetch_add(1, Ordering::SeqCst);
+            self.sent
+                .lock()
+                .expect("sent HTTP requests")
+                .push((grant, request, delivery_id));
             let result = self
                 .outcomes
                 .lock()
@@ -2728,6 +2882,7 @@ mod tests {
         let http = Arc::new(FixtureHttp {
             outcomes: Mutex::new(outcomes.into()),
             sends: AtomicUsize::new(0),
+            sent: Mutex::new(Vec::new()),
         });
         (
             PluginCallbackAdapter::new(port.clone(), http.clone()),
@@ -2833,7 +2988,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn plugin_callback_http_allows_one_identical_same_process_ambiguous_resend() {
+    async fn plugin_callback_http_owns_one_internal_same_process_ambiguous_resend() {
         let mut state = http_state();
         let request = http_request();
         let (frame, body) = callback_message(&state, request.clone());
@@ -2846,27 +3001,89 @@ mod tests {
         assert!(matches!(
             first,
             Ok(PluginCallbackDispatch::Reply(EncodedPluginCallbackReply {
-                reply: HostCallReply::HttpRequest(WitResult::Err(_)),
-                ..
-            }))
-        ));
-        let (second_frame, second_body) = callback_message(&state, request.clone());
-        let second = adapter
-            .dispatch_message(&mut state, &second_frame, &second_body)
-            .await;
-        assert!(matches!(
-            second,
-            Ok(PluginCallbackDispatch::Reply(EncodedPluginCallbackReply {
                 reply: HostCallReply::HttpRequest(WitResult::Ok(_)),
                 ..
             }))
         ));
-        let (third_frame, third_body) = callback_message(&state, request);
-        let third = adapter
-            .dispatch_message(&mut state, &third_frame, &third_body)
-            .await;
+        assert_eq!(http.sends.load(Ordering::SeqCst), 2);
+        {
+            let sent = http.sent.lock().expect("sent HTTP requests");
+            assert_eq!(sent.len(), 2);
+            assert_eq!(sent[0], sent[1]);
+        }
+
+        for later_request in [
+            request.clone(),
+            HostCallRequest::HttpRequest(wit::HttpRequest {
+                path_and_query: "/different".to_owned(),
+                ..match request.clone() {
+                    HostCallRequest::HttpRequest(request) => request,
+                    _ => unreachable!(),
+                }
+            }),
+        ] {
+            let (later_frame, later_body) = callback_message(&state, later_request);
+            assert!(matches!(
+                adapter
+                    .dispatch_message(&mut state, &later_frame, &later_body)
+                    .await,
+                Ok(PluginCallbackDispatch::Reply(EncodedPluginCallbackReply {
+                    reply: HostCallReply::HttpRequest(WitResult::Err(_)),
+                    ..
+                }))
+            ));
+            assert_eq!(http.sends.load(Ordering::SeqCst), 2);
+        }
+        assert_eq!(
+            *port.transitions.lock().expect("transitions"),
+            vec![
+                (
+                    PluginInvocationState::Reserved,
+                    PluginInvocationState::DispatchingHttp
+                ),
+                (
+                    PluginInvocationState::DispatchingHttp,
+                    PluginInvocationState::AmbiguousHttp
+                ),
+                (
+                    PluginInvocationState::AmbiguousHttp,
+                    PluginInvocationState::DispatchingHttp
+                ),
+            ]
+        );
+    }
+
+    #[tokio::test]
+    async fn plugin_callback_http_internal_resend_is_bounded_and_preserves_initial_ambiguity() {
+        let mut state = http_state();
+        let request = http_request();
+        let (frame, body) = callback_message(&state, request.clone());
+        let mut retry_error = ambiguous_error();
+        retry_error.code = wit::HttpErrorCode::Unavailable;
+        retry_error.delivery = wit::DeliveryState::NotSent;
+        retry_error.message = "retry was not sent".to_owned();
+        let (adapter, port, http) = fixture_adapter(
+            &state,
+            vec![Err(ambiguous_error()), Err(retry_error)],
+            false,
+        );
         assert!(matches!(
-            third,
+            adapter.dispatch_message(&mut state, &frame, &body).await,
+            Ok(PluginCallbackDispatch::Reply(EncodedPluginCallbackReply {
+                reply: HostCallReply::HttpRequest(WitResult::Err(wit::HttpError {
+                    delivery: wit::DeliveryState::MayHaveBeenSent,
+                    ..
+                })),
+                ..
+            }))
+        ));
+        assert_eq!(http.sends.load(Ordering::SeqCst), 2);
+
+        let (second_frame, second_body) = callback_message(&state, request);
+        assert!(matches!(
+            adapter
+                .dispatch_message(&mut state, &second_frame, &second_body)
+                .await,
             Ok(PluginCallbackDispatch::Reply(EncodedPluginCallbackReply {
                 reply: HostCallReply::HttpRequest(WitResult::Err(_)),
                 ..
@@ -2887,6 +3104,10 @@ mod tests {
                 (
                     PluginInvocationState::AmbiguousHttp,
                     PluginInvocationState::DispatchingHttp
+                ),
+                (
+                    PluginInvocationState::DispatchingHttp,
+                    PluginInvocationState::AmbiguousHttp
                 ),
             ]
         );
@@ -2914,6 +3135,241 @@ mod tests {
         assert_eq!(
             adapter.dispatch_message(&mut state, &frame, &body).await,
             Err(PluginCallbackError::StaleAuthority)
+        );
+    }
+
+    fn service_boundary_fixture(
+        kind: DataKind,
+    ) -> (
+        PluginInvocationCallbackState,
+        InstalledPlugin,
+        InstalledPluginProfile,
+    ) {
+        let grant = Permission {
+            capability: Capability::ServicesConsume,
+            scope: PermissionScope::Services(ServiceConsumeScope {
+                services: vec![ServiceReference {
+                    plugin_id: "target-plugin".to_owned(),
+                    service_id: "lookup".to_owned(),
+                }],
+            }),
+        };
+        let mut state = callback_state_with_grants(vec![grant]);
+        state.authority.plugin.manifest.dependencies = vec![Dependency {
+            id: "target-plugin".to_owned(),
+            requirement: "^1.0.0".to_owned(),
+            services: vec!["lookup".to_owned()],
+        }];
+        let mut target = plugin(&[Capability::ServicesProvide]);
+        target.plugin_id = PluginId::parse("target-plugin").expect("target id");
+        target.manifest.id = target.plugin_id.to_string();
+        target.manifest.name = "Target".to_owned();
+        let field = ServiceField {
+            id: "value".to_owned(),
+            kind,
+            required: true,
+        };
+        target.manifest.services = vec![ServiceDeclaration {
+            id: "lookup".to_owned(),
+            title: "Lookup".to_owned(),
+            request: vec![field.clone()],
+            response: vec![field],
+        }];
+        let profile = InstalledPluginProfile {
+            plugins: vec![state.authority.plugin.clone(), target.clone()],
+            activation_order: vec![
+                target.plugin_id.clone(),
+                state.authority.plugin.plugin_id.clone(),
+            ],
+            community_policy: CommunityPluginPolicy {
+                community_registry_enabled: false,
+                updated_at: timestamp("2026-01-01T00:00:00Z"),
+            },
+        };
+        (state, target, profile)
+    }
+
+    fn validate_service_request_value(
+        state: &PluginInvocationCallbackState,
+        profile: &InstalledPluginProfile,
+        value: wit::DataValue,
+    ) -> Result<ValidatedPluginServiceCall, PluginCallbackError> {
+        validate_service_call(
+            state,
+            state.authority.callback.clone(),
+            profile,
+            wit::ServiceCall {
+                plugin_id: "target-plugin".to_owned(),
+                service_id: "lookup".to_owned(),
+                values: vec![wit::NamedValue {
+                    name: "value".to_owned(),
+                    value,
+                }],
+            },
+        )
+    }
+
+    fn validate_service_response_value(
+        target: &InstalledPlugin,
+        value: wit::DataValue,
+    ) -> Result<(), PluginCallbackError> {
+        validate_service_response(
+            target,
+            &PluginId::parse("lookup").expect("service id"),
+            &wit::ServiceData {
+                values: vec![wit::NamedValue {
+                    name: "value".to_owned(),
+                    value,
+                }],
+            },
+        )
+    }
+
+    fn service_list_values(count: usize) -> Vec<(DataKind, wit::DataValue)> {
+        let uuid = operation(30).to_string();
+        vec![
+            (
+                DataKind::StringList,
+                wit::DataValue::StringList(vec!["value".to_owned(); count]),
+            ),
+            (
+                DataKind::IntegerList,
+                wit::DataValue::IntegerList(vec![1; count]),
+            ),
+            (
+                DataKind::BooleanList,
+                wit::DataValue::BooleanList(vec![true; count]),
+            ),
+            (
+                DataKind::DateList,
+                wit::DataValue::DateList(vec!["2026-01-01".to_owned(); count]),
+            ),
+            (
+                DataKind::TimestampList,
+                wit::DataValue::TimestampList(vec!["2026-01-01T00:00:00Z".to_owned(); count]),
+            ),
+            (
+                DataKind::TaskIdList,
+                wit::DataValue::TaskIdList(vec![uuid.clone(); count]),
+            ),
+            (
+                DataKind::ProjectIdList,
+                wit::DataValue::ProjectIdList(vec![uuid.clone(); count]),
+            ),
+            (
+                DataKind::TagIdList,
+                wit::DataValue::TagIdList(vec![uuid; count]),
+            ),
+            (
+                DataKind::PluginIdList,
+                wit::DataValue::PluginIdList(vec!["plugin".to_owned(); count]),
+            ),
+            (
+                DataKind::OptionIdList,
+                wit::DataValue::OptionIdList(vec!["option".to_owned(); count]),
+            ),
+        ]
+    }
+
+    #[test]
+    fn plugin_callback_service_request_enforces_list_and_utf8_string_boundaries() {
+        for (kind, value) in service_list_values(100) {
+            let (state, _, profile) = service_boundary_fixture(kind);
+            assert!(validate_service_request_value(&state, &profile, value).is_ok());
+        }
+        for (kind, value) in service_list_values(101) {
+            let (state, _, profile) = service_boundary_fixture(kind);
+            assert_eq!(
+                validate_service_request_value(&state, &profile, value),
+                Err(PluginCallbackError::OperationTooLarge)
+            );
+        }
+
+        let accepted = "é".repeat(4 * 1024);
+        let rejected = format!("{accepted}a");
+        assert_eq!(accepted.len(), 8 * 1024);
+        assert_eq!(rejected.len(), 8 * 1024 + 1);
+
+        let (state, _, profile) = service_boundary_fixture(DataKind::String);
+        assert!(
+            validate_service_request_value(
+                &state,
+                &profile,
+                wit::DataValue::Scalar(wit::ScalarValue::StringValue(accepted.clone())),
+            )
+            .is_ok()
+        );
+        assert_eq!(
+            validate_service_request_value(
+                &state,
+                &profile,
+                wit::DataValue::Scalar(wit::ScalarValue::StringValue(rejected.clone())),
+            ),
+            Err(PluginCallbackError::OperationTooLarge)
+        );
+
+        let (state, _, profile) = service_boundary_fixture(DataKind::StringList);
+        assert!(
+            validate_service_request_value(
+                &state,
+                &profile,
+                wit::DataValue::StringList(vec![accepted]),
+            )
+            .is_ok()
+        );
+        assert_eq!(
+            validate_service_request_value(
+                &state,
+                &profile,
+                wit::DataValue::StringList(vec![rejected]),
+            ),
+            Err(PluginCallbackError::OperationTooLarge)
+        );
+    }
+
+    #[test]
+    fn plugin_callback_service_response_enforces_list_and_utf8_string_boundaries() {
+        for (kind, value) in service_list_values(100) {
+            let (_, target, _) = service_boundary_fixture(kind);
+            assert!(validate_service_response_value(&target, value).is_ok());
+        }
+        for (kind, value) in service_list_values(101) {
+            let (_, target, _) = service_boundary_fixture(kind);
+            assert_eq!(
+                validate_service_response_value(&target, value),
+                Err(PluginCallbackError::OperationTooLarge)
+            );
+        }
+
+        let accepted = "é".repeat(4 * 1024);
+        let rejected = format!("{accepted}a");
+        assert_eq!(accepted.len(), 8 * 1024);
+        assert_eq!(rejected.len(), 8 * 1024 + 1);
+
+        let (_, target, _) = service_boundary_fixture(DataKind::String);
+        assert!(
+            validate_service_response_value(
+                &target,
+                wit::DataValue::Scalar(wit::ScalarValue::StringValue(accepted.clone())),
+            )
+            .is_ok()
+        );
+        assert_eq!(
+            validate_service_response_value(
+                &target,
+                wit::DataValue::Scalar(wit::ScalarValue::StringValue(rejected.clone())),
+            ),
+            Err(PluginCallbackError::OperationTooLarge)
+        );
+
+        let (_, target, _) = service_boundary_fixture(DataKind::StringList);
+        assert!(
+            validate_service_response_value(&target, wit::DataValue::StringList(vec![accepted]),)
+                .is_ok()
+        );
+        assert_eq!(
+            validate_service_response_value(&target, wit::DataValue::StringList(vec![rejected]),),
+            Err(PluginCallbackError::OperationTooLarge)
         );
     }
 

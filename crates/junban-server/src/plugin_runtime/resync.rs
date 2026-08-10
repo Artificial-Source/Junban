@@ -15,11 +15,11 @@ use junban_app::{
 };
 use junban_domain::OperationId;
 use junban_plugin_sdk::{
-    AuthorityFence, ChildFrame, InvocationKind, InvocationOutcome, InvocationRequest, ParentFrame,
-    Permission, PluginId, canonical_permission_hash, decode_invocation_outcome,
+    AuthorityFence, Capability, ChildFrame, InvocationKind, InvocationOutcome, InvocationRequest,
+    ParentFrame, Permission, PluginId, canonical_permission_hash, decode_invocation_outcome,
     private_body_types::{
-        FinalizeResync, FlushStagedKv, FlushState, ResyncPage, ResyncPageOutcome, SnapshotPage,
-        SnapshotRecords, WitResult,
+        FinalKvChoice, FinalizeResync, FlushStagedKv, FlushState, ResyncPage, ResyncPageOutcome,
+        SnapshotPage, SnapshotRecords, WitResult,
     },
     validate_child_body,
 };
@@ -146,6 +146,7 @@ pub struct PluginResyncDriver {
     port: Arc<dyn PluginResyncPort>,
     delivery: PluginInvocationDelivery,
     permission_set_sha256: String,
+    storage_granted: bool,
     session: PluginResyncSession,
     transcript: Option<PluginResyncTranscript>,
     lifecycle: PluginResyncLifecycle,
@@ -167,6 +168,9 @@ impl PluginResyncDriver {
     ) -> Result<Self, PluginResyncDriverError> {
         let permission_set_sha256 =
             canonical_permission_hash(grants).ok_or(PluginResyncDriverError::StaleAuthority)?;
+        let storage_granted = grants
+            .iter()
+            .any(|grant| grant.capability == Capability::Storage);
         let session = port
             .begin(
                 plugin_id.clone(),
@@ -202,6 +206,7 @@ impl PluginResyncDriver {
             port,
             delivery,
             permission_set_sha256,
+            storage_granted,
             session,
             transcript: Some(transcript),
             lifecycle: PluginResyncLifecycle::StartingResync,
@@ -354,11 +359,17 @@ impl PluginResyncDriver {
     }
 
     fn try_accept_outcome(&mut self, outcome_body: &[u8]) -> Result<(), PluginResyncDriverError> {
+        if self.pending.is_none() {
+            return Err(PluginResyncDriverError::InvalidTraversal);
+        }
+        let outcome = decode_resync_outcome(outcome_body)?;
+        if !self.storage_granted && resync_outcome_uses_storage(&outcome) {
+            return Err(PluginResyncDriverError::InvalidOutcome);
+        }
         let pending = self
             .pending
             .take()
             .ok_or(PluginResyncDriverError::InvalidTraversal)?;
-        let outcome = decode_resync_outcome(outcome_body)?;
         let transcript = self
             .transcript
             .as_mut()
@@ -600,6 +611,22 @@ fn canonical_request_message(
     Ok((frame, body))
 }
 
+fn resync_outcome_uses_storage(outcome: &ResyncPageOutcome) -> bool {
+    match outcome {
+        ResyncPageOutcome::SnapshotAck(ack) => ack
+            .segment
+            .as_ref()
+            .is_some_and(|segment| !segment.operations.is_empty()),
+        ResyncPageOutcome::FlushAck(ack) => ack
+            .segment
+            .as_ref()
+            .is_some_and(|segment| !segment.operations.is_empty()),
+        ResyncPageOutcome::Finalized(finalized) => {
+            finalized.choice == FinalKvChoice::ReplaceKvWithStagedSegments
+        }
+    }
+}
+
 fn decode_resync_outcome(body: &[u8]) -> Result<ResyncPageOutcome, PluginResyncDriverError> {
     match decode_invocation_outcome(InvocationKind::Resync, body)
         .map_err(|_| PluginResyncDriverError::InvalidOutcome)?
@@ -633,9 +660,12 @@ mod tests {
     use jiff::Timestamp;
     use junban_app::PluginSnapshotItem;
     use junban_domain::{Task, TaskId, TaskTitle};
-    use junban_plugin_sdk::private_body_types::{
-        ByteList, FinalKvChoice, FinalizedResync, FlushAck, KvOperation, KvSegment, KvSet,
-        ResourceKind, SnapshotAck,
+    use junban_plugin_sdk::{
+        Capability, PermissionScope, UnscopedPermission,
+        private_body_types::{
+            ByteList, FinalizedResync, FlushAck, KvOperation, KvSegment, KvSet, ResourceKind,
+            SnapshotAck,
+        },
     };
 
     fn operation(index: u64) -> OperationId {
@@ -771,9 +801,65 @@ mod tests {
         }
     }
 
+    fn storage_grant() -> Permission {
+        Permission {
+            capability: Capability::Storage,
+            scope: PermissionScope::Unscoped(UnscopedPermission {}),
+        }
+    }
+
+    async fn traverse_snapshots_without_kv_operations(
+        driver: &mut PluginResyncDriver,
+        session: &PluginResyncSession,
+    ) {
+        for (page_index, kind) in [
+            PluginSnapshotKind::Task,
+            PluginSnapshotKind::Task,
+            PluginSnapshotKind::Project,
+            PluginSnapshotKind::Tag,
+        ]
+        .into_iter()
+        .enumerate()
+        {
+            let _invocation = driver.next_invocation().await.expect("snapshot");
+            let (frame, body) = outcome_message(
+                driver,
+                ResyncPageOutcome::SnapshotAck(SnapshotAck {
+                    session_id: session.operation_id.to_string(),
+                    page_index: u32::try_from(page_index).expect("page index"),
+                    kind: resource(kind),
+                    segment: (page_index == 0).then_some(KvSegment {
+                        operations: Vec::new(),
+                    }),
+                }),
+            );
+            driver
+                .accept_outcome(&frame, &body)
+                .expect("snapshot outcome");
+        }
+    }
+
+    async fn complete_flush_without_segment(
+        driver: &mut PluginResyncDriver,
+        session: &PluginResyncSession,
+    ) {
+        let _flush = driver.next_invocation().await.expect("flush");
+        let (frame, body) = outcome_message(
+            driver,
+            ResyncPageOutcome::FlushAck(FlushAck {
+                session_id: session.operation_id.to_string(),
+                request_index: 0,
+                segment: None,
+                state: FlushState::Complete,
+            }),
+        );
+        driver.accept_outcome(&frame, &body).expect("flush outcome");
+    }
+
     #[tokio::test]
     async fn plugin_resync_driver_traverses_task_project_tag_then_flush_and_finalize() {
         let (port, session) = fixture();
+        let grants = [storage_grant()];
         let mut driver = PluginResyncDriver::begin(
             port.clone(),
             session.plugin_id.clone(),
@@ -781,7 +867,7 @@ mod tests {
             session.activation_epoch,
             operation(2),
             session.operation_id,
-            &[],
+            &grants,
         )
         .await
         .expect("driver");
@@ -803,7 +889,7 @@ mod tests {
             assert!(matches!(
                 invocation.frame,
                 ParentFrame::Invoke { permission_hash, .. }
-                    if permission_hash == canonical_permission_hash(&[]).expect("permission hash")
+                    if permission_hash == canonical_permission_hash(&grants).expect("permission hash")
             ));
             let (frame, body) = outcome_message(
                 &driver,
@@ -899,6 +985,148 @@ mod tests {
             request.transcript.transcript_sha256(),
             request.transcript.candidate_sha256()
         );
+    }
+
+    #[tokio::test]
+    async fn plugin_resync_driver_without_storage_rejects_nonempty_segments() {
+        let (port, session) = fixture();
+        let mut driver = PluginResyncDriver::begin(
+            port,
+            session.plugin_id.clone(),
+            session.package_generation,
+            session.activation_epoch,
+            operation(2),
+            session.operation_id,
+            &[],
+        )
+        .await
+        .expect("driver");
+        let _invocation = driver.next_invocation().await.expect("snapshot");
+        let (frame, body) = outcome_message(
+            &driver,
+            ResyncPageOutcome::SnapshotAck(SnapshotAck {
+                session_id: session.operation_id.to_string(),
+                page_index: 0,
+                kind: ResourceKind::Task,
+                segment: Some(KvSegment {
+                    operations: vec![KvOperation::Set(KvSet {
+                        key: "unauthorized".to_owned(),
+                        value: ByteList::new(vec![1]).expect("value"),
+                    })],
+                }),
+            }),
+        );
+        assert_eq!(
+            driver.accept_outcome(&frame, &body),
+            Err(PluginResyncDriverError::InvalidOutcome)
+        );
+        assert_eq!(driver.lifecycle(), PluginResyncLifecycle::Loaded);
+
+        let (port, session) = fixture();
+        let mut driver = PluginResyncDriver::begin(
+            port,
+            session.plugin_id.clone(),
+            session.package_generation,
+            session.activation_epoch,
+            operation(2),
+            session.operation_id,
+            &[],
+        )
+        .await
+        .expect("driver");
+        traverse_snapshots_without_kv_operations(&mut driver, &session).await;
+        let _flush = driver.next_invocation().await.expect("flush");
+        let (frame, body) = outcome_message(
+            &driver,
+            ResyncPageOutcome::FlushAck(FlushAck {
+                session_id: session.operation_id.to_string(),
+                request_index: 0,
+                segment: Some(KvSegment {
+                    operations: vec![KvOperation::Set(KvSet {
+                        key: "unauthorized".to_owned(),
+                        value: ByteList::new(vec![1]).expect("value"),
+                    })],
+                }),
+                state: FlushState::Complete,
+            }),
+        );
+        assert_eq!(
+            driver.accept_outcome(&frame, &body),
+            Err(PluginResyncDriverError::InvalidOutcome)
+        );
+        assert_eq!(driver.lifecycle(), PluginResyncLifecycle::Loaded);
+    }
+
+    #[tokio::test]
+    async fn plugin_resync_driver_without_storage_rejects_replace() {
+        let (port, session) = fixture();
+        let mut driver = PluginResyncDriver::begin(
+            port,
+            session.plugin_id.clone(),
+            session.package_generation,
+            session.activation_epoch,
+            operation(2),
+            session.operation_id,
+            &[],
+        )
+        .await
+        .expect("driver");
+        traverse_snapshots_without_kv_operations(&mut driver, &session).await;
+        complete_flush_without_segment(&mut driver, &session).await;
+
+        let _finalize = driver.next_invocation().await.expect("finalize");
+        let (frame, body) = outcome_message(
+            &driver,
+            ResyncPageOutcome::Finalized(FinalizedResync {
+                session_id: session.operation_id.to_string(),
+                choice: FinalKvChoice::ReplaceKvWithStagedSegments,
+            }),
+        );
+        assert_eq!(
+            driver.accept_outcome(&frame, &body),
+            Err(PluginResyncDriverError::InvalidOutcome)
+        );
+        assert_eq!(driver.lifecycle(), PluginResyncLifecycle::Loaded);
+    }
+
+    #[tokio::test]
+    async fn plugin_resync_driver_without_storage_allows_empty_leave_traversal() {
+        let (port, session) = fixture();
+        let mut driver = PluginResyncDriver::begin(
+            port.clone(),
+            session.plugin_id.clone(),
+            session.package_generation,
+            session.activation_epoch,
+            operation(2),
+            session.operation_id,
+            &[],
+        )
+        .await
+        .expect("driver");
+        traverse_snapshots_without_kv_operations(&mut driver, &session).await;
+        complete_flush_without_segment(&mut driver, &session).await;
+
+        let _finalize = driver.next_invocation().await.expect("finalize");
+        let (frame, body) = outcome_message(
+            &driver,
+            ResyncPageOutcome::Finalized(FinalizedResync {
+                session_id: session.operation_id.to_string(),
+                choice: FinalKvChoice::LeaveKv,
+            }),
+        );
+        driver.accept_outcome(&frame, &body).expect("leave outcome");
+        assert!(matches!(
+            driver.finalize().await,
+            Ok(FinalizePluginResyncOutcome::Committed(_))
+        ));
+        let request = port
+            .finalization
+            .lock()
+            .expect("finalization")
+            .clone()
+            .expect("commit request");
+        assert_eq!(request.transcript.candidate_keys(), 0);
+        assert_eq!(request.transcript.replacement(), None);
     }
 
     #[tokio::test]

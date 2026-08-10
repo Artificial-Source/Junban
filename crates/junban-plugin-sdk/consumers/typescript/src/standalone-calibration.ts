@@ -20,16 +20,10 @@ export const guest = {
       nodes: [{ id: "root", content: { tag: "stack", val: { gap: 0, align: "start" } } }],
     };
   },
-  handleSurfaceAction(
-    _context: T.InvocationContext,
-    _action: T.SurfaceAction,
-  ): T.PluginOutcome {
+  handleSurfaceAction(_context: T.InvocationContext, _action: T.SurfaceAction): T.PluginOutcome {
     return {};
   },
-  validateSettings(
-    _context: T.InvocationContext,
-    _values: T.SettingValues,
-  ): T.ValidationIssue[] {
+  validateSettings(_context: T.InvocationContext, _values: T.SettingValues): T.ValidationIssue[] {
     return [];
   },
   resync(_context: T.InvocationContext, page: T.ResyncPage): T.ResyncPageOutcome {

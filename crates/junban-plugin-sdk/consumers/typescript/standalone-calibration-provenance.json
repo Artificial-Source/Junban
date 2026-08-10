@@ -12,10 +12,6 @@
   "byteReproducible": false,
   "sizeBytes": 14988599,
   "sha256": "8616e64e1152ad6f2915107745201ac1888c15124132c9c1fffba0cbd165d8e7",
-  "imports": [
-    "junban:plugin/types@0.1.0"
-  ],
-  "exports": [
-    "junban:plugin/guest@0.1.0"
-  ]
+  "imports": ["junban:plugin/types@0.1.0"],
+  "exports": ["junban:plugin/guest@0.1.0"]
 }

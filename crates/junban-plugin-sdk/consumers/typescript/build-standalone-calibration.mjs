@@ -67,6 +67,11 @@ function provenance(path) {
     exports: ["junban:plugin/guest@0.1.0"],
   };
 }
+function formattedProvenance(path) {
+  return `${JSON.stringify(provenance(path), null, 2)
+    .replace(/"imports": \[\n\s+"([^"]+)"\n\s+\]/, '"imports": ["$1"]')
+    .replace(/"exports": \[\n\s+"([^"]+)"\n\s+\]/, '"exports": ["$1"]')}\n`;
+}
 
 try {
   if (run(jco, ["--version"], true).trim() !== "1.26.1") {
@@ -96,13 +101,13 @@ try {
   }
   if (mode === "--build") {
     copyFileSync(component, retained);
-    writeFileSync(provenancePath, `${JSON.stringify(provenance(retained), null, 2)}\n`, "utf8");
+    writeFileSync(provenancePath, formattedProvenance(retained), "utf8");
   } else {
     if (structure !== componentStructure(retained)) {
       console.error("fresh standalone calibration component structure drifted");
       process.exit(1);
     }
-    const expected = `${JSON.stringify(provenance(retained), null, 2)}\n`;
+    const expected = formattedProvenance(retained);
     if (readFileSync(provenancePath, "utf8") !== expected) {
       console.error("standalone calibration provenance drifted");
       process.exit(1);

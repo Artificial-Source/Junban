@@ -24,22 +24,23 @@ use junban_app::{
     PLUGIN_KV_BYTES_MAX, PLUGIN_KV_KEYS_MAX, PLUGIN_KV_VALUE_BYTES_MAX,
     PLUGIN_RESYNC_PAGE_BYTES_MAX, PLUGIN_RESYNC_PAGE_ITEMS_MAX, PLUGIN_SETTINGS_BYTES_MAX,
     PLUGIN_SETTINGS_KEYS_MAX, PLUGINS_ENABLED_MAX, PLUGINS_INSTALLED_MAX,
-    PlannedPluginInvocationCommit, PluginComponentSelection, PluginCursorPosition,
-    PluginDeliveryMode, PluginEventCursor, PluginGrant, PluginGraphFenceCause,
-    PluginGraphFenceDisposition, PluginGraphFenceOutcome, PluginGraphFenceRequest,
-    PluginGraphFenceResult, PluginGraphRejection, PluginGuestEffectRejection, PluginHookKind,
-    PluginInstallSource, PluginInvocation, PluginInvocationDelivery, PluginInvocationDeliveryCheck,
-    PluginInvocationState, PluginInvocationTerminalKind, PluginKvEntry, PluginKvPatch,
-    PluginManifestEntry, PluginManifestEntrySelector, PluginMutationOutcome,
-    PluginOperatorRequestIdentity, PluginPackageAdmission, PluginPackageReconciliation,
-    PluginResyncEvent, PluginResyncKvCommit, PluginResyncPage, PluginResyncPageRequest,
-    PluginResyncSession, PluginRetainedEventClassification, PluginRuntimeState, PluginSetting,
-    PluginSnapshotItem, PluginSnapshotKind, PublisherTrust, PublisherTrustStatus,
-    RecordPluginAttemptFailureRequest, ReplacePluginGrantsRequest, RepositoryError,
-    ReservePluginInvocationRequest, ReservedPluginInvocation, ResourceRef, ResourceSnapshot,
-    ResyncScope, RevokePluginGrantsRequest, SetPluginSettingRequest,
-    TransitionPluginInvocationRequest, TrustPublisherRequest, VerifiedPluginCursorSkipRequest,
-    classify_plugin_resync_event, convert_active_plugin_event, plugin_committed_event_content_hash,
+    PlannedPluginInvocationCommit, PluginActiveEvent, PluginComponentSelection,
+    PluginCursorPosition, PluginDeliveryMode, PluginEventCursor, PluginGrant,
+    PluginGraphFenceCause, PluginGraphFenceDisposition, PluginGraphFenceOutcome,
+    PluginGraphFenceRequest, PluginGraphFenceResult, PluginGraphRejection,
+    PluginGuestEffectRejection, PluginHookKind, PluginInstallSource, PluginInvocation,
+    PluginInvocationDelivery, PluginInvocationDeliveryCheck, PluginInvocationState,
+    PluginInvocationTerminalKind, PluginKvEntry, PluginKvPatch, PluginManifestEntry,
+    PluginManifestEntrySelector, PluginMutationOutcome, PluginOperatorRequestIdentity,
+    PluginPackageAdmission, PluginPackageReconciliation, PluginResyncEvent, PluginResyncKvCommit,
+    PluginResyncPage, PluginResyncPageRequest, PluginResyncSession,
+    PluginRetainedEventClassification, PluginRuntimeState, PluginSetting, PluginSnapshotItem,
+    PluginSnapshotKind, PublisherTrust, PublisherTrustStatus, RecordPluginAttemptFailureRequest,
+    ReplacePluginGrantsRequest, RepositoryError, ReservePluginInvocationRequest,
+    ReservedPluginInvocation, ResourceRef, ResourceSnapshot, ResyncScope,
+    RevokePluginGrantsRequest, SetPluginSettingRequest, TransitionPluginInvocationRequest,
+    TrustPublisherRequest, VerifiedPluginCursorSkipRequest, classify_plugin_resync_event,
+    convert_active_plugin_event, plugin_committed_event_content_hash,
     plugin_invalidating_event_request_digest, plugin_invocation_request_hash,
     plugin_manifest_entry_authority, plugin_resync_request_hash,
     plugin_retained_event_payload_hash, plugin_retention_loss_request_digest,
@@ -3881,60 +3882,6 @@ fn restart_plugin_cursor_for_resync(
     ))
 }
 
-fn event_matches_subscription(event_type: &str, subscription: EventKind) -> bool {
-    matches!(
-        (event_type, subscription),
-        (EventType::TASK_CREATED, EventKind::TaskCreated)
-            | (EventType::TASK_UPDATED, EventKind::TaskUpdated)
-            | (EventType::TASK_COMPLETED, EventKind::TaskCompleted)
-            | (EventType::TASK_UNCOMPLETED, EventKind::TaskUncompleted)
-            | (EventType::TASK_CANCELLED, EventKind::TaskCancelled)
-            | (EventType::TASK_REOPENED, EventKind::TaskReopened)
-            | (EventType::TASK_DELETED, EventKind::TaskDeleted)
-            | (EventType::PROJECT_CREATED, EventKind::ProjectCreated)
-            | (EventType::PROJECT_UPDATED, EventKind::ProjectUpdated)
-            | (EventType::PROJECT_DELETED, EventKind::ProjectDeleted)
-            | (EventType::TAG_CREATED, EventKind::TagCreated)
-            | (EventType::TAG_UPDATED, EventKind::TagUpdated)
-            | (EventType::TAG_DELETED, EventKind::TagDeleted)
-            | (EventType::SECTION_CREATED, EventKind::SectionCreated)
-            | (EventType::SECTION_UPDATED, EventKind::SectionUpdated)
-            | (EventType::SECTION_DELETED, EventKind::SectionDeleted)
-    )
-}
-
-fn retained_event_is_invalidating(event: &CommittedEvent) -> bool {
-    if !event.affected.task_ids.is_empty()
-        || !event.affected.project_ids.is_empty()
-        || !event.affected.tag_ids.is_empty()
-    {
-        return true;
-    }
-    matches!(
-        event.event_type.as_str(),
-        EventType::TASK_CREATED
-            | EventType::TASK_UPDATED
-            | EventType::TASK_COMPLETED
-            | EventType::TASK_UNCOMPLETED
-            | EventType::TASK_CANCELLED
-            | EventType::TASK_REOPENED
-            | EventType::TASK_DELETED
-            | EventType::TASK_MOVED
-            | EventType::TASK_REORDERED
-            | EventType::TASK_BULK
-            | EventType::TASK_RESTORED
-            | EventType::PROJECT_CREATED
-            | EventType::PROJECT_UPDATED
-            | EventType::PROJECT_DELETED
-            | EventType::TAG_CREATED
-            | EventType::TAG_UPDATED
-            | EventType::TAG_DELETED
-            | EventType::SECTION_DELETED
-            | EventType::OPERATION_UNDONE
-            | EventType::IMPORT_APPLIED
-    )
-}
-
 pub(crate) fn verified_skip_plugin_cursor(
     connection: &mut Connection,
     request: VerifiedPluginCursorSkipRequest,
@@ -3965,17 +3912,31 @@ pub(crate) fn verified_skip_plugin_cursor(
     }
     let event = load_exact_retained_event(&transaction, request.source_revision)?;
     let content_hash = plugin_committed_event_content_hash(&event)?;
-    let subscribed = plugin
-        .manifest
-        .subscriptions
-        .iter()
-        .any(|kind| event_matches_subscription(event.event_type.as_str(), *kind));
     if content_hash != request.event_content_sha256
-        || subscribed
-        || (request.authority.mode == PluginDeliveryMode::StartingCatchUp
-            && retained_event_is_invalidating(&event))
         || request.classification != PluginRetainedEventClassification::Irrelevant
     {
+        return Err(RepositoryError::Conflict);
+    }
+    let authoritative_irrelevant = match request.authority.mode {
+        PluginDeliveryMode::Active => matches!(
+            convert_active_plugin_event(
+                &current.event_epoch,
+                &event,
+                &plugin.manifest.subscriptions,
+            ),
+            Ok(PluginActiveEvent::Irrelevant)
+        ),
+        PluginDeliveryMode::StartingCatchUp => matches!(
+            classify_plugin_resync_event(
+                &current.event_epoch,
+                &event,
+                &plugin.manifest.subscriptions,
+            ),
+            Ok(PluginResyncEvent::Irrelevant)
+        ),
+        PluginDeliveryMode::StartingResync => false,
+    };
+    if !authoritative_irrelevant {
         return Err(RepositoryError::Conflict);
     }
     let cursor = advance_cursor_in_transaction(
@@ -14009,6 +13970,195 @@ mod tests {
                 exact_cursor.next.revision
             );
         }
+    }
+
+    #[test]
+    fn verified_cursor_skip_uses_authoritative_mode_classification_for_completion_cascades() {
+        for mode in [
+            PluginDeliveryMode::Active,
+            PluginDeliveryMode::StartingCatchUp,
+        ] {
+            let profile = TestProfile::new();
+            let mut connection = profile.connection();
+            let store = PluginPackageStore::open(&profile.path).unwrap();
+            let now = Timestamp::constant(1_800_000_189, mode as i32 + 20);
+            let installed = install_named_fixture_with_events(
+                &mut connection,
+                &store,
+                "completion-cascade",
+                Vec::new(),
+                vec![EventKind::TaskCompleted],
+                now,
+            );
+            let granted = grant_capabilities(
+                &mut connection,
+                &installed,
+                &[Capability::EventsSubscribe],
+                now,
+            );
+            let parent_id = TaskId::new();
+            task_ops::create_task(
+                &mut connection,
+                OperationId::new(),
+                parent_id,
+                TaskDraft::new(TaskTitle::new("Cascade parent").unwrap()),
+                now,
+            )
+            .unwrap();
+            let mut child = TaskDraft::new(TaskTitle::new("Cascade child").unwrap());
+            child.parent_id = Some(parent_id);
+            task_ops::create_task(
+                &mut connection,
+                OperationId::new(),
+                TaskId::new(),
+                child,
+                now,
+            )
+            .unwrap();
+            let active = activate_plugin(&mut connection, &store, &granted, now);
+            if mode == PluginDeliveryMode::StartingCatchUp {
+                connection
+                    .execute(
+                        "UPDATE plugins SET runtime_state = 'starting' WHERE plugin_id = ?1",
+                        [active.plugin_id.as_str()],
+                    )
+                    .unwrap();
+            }
+            let plugin = get_installed_plugin(&connection, active.plugin_id).unwrap();
+            let cursor_before = get_plugin_cursor(&connection, plugin.plugin_id.clone()).unwrap();
+            let mutation = task_ops::complete_task(
+                &mut connection,
+                OperationId::new(),
+                parent_id,
+                now,
+                junban_app::TemporalContext::new(
+                    "2026-08-05".parse().unwrap(),
+                    jiff::tz::TimeZone::UTC,
+                ),
+            )
+            .unwrap();
+            assert_eq!(mutation.event.revision, cursor_before.revision + 1);
+            assert_eq!(mutation.event.affected.task_ids.len(), 2);
+            assert_eq!(mutation.event.snapshot, None);
+            assert_eq!(
+                convert_active_plugin_event(
+                    &cursor_before.event_epoch,
+                    &mutation.event,
+                    &plugin.manifest.subscriptions,
+                )
+                .unwrap(),
+                PluginActiveEvent::Irrelevant
+            );
+            assert_eq!(
+                classify_plugin_resync_event(
+                    &cursor_before.event_epoch,
+                    &mutation.event,
+                    &plugin.manifest.subscriptions,
+                )
+                .unwrap(),
+                PluginResyncEvent::Invalidating
+            );
+
+            let request = verified_skip_request(
+                &connection,
+                &plugin,
+                mode,
+                PluginRetainedEventClassification::Irrelevant,
+            );
+            if mode == PluginDeliveryMode::Active {
+                let skipped = verified_skip_plugin_cursor(&mut connection, request, now).unwrap();
+                assert_eq!(skipped.revision, cursor_before.revision + 1);
+                assert!(!skipped.resync_required);
+            } else {
+                assert_eq!(
+                    verified_skip_plugin_cursor(&mut connection, request, now).unwrap_err(),
+                    RepositoryError::Conflict
+                );
+                assert_eq!(
+                    get_plugin_cursor(&connection, plugin.plugin_id).unwrap(),
+                    cursor_before
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn verified_cursor_skip_rejects_unsubscribed_malformed_direct_event_without_mutation() {
+        let profile = TestProfile::new();
+        let mut connection = profile.connection();
+        let store = PluginPackageStore::open(&profile.path).unwrap();
+        let now = Timestamp::constant(1_800_000_189, 30);
+        let installed = install_named_fixture_with_events(
+            &mut connection,
+            &store,
+            "malformed-direct",
+            Vec::new(),
+            vec![EventKind::TaskCompleted],
+            now,
+        );
+        let granted = grant_capabilities(
+            &mut connection,
+            &installed,
+            &[Capability::EventsSubscribe],
+            now,
+        );
+        let plugin = activate_plugin(&mut connection, &store, &granted, now);
+        let cursor_before = get_plugin_cursor(&connection, plugin.plugin_id.clone()).unwrap();
+        task_ops::create_task(
+            &mut connection,
+            OperationId::new(),
+            TaskId::new(),
+            TaskDraft::new(TaskTitle::new("Malformed direct event").unwrap()),
+            now,
+        )
+        .unwrap();
+        let source_revision = cursor_before.revision + 1;
+        make_latest_event_malformed_direct(&connection, source_revision);
+        let event = load_exact_retained_event(&connection, source_revision).unwrap();
+        assert!(
+            !plugin
+                .manifest
+                .subscriptions
+                .contains(&EventKind::TaskCreated)
+        );
+        assert!(matches!(
+            convert_active_plugin_event(
+                &cursor_before.event_epoch,
+                &event,
+                &plugin.manifest.subscriptions,
+            ),
+            Err(junban_app::PluginEventError::Malformed)
+        ));
+        let revision_before = global_revision(&connection).unwrap();
+        let receipt_count_before: i64 = connection
+            .query_row("SELECT COUNT(*) FROM operation_receipts", [], |row| {
+                row.get(0)
+            })
+            .unwrap();
+        let request = verified_skip_request(
+            &connection,
+            &plugin,
+            PluginDeliveryMode::Active,
+            PluginRetainedEventClassification::Irrelevant,
+        );
+
+        assert_eq!(
+            verified_skip_plugin_cursor(&mut connection, request, now).unwrap_err(),
+            RepositoryError::Conflict
+        );
+        assert_eq!(
+            get_plugin_cursor(&connection, plugin.plugin_id).unwrap(),
+            cursor_before
+        );
+        assert_eq!(global_revision(&connection).unwrap(), revision_before);
+        assert_eq!(
+            connection
+                .query_row::<i64, _, _>("SELECT COUNT(*) FROM operation_receipts", [], |row| {
+                    row.get(0)
+                })
+                .unwrap(),
+            receipt_count_before
+        );
     }
 
     #[test]

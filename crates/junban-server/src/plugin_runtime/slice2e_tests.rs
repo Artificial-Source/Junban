@@ -1740,16 +1740,13 @@ async fn phase7_slice2e_real_production_composition() {
     );
 }
 
+#[cfg(target_os = "linux")]
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
 #[ignore = "Linux cgroup-v2 calibration is an explicit evidence campaign"]
 async fn phase7_slice2e_linux_cgroup_calibration_probe() {
     if env::var("JUNBAN_SLICE2E_CALIBRATION").ok().as_deref() != Some("1") {
         return;
     }
-    assert!(
-        cfg!(target_os = "linux"),
-        "Slice 2E cgroup calibration is Linux-only"
-    );
     let paths = FixturePaths::from_environment().expect("calibration fixture paths");
     assert_fixture_imports(&paths);
     let profile_name = env::var("JUNBAN_SLICE2E_CALIBRATION_PROFILE")

@@ -3881,6 +3881,28 @@ fn restart_plugin_cursor_for_resync(
     ))
 }
 
+fn event_matches_subscription(event_type: &str, subscription: EventKind) -> bool {
+    matches!(
+        (event_type, subscription),
+        (EventType::TASK_CREATED, EventKind::TaskCreated)
+            | (EventType::TASK_UPDATED, EventKind::TaskUpdated)
+            | (EventType::TASK_COMPLETED, EventKind::TaskCompleted)
+            | (EventType::TASK_UNCOMPLETED, EventKind::TaskUncompleted)
+            | (EventType::TASK_CANCELLED, EventKind::TaskCancelled)
+            | (EventType::TASK_REOPENED, EventKind::TaskReopened)
+            | (EventType::TASK_DELETED, EventKind::TaskDeleted)
+            | (EventType::PROJECT_CREATED, EventKind::ProjectCreated)
+            | (EventType::PROJECT_UPDATED, EventKind::ProjectUpdated)
+            | (EventType::PROJECT_DELETED, EventKind::ProjectDeleted)
+            | (EventType::TAG_CREATED, EventKind::TagCreated)
+            | (EventType::TAG_UPDATED, EventKind::TagUpdated)
+            | (EventType::TAG_DELETED, EventKind::TagDeleted)
+            | (EventType::SECTION_CREATED, EventKind::SectionCreated)
+            | (EventType::SECTION_UPDATED, EventKind::SectionUpdated)
+            | (EventType::SECTION_DELETED, EventKind::SectionDeleted)
+    )
+}
+
 fn retained_event_is_invalidating(event: &CommittedEvent) -> bool {
     if !event.affected.task_ids.is_empty()
         || !event.affected.project_ids.is_empty()
@@ -3947,10 +3969,11 @@ pub(crate) fn verified_skip_plugin_cursor(
         .manifest
         .subscriptions
         .iter()
-        .any(|kind| kind.as_str() == event.event_type.as_str());
+        .any(|kind| event_matches_subscription(event.event_type.as_str(), *kind));
     if content_hash != request.event_content_sha256
         || subscribed
-        || retained_event_is_invalidating(&event)
+        || (request.authority.mode == PluginDeliveryMode::StartingCatchUp
+            && retained_event_is_invalidating(&event))
         || request.classification != PluginRetainedEventClassification::Irrelevant
     {
         return Err(RepositoryError::Conflict);
@@ -7290,15 +7313,15 @@ mod tests {
             capability,
             scope: PermissionScope::Unscoped(UnscopedPermission {}),
         };
-        let mut permissions = vec![
-            unscoped(Capability::Commands),
-            Permission {
+        let mut permissions = vec![unscoped(Capability::Commands)];
+        if !subscriptions.is_empty() {
+            permissions.push(Permission {
                 capability: Capability::EventsSubscribe,
                 scope: PermissionScope::Events(EventScope {
                     event_kinds: subscriptions.clone(),
                 }),
-            },
-        ];
+            });
+        }
         permissions.extend([
             Permission {
                 capability: Capability::Http,
@@ -7956,8 +7979,31 @@ mod tests {
         dependencies: Vec<Dependency>,
         now: Timestamp,
     ) -> InstalledPlugin {
-        let (bytes, authority, public_key) =
-            package_with_dependencies(plugin_id, "1.0.0", dependencies);
+        install_named_fixture_with_events(
+            connection,
+            store,
+            plugin_id,
+            dependencies,
+            vec![EventKind::TaskCreated],
+            now,
+        )
+    }
+
+    fn install_named_fixture_with_events(
+        connection: &mut Connection,
+        store: &PluginPackageStore,
+        plugin_id: &str,
+        dependencies: Vec<Dependency>,
+        subscriptions: Vec<EventKind>,
+        now: Timestamp,
+    ) -> InstalledPlugin {
+        let (bytes, authority, public_key) = package_with_key_and_events(
+            plugin_id,
+            "1.0.0",
+            dependencies,
+            &KEY_BYTES,
+            subscriptions,
+        );
         assert_eq!(publish_bytes(store, &bytes).unwrap(), authority);
         let trusted: bool = connection
             .query_row(
@@ -14026,7 +14072,14 @@ mod tests {
         let profile = TestProfile::new();
         let mut connection = profile.connection();
         let store = PluginPackageStore::open(&profile.path).unwrap();
-        let installed = install_fixture(&mut connection, &store, now);
+        let installed = install_named_fixture_with_events(
+            &mut connection,
+            &store,
+            "test-plugin",
+            Vec::new(),
+            Vec::new(),
+            now,
+        );
         let granted = grant_capabilities(&mut connection, &installed, &[Capability::Commands], now);
         let plugin = activate_plugin(&mut connection, &store, &granted, now);
         append_irrelevant_settings_event(&mut connection, now, "#234567");
@@ -14064,6 +14117,25 @@ mod tests {
         )
         .unwrap();
         verified_skip_plugin_cursor(&mut connection, blocked_skip, now).unwrap();
+
+        // Active delivery intentionally treats a valid unsubscribed direct domain
+        // event as cursor-only work. Starting catch-up keeps the stricter baseline
+        // invalidation rule enforced above.
+        task_ops::create_task(
+            &mut connection,
+            OperationId::new(),
+            TaskId::new(),
+            TaskDraft::new(TaskTitle::new("Unsubscribed active skip").unwrap()),
+            now,
+        )
+        .unwrap();
+        let unsubscribed = verified_skip_request(
+            &connection,
+            &plugin,
+            PluginDeliveryMode::Active,
+            PluginRetainedEventClassification::Irrelevant,
+        );
+        verified_skip_plugin_cursor(&mut connection, unsubscribed, now).unwrap();
 
         connection
             .execute(

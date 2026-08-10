@@ -5551,4 +5551,6 @@ fn frame_plugin_id(frame: &ChildFrame) -> Option<PluginId> {
 }
 
 #[cfg(test)]
+mod slice2e_tests;
+#[cfg(test)]
 mod tests;

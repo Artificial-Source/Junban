@@ -2474,7 +2474,7 @@ pub(crate) fn get_plugin_cursor(
     load_plugin_cursor(connection, &plugin_id)
 }
 
-pub(crate) fn begin_plugin_resync(
+pub(crate) fn open_plugin_resync_session(
     connection: &mut Connection,
     request: BeginPluginResyncRequest,
     now: Timestamp,
@@ -3051,10 +3051,8 @@ fn advance_cursor_in_transaction(
     load_plugin_cursor(connection, &request.plugin_id)
 }
 
-// P7-2D-DB-002 REMOVAL BLOCKER: this unwrapped cursor mutation remains only
-// while the pre-integration supervisor compiles. New delivery paths must use
-// an authority-bearing event terminal or verified skip.
-pub(crate) fn advance_plugin_cursor(
+#[cfg(test)]
+fn advance_cursor_for_test(
     connection: &mut Connection,
     request: AdvancePluginCursorRequest,
     now: Timestamp,
@@ -4316,8 +4314,8 @@ fn invocation_request_material(request: &ReservePluginInvocationRequest, now: Ti
             .map_or(0, |value| value.to_string().len())
 }
 
-// P7-2D-DB-002 REMOVAL BLOCKER: unwrapped pre-integration supervisor path.
-pub(crate) fn reserve_plugin_invocation(
+#[cfg(test)]
+fn reserve_invocation_for_test(
     connection: &mut Connection,
     request: ReservePluginInvocationRequest,
     now: Timestamp,
@@ -4610,8 +4608,8 @@ fn legal_invocation_transition(from: PluginInvocationState, to: PluginInvocation
     )
 }
 
-// P7-2D-DB-002 REMOVAL BLOCKER: unwrapped pre-integration supervisor path.
-pub(crate) fn transition_plugin_invocation(
+#[cfg(test)]
+fn transition_invocation_for_test(
     connection: &mut Connection,
     request: TransitionPluginInvocationRequest,
     now: Timestamp,
@@ -4782,8 +4780,8 @@ struct PluginInvocationCompletionFence {
     activation_epoch: u64,
 }
 
-// P7-2D-DB-002 REMOVAL BLOCKER: unwrapped pre-integration supervisor path.
-pub(crate) fn complete_plugin_invocation(
+#[cfg(test)]
+fn terminalize_invocation_for_test(
     connection: &mut Connection,
     operation_id: OperationId,
     plugin_id: PluginId,
@@ -4791,7 +4789,7 @@ pub(crate) fn complete_plugin_invocation(
     activation_epoch: u64,
     now: Timestamp,
 ) -> Result<CommittedPluginInvocation, RepositoryError> {
-    complete_plugin_invocation_with(
+    terminalize_plugin_invocation_with(
         connection,
         operation_id,
         plugin_id,
@@ -4807,7 +4805,7 @@ pub(crate) fn complete_authorized_plugin_invocation(
     request: CompletePluginInvocationRequest,
     now: Timestamp,
 ) -> Result<CommittedPluginInvocation, RepositoryError> {
-    complete_plugin_invocation_with_delivery(
+    terminalize_plugin_invocation_with_delivery(
         connection,
         PluginInvocationCompletionFence {
             operation_id: request.operation_id,
@@ -4821,7 +4819,8 @@ pub(crate) fn complete_authorized_plugin_invocation(
     )
 }
 
-fn complete_plugin_invocation_with(
+#[cfg(test)]
+fn terminalize_plugin_invocation_with(
     connection: &mut Connection,
     operation_id: OperationId,
     plugin_id: PluginId,
@@ -4830,7 +4829,7 @@ fn complete_plugin_invocation_with(
     now: Timestamp,
     before_commit: impl FnOnce() -> Result<(), RepositoryError>,
 ) -> Result<CommittedPluginInvocation, RepositoryError> {
-    complete_plugin_invocation_with_delivery(
+    terminalize_plugin_invocation_with_delivery(
         connection,
         PluginInvocationCompletionFence {
             operation_id,
@@ -4844,7 +4843,7 @@ fn complete_plugin_invocation_with(
     )
 }
 
-fn complete_plugin_invocation_with_delivery(
+fn terminalize_plugin_invocation_with_delivery(
     connection: &mut Connection,
     fence: PluginInvocationCompletionFence,
     delivery: Option<&PluginInvocationDelivery>,
@@ -5065,8 +5064,8 @@ impl ApplicationMutationUnitOfWork for StorageMutationUnitOfWork<'_> {
     }
 }
 
-// P7-2D-DB-002 REMOVAL BLOCKER: unwrapped pre-integration supervisor path.
-pub(crate) fn commit_plugin_invocation(
+#[cfg(test)]
+fn commit_invocation_for_test(
     connection: &mut Connection,
     request: PlannedPluginInvocationCommit,
     now: Timestamp,
@@ -5088,7 +5087,8 @@ pub(crate) fn commit_authorized_plugin_invocation(
     )
 }
 
-pub(crate) fn commit_plugin_invocation_with(
+#[cfg(test)]
+fn commit_plugin_invocation_with(
     connection: &mut Connection,
     request: PlannedPluginInvocationCommit,
     now: Timestamp,
@@ -6802,7 +6802,7 @@ mod tests {
         let plugin_id = request.plugin_id.clone();
         let package_generation = request.package_generation;
         let activation_epoch = request.activation_epoch;
-        reserve_plugin_invocation(connection, request, now).unwrap();
+        reserve_invocation_for_test(connection, request, now).unwrap();
         for (expected_state, next_state) in [
             (
                 PluginInvocationState::Reserved,
@@ -6813,7 +6813,7 @@ mod tests {
                 PluginInvocationState::AmbiguousHttp,
             ),
         ] {
-            transition_plugin_invocation(
+            transition_invocation_for_test(
                 connection,
                 TransitionPluginInvocationRequest {
                     operation_id,
@@ -7137,7 +7137,7 @@ mod tests {
         choice: FinalKvChoice,
     ) -> (FinalizePluginResyncRequest, InstalledPlugin, u64) {
         let operation_id = OperationId::new();
-        let session = begin_plugin_resync(
+        let session = open_plugin_resync_session(
             connection,
             BeginPluginResyncRequest {
                 operation_id,
@@ -8179,7 +8179,7 @@ mod tests {
             delivery_operation_id: OperationId::new(),
             resync_session: None,
         };
-        reserve_plugin_invocation(&mut connection, request, now).unwrap();
+        reserve_invocation_for_test(&mut connection, request, now).unwrap();
         let dashboard_persisted: String = connection
             .query_row(
                 "SELECT entry_id FROM plugin_invocations WHERE operation_id = ?1",
@@ -8204,7 +8204,7 @@ mod tests {
                 .entry,
             dashboard_entry
         );
-        complete_plugin_invocation(
+        terminalize_invocation_for_test(
             &mut connection,
             dashboard_operation,
             plugin.plugin_id.clone(),
@@ -8214,7 +8214,7 @@ mod tests {
         )
         .unwrap();
         let sidebar_operation = OperationId::new();
-        reserve_plugin_invocation(
+        reserve_invocation_for_test(
             &mut connection,
             ReservePluginInvocationRequest {
                 operation_id: sidebar_operation,
@@ -8245,7 +8245,7 @@ mod tests {
             "cf9341a91359732fb9146d2cd6426495c7eecb3e344be53fbfa3301e82457e33"
         );
         assert_ne!(dashboard_persisted, sidebar_persisted);
-        complete_plugin_invocation(
+        terminalize_invocation_for_test(
             &mut connection,
             sidebar_operation,
             plugin.plugin_id.clone(),
@@ -8255,7 +8255,7 @@ mod tests {
         )
         .unwrap();
         assert_eq!(
-            reserve_plugin_invocation(
+            reserve_invocation_for_test(
                 &mut connection,
                 ReservePluginInvocationRequest {
                     operation_id: OperationId::new(),
@@ -8332,7 +8332,7 @@ mod tests {
             resync_session: None,
         };
         assert_eq!(
-            reserve_plugin_invocation(
+            reserve_invocation_for_test(
                 &mut connection,
                 reservation(&active_without_grant, "task-deleted"),
                 now,
@@ -8378,10 +8378,10 @@ mod tests {
         };
 
         let reserved =
-            reserve_plugin_invocation(&mut connection, granted_reservation("task-deleted"), now)
+            reserve_invocation_for_test(&mut connection, granted_reservation("task-deleted"), now)
                 .unwrap();
         let invocation = reserved.invocation().unwrap().clone();
-        transition_plugin_invocation(
+        transition_invocation_for_test(
             &mut connection,
             TransitionPluginInvocationRequest {
                 operation_id: invocation.operation_id,
@@ -8395,7 +8395,7 @@ mod tests {
         )
         .unwrap();
         let cursor = get_plugin_cursor(&connection, invocation.plugin_id.clone()).unwrap();
-        commit_plugin_invocation(
+        commit_invocation_for_test(
             &mut connection,
             plan(CommitPluginInvocationRequest {
                 invocation_operation_id: invocation.operation_id,
@@ -8493,7 +8493,7 @@ mod tests {
         let current = get_installed_plugin(&connection, plugin.plugin_id.clone()).unwrap();
         let active = activate_plugin(&mut connection, &store, &current, now);
         assert_eq!(
-            reserve_plugin_invocation(
+            reserve_invocation_for_test(
                 &mut connection,
                 ReservePluginInvocationRequest {
                     operation_id: OperationId::new(),
@@ -9716,22 +9716,22 @@ mod tests {
             resync_session: None,
         };
         assert!(
-            !reserve_plugin_invocation(&mut connection, reservation.clone(), now)
+            !reserve_invocation_for_test(&mut connection, reservation.clone(), now)
                 .unwrap()
                 .replayed()
         );
         assert!(
-            reserve_plugin_invocation(&mut connection, reservation.clone(), now)
+            reserve_invocation_for_test(&mut connection, reservation.clone(), now)
                 .unwrap()
                 .replayed()
         );
         let mut changed_reservation = reservation;
         changed_reservation.request_sha256 = Sha256Digest::of(b"changed");
         assert_eq!(
-            reserve_plugin_invocation(&mut connection, changed_reservation, now).unwrap_err(),
+            reserve_invocation_for_test(&mut connection, changed_reservation, now).unwrap_err(),
             RepositoryError::IdempotencyMismatch
         );
-        transition_plugin_invocation(
+        transition_invocation_for_test(
             &mut connection,
             TransitionPluginInvocationRequest {
                 operation_id: invocation_operation_id,
@@ -9815,7 +9815,7 @@ mod tests {
             PluginInvocationState::EffectCommitting
         );
 
-        let committed = commit_plugin_invocation(&mut connection, plan(request), now).unwrap();
+        let committed = commit_invocation_for_test(&mut connection, plan(request), now).unwrap();
         assert_eq!(
             committed.mutation.unwrap().event.revision,
             revision_before as u64 + 1
@@ -9863,9 +9863,9 @@ mod tests {
             delivery_operation_id: OperationId::new(),
             resync_session: None,
         };
-        reserve_plugin_invocation(&mut connection, request.clone(), now).unwrap();
+        reserve_invocation_for_test(&mut connection, request.clone(), now).unwrap();
         assert!(
-            complete_plugin_invocation_with(
+            terminalize_plugin_invocation_with(
                 &mut connection,
                 operation_id,
                 plugin.plugin_id.clone(),
@@ -9890,7 +9890,7 @@ mod tests {
             )
             .unwrap();
         assert_eq!(receipt_count, 0);
-        let committed = complete_plugin_invocation(
+        let committed = terminalize_invocation_for_test(
             &mut connection,
             operation_id,
             plugin.plugin_id.clone(),
@@ -9909,21 +9909,21 @@ mod tests {
         drop(connection);
 
         let mut connection = profile.connection();
-        let replay = reserve_plugin_invocation(&mut connection, request.clone(), now).unwrap();
+        let replay = reserve_invocation_for_test(&mut connection, request.clone(), now).unwrap();
         let terminal = replay.terminal().unwrap();
         assert!(terminal.replayed);
         assert_eq!(serde_json::to_string(terminal).unwrap(), committed_json);
         let mut changed = request.clone();
         changed.request_sha256 = Sha256Digest::of(b"changed-terminal-request");
         assert_eq!(
-            reserve_plugin_invocation(&mut connection, changed, now).unwrap_err(),
+            reserve_invocation_for_test(&mut connection, changed, now).unwrap_err(),
             RepositoryError::IdempotencyMismatch
         );
 
         let expired = now
             .checked_add((PLUGIN_INVOCATION_RETENTION_DAYS * 24).hours())
             .unwrap();
-        let fresh = reserve_plugin_invocation(&mut connection, request, expired).unwrap();
+        let fresh = reserve_invocation_for_test(&mut connection, request, expired).unwrap();
         assert!(matches!(fresh, ReservedPluginInvocation::Reserved(_)));
     }
 
@@ -9962,8 +9962,8 @@ mod tests {
 
         let domain_operation = OperationId::new();
         let domain_reservation = reservation(domain_operation, b"domain-terminal");
-        reserve_plugin_invocation(&mut connection, domain_reservation.clone(), now).unwrap();
-        transition_plugin_invocation(
+        reserve_invocation_for_test(&mut connection, domain_reservation.clone(), now).unwrap();
+        transition_invocation_for_test(
             &mut connection,
             TransitionPluginInvocationRequest {
                 operation_id: domain_operation,
@@ -9977,7 +9977,7 @@ mod tests {
         )
         .unwrap();
         let task_id = TaskId::new();
-        let domain = commit_plugin_invocation(
+        let domain = commit_invocation_for_test(
             &mut connection,
             plan(CommitPluginInvocationRequest {
                 invocation_operation_id: domain_operation,
@@ -10002,7 +10002,7 @@ mod tests {
             PluginInvocationTerminalKind::DomainEffect
         );
         assert!(domain.mutation.as_ref().unwrap().newly_committed);
-        let replay = reserve_plugin_invocation(&mut connection, domain_reservation, now).unwrap();
+        let replay = reserve_invocation_for_test(&mut connection, domain_reservation, now).unwrap();
         let replay = replay.terminal().unwrap();
         assert_eq!(
             replay.terminal_kind,
@@ -10013,8 +10013,8 @@ mod tests {
 
         let kv_operation = OperationId::new();
         let kv_reservation = reservation(kv_operation, b"kv-terminal");
-        reserve_plugin_invocation(&mut connection, kv_reservation.clone(), now).unwrap();
-        transition_plugin_invocation(
+        reserve_invocation_for_test(&mut connection, kv_reservation.clone(), now).unwrap();
+        transition_invocation_for_test(
             &mut connection,
             TransitionPluginInvocationRequest {
                 operation_id: kv_operation,
@@ -10027,7 +10027,7 @@ mod tests {
             now,
         )
         .unwrap();
-        let kv = commit_plugin_invocation(
+        let kv = commit_invocation_for_test(
             &mut connection,
             plan(CommitPluginInvocationRequest {
                 invocation_operation_id: kv_operation,
@@ -10052,7 +10052,7 @@ mod tests {
         let mut expected_kv_replay = kv.clone();
         expected_kv_replay.replayed = true;
         assert_eq!(
-            reserve_plugin_invocation(&mut connection, kv_reservation.clone(), now)
+            reserve_invocation_for_test(&mut connection, kv_reservation.clone(), now)
                 .unwrap()
                 .terminal()
                 .unwrap(),
@@ -10061,14 +10061,14 @@ mod tests {
         let mut changed_kv = kv_reservation.clone();
         changed_kv.request_sha256 = Sha256Digest::of(b"changed-kv-terminal");
         assert_eq!(
-            reserve_plugin_invocation(&mut connection, changed_kv, now).unwrap_err(),
+            reserve_invocation_for_test(&mut connection, changed_kv, now).unwrap_err(),
             RepositoryError::IdempotencyMismatch
         );
 
         let http_operation = OperationId::new();
         let http_reservation = reservation(http_operation, b"http-terminal");
-        reserve_plugin_invocation(&mut connection, http_reservation.clone(), now).unwrap();
-        transition_plugin_invocation(
+        reserve_invocation_for_test(&mut connection, http_reservation.clone(), now).unwrap();
+        transition_invocation_for_test(
             &mut connection,
             TransitionPluginInvocationRequest {
                 operation_id: http_operation,
@@ -10081,7 +10081,7 @@ mod tests {
             now,
         )
         .unwrap();
-        let http = commit_plugin_invocation(
+        let http = commit_invocation_for_test(
             &mut connection,
             plan(CommitPluginInvocationRequest {
                 invocation_operation_id: http_operation,
@@ -10102,7 +10102,7 @@ mod tests {
         let mut expected_http_replay = http.clone();
         expected_http_replay.replayed = true;
         assert_eq!(
-            reserve_plugin_invocation(&mut connection, http_reservation.clone(), now)
+            reserve_invocation_for_test(&mut connection, http_reservation.clone(), now)
                 .unwrap()
                 .terminal()
                 .unwrap(),
@@ -10111,7 +10111,7 @@ mod tests {
         let mut changed_http = http_reservation.clone();
         changed_http.request_sha256 = Sha256Digest::of(b"changed-http-terminal");
         assert_eq!(
-            reserve_plugin_invocation(&mut connection, changed_http, now).unwrap_err(),
+            reserve_invocation_for_test(&mut connection, changed_http, now).unwrap_err(),
             RepositoryError::IdempotencyMismatch
         );
         let backup = crate::backup_ops::create_backup(&connection, &profile.path).unwrap();
@@ -10121,12 +10121,12 @@ mod tests {
             .checked_add((PLUGIN_INVOCATION_RETENTION_DAYS * 24).hours())
             .unwrap();
         assert!(
-            reserve_plugin_invocation(&mut connection, http_reservation.clone(), expired)
+            reserve_invocation_for_test(&mut connection, http_reservation.clone(), expired)
                 .unwrap()
                 .invocation()
                 .is_some()
         );
-        complete_plugin_invocation(
+        terminalize_invocation_for_test(
             &mut connection,
             http_operation,
             plugin.plugin_id.clone(),
@@ -10136,7 +10136,7 @@ mod tests {
         )
         .unwrap();
         assert!(
-            reserve_plugin_invocation(&mut connection, kv_reservation, expired)
+            reserve_invocation_for_test(&mut connection, kv_reservation, expired)
                 .unwrap()
                 .invocation()
                 .is_some()
@@ -10159,7 +10159,7 @@ mod tests {
         let plugin = activate_plugin(&mut connection, &store, &granted, now);
         let cursor = get_plugin_cursor(&connection, plugin.plugin_id.clone()).unwrap();
         let invocation_operation_id = OperationId::new();
-        reserve_plugin_invocation(
+        reserve_invocation_for_test(
             &mut connection,
             ReservePluginInvocationRequest {
                 operation_id: invocation_operation_id,
@@ -10177,7 +10177,7 @@ mod tests {
             now,
         )
         .unwrap();
-        transition_plugin_invocation(
+        transition_invocation_for_test(
             &mut connection,
             TransitionPluginInvocationRequest {
                 operation_id: invocation_operation_id,
@@ -10231,7 +10231,7 @@ mod tests {
             draft: TaskDraft::new(TaskTitle::new("Changed task").unwrap()),
         });
         assert_eq!(
-            commit_plugin_invocation(&mut connection, plan(changed), now).unwrap_err(),
+            commit_invocation_for_test(&mut connection, plan(changed), now).unwrap_err(),
             RepositoryError::IdempotencyMismatch
         );
         assert_eq!(
@@ -10245,7 +10245,7 @@ mod tests {
             PluginInvocationState::EffectCommitting
         );
 
-        let committed = commit_plugin_invocation(&mut connection, plan(request), now).unwrap();
+        let committed = commit_invocation_for_test(&mut connection, plan(request), now).unwrap();
         assert!(!committed.mutation.unwrap().newly_committed);
         assert_eq!(committed.cursor.unwrap().revision, revision_after_effect);
         assert_eq!(
@@ -10287,7 +10287,7 @@ mod tests {
             )
             .unwrap() as u64;
         let operation_id = OperationId::new();
-        reserve_plugin_invocation(
+        reserve_invocation_for_test(
             &mut connection,
             ReservePluginInvocationRequest {
                 operation_id,
@@ -10305,7 +10305,7 @@ mod tests {
             now,
         )
         .unwrap();
-        transition_plugin_invocation(
+        transition_invocation_for_test(
             &mut connection,
             TransitionPluginInvocationRequest {
                 operation_id,
@@ -10369,7 +10369,7 @@ mod tests {
             PluginInvocationState::DispatchingHttp
         );
 
-        let committed = commit_plugin_invocation(&mut connection, plan(request), now).unwrap();
+        let committed = commit_invocation_for_test(&mut connection, plan(request), now).unwrap();
         assert_eq!(committed.cursor.unwrap().revision, head);
         assert!(committed.mutation.is_none());
         assert_eq!(
@@ -10422,20 +10422,20 @@ mod tests {
                 resync_required: false,
             },
         };
-        let advanced = advance_plugin_cursor(&mut connection, request.clone(), now).unwrap();
+        let advanced = advance_cursor_for_test(&mut connection, request.clone(), now).unwrap();
         assert!(!advanced.resync_required);
         assert_eq!(
-            advance_plugin_cursor(&mut connection, request.clone(), now).unwrap(),
+            advance_cursor_for_test(&mut connection, request.clone(), now).unwrap(),
             advanced
         );
         let mut stale_fence = request;
         stale_fence.package_generation += 1;
         assert_eq!(
-            advance_plugin_cursor(&mut connection, stale_fence, now).unwrap_err(),
+            advance_cursor_for_test(&mut connection, stale_fence, now).unwrap_err(),
             RepositoryError::Conflict
         );
         assert_eq!(
-            advance_plugin_cursor(
+            advance_cursor_for_test(
                 &mut connection,
                 AdvancePluginCursorRequest {
                     plugin_id: plugin.plugin_id.clone(),
@@ -10566,7 +10566,7 @@ mod tests {
         )
         .unwrap();
 
-        let session = begin_plugin_resync(
+        let session = open_plugin_resync_session(
             &mut connection,
             BeginPluginResyncRequest {
                 operation_id: OperationId::new(),
@@ -10959,13 +10959,13 @@ mod tests {
         );
         let dispatching_operation = OperationId::new();
         let dispatching_delivery = OperationId::new();
-        reserve_plugin_invocation(
+        reserve_invocation_for_test(
             &mut connection,
             retention_test_invocation_request(&target, dispatching_operation, dispatching_delivery),
             now,
         )
         .unwrap();
-        transition_plugin_invocation(
+        transition_invocation_for_test(
             &mut connection,
             TransitionPluginInvocationRequest {
                 operation_id: dispatching_operation,
@@ -11096,14 +11096,14 @@ mod tests {
             let sibling = activate_plugin(&mut connection, &store, &sibling, now);
             let target_operation = OperationId::new();
             let target_delivery = OperationId::new();
-            reserve_plugin_invocation(
+            reserve_invocation_for_test(
                 &mut connection,
                 retention_test_invocation_request(&target, target_operation, target_delivery),
                 now,
             )
             .unwrap();
             if target_state == PluginInvocationState::EffectCommitting {
-                transition_plugin_invocation(
+                transition_invocation_for_test(
                     &mut connection,
                     TransitionPluginInvocationRequest {
                         operation_id: target_operation,
@@ -11119,14 +11119,14 @@ mod tests {
             }
             let sibling_operation = OperationId::new();
             let sibling_delivery = OperationId::new();
-            reserve_plugin_invocation(
+            reserve_invocation_for_test(
                 &mut connection,
                 retention_test_invocation_request(&sibling, sibling_operation, sibling_delivery),
                 now,
             )
             .unwrap();
             if target_state == PluginInvocationState::Reserved {
-                transition_plugin_invocation(
+                transition_invocation_for_test(
                     &mut connection,
                     TransitionPluginInvocationRequest {
                         operation_id: sibling_operation,
@@ -11356,7 +11356,7 @@ mod tests {
         let cursor = get_plugin_cursor(&connection, plugin.plugin_id.clone()).unwrap();
         let http_operation = OperationId::new();
         let delivery_operation = OperationId::new();
-        reserve_plugin_invocation(
+        reserve_invocation_for_test(
             &mut connection,
             ReservePluginInvocationRequest {
                 operation_id: http_operation,
@@ -11374,7 +11374,7 @@ mod tests {
             now,
         )
         .unwrap();
-        transition_plugin_invocation(
+        transition_invocation_for_test(
             &mut connection,
             TransitionPluginInvocationRequest {
                 operation_id: http_operation,
@@ -11387,7 +11387,7 @@ mod tests {
             now,
         )
         .unwrap();
-        transition_plugin_invocation(
+        transition_invocation_for_test(
             &mut connection,
             TransitionPluginInvocationRequest {
                 operation_id: http_operation,
@@ -11426,9 +11426,9 @@ mod tests {
                 resync_required: false,
             },
         };
-        let resync = advance_plugin_cursor(&mut connection, request.clone(), now).unwrap();
+        let resync = advance_cursor_for_test(&mut connection, request.clone(), now).unwrap();
         assert_eq!(
-            advance_plugin_cursor(&mut connection, request, now).unwrap(),
+            advance_cursor_for_test(&mut connection, request, now).unwrap(),
             resync
         );
         assert!(resync.resync_required);
@@ -11455,11 +11455,11 @@ mod tests {
             resync_session: None,
         };
         assert_eq!(
-            reserve_plugin_invocation(&mut connection, ordinary, now).unwrap_err(),
+            reserve_invocation_for_test(&mut connection, ordinary, now).unwrap_err(),
             RepositoryError::Conflict
         );
         let resync_operation_id = OperationId::new();
-        let session = begin_plugin_resync(
+        let session = open_plugin_resync_session(
             &mut connection,
             BeginPluginResyncRequest {
                 operation_id: resync_operation_id,
@@ -11470,7 +11470,7 @@ mod tests {
             now,
         )
         .unwrap();
-        let resync_invocation = reserve_plugin_invocation(
+        let resync_invocation = reserve_invocation_for_test(
             &mut connection,
             ReservePluginInvocationRequest {
                 operation_id: resync_operation_id,
@@ -11487,7 +11487,7 @@ mod tests {
         )
         .unwrap();
         let invocation = resync_invocation.invocation().unwrap().clone();
-        transition_plugin_invocation(
+        transition_invocation_for_test(
             &mut connection,
             TransitionPluginInvocationRequest {
                 operation_id: invocation.operation_id,
@@ -11500,7 +11500,7 @@ mod tests {
             now,
         )
         .unwrap();
-        commit_plugin_invocation(
+        commit_invocation_for_test(
             &mut connection,
             plan(CommitPluginInvocationRequest {
                 invocation_operation_id: invocation.operation_id,
@@ -12030,7 +12030,7 @@ mod tests {
             )
             .unwrap();
         assert_eq!(
-            advance_plugin_cursor(
+            advance_cursor_for_test(
                 &mut connection,
                 AdvancePluginCursorRequest {
                     plugin_id: plugin.plugin_id.clone(),
@@ -12049,7 +12049,7 @@ mod tests {
             RepositoryError::Conflict
         );
         let operation_id = OperationId::new();
-        let session = begin_plugin_resync(
+        let session = open_plugin_resync_session(
             &mut connection,
             BeginPluginResyncRequest {
                 operation_id,
@@ -12072,17 +12072,17 @@ mod tests {
             delivery_operation_id: OperationId::new(),
             resync_session: Some(session.clone()),
         };
-        reserve_plugin_invocation(&mut connection, reservation.clone(), now).unwrap();
+        reserve_invocation_for_test(&mut connection, reservation.clone(), now).unwrap();
         let mut changed = reservation;
         changed.delivery_operation_id = OperationId::new();
         assert_eq!(
-            reserve_plugin_invocation(&mut connection, changed, now).unwrap_err(),
+            reserve_invocation_for_test(&mut connection, changed, now).unwrap_err(),
             RepositoryError::IdempotencyMismatch
         );
         // A fixed-head resync may finalize after newer retained events arrive; catch-up
         // consumes that retained tail before live admission reopens.
         set_community_plugin_policy(&mut connection, OperationId::new(), false, now).unwrap();
-        transition_plugin_invocation(
+        transition_invocation_for_test(
             &mut connection,
             TransitionPluginInvocationRequest {
                 operation_id,
@@ -12095,7 +12095,7 @@ mod tests {
             now,
         )
         .unwrap();
-        let committed = commit_plugin_invocation(
+        let committed = commit_invocation_for_test(
             &mut connection,
             plan(CommitPluginInvocationRequest {
                 invocation_operation_id: operation_id,
@@ -12577,7 +12577,7 @@ mod tests {
         .unwrap();
         let plugin = get_installed_plugin(&connection, installed.plugin_id).unwrap();
         let operation_id = OperationId::new();
-        let session = begin_plugin_resync(
+        let session = open_plugin_resync_session(
             &mut connection,
             BeginPluginResyncRequest {
                 operation_id,
@@ -13037,12 +13037,12 @@ mod tests {
             delivery_operation_id: OperationId::new(),
             resync_session: None,
         };
-        reserve_plugin_invocation(&mut connection, operator.clone(), now).unwrap();
+        reserve_invocation_for_test(&mut connection, operator.clone(), now).unwrap();
         assert_eq!(
             verified_skip_plugin_cursor(&mut connection, blocked_skip.clone(), now).unwrap_err(),
             RepositoryError::Conflict
         );
-        complete_plugin_invocation(
+        terminalize_invocation_for_test(
             &mut connection,
             operator.operation_id,
             plugin.plugin_id.clone(),
@@ -13109,7 +13109,7 @@ mod tests {
         .unwrap();
         let resync_plugin = get_installed_plugin(&connection, installed.plugin_id).unwrap();
         let resync_operation = OperationId::new();
-        let session = begin_plugin_resync(
+        let session = open_plugin_resync_session(
             &mut connection,
             BeginPluginResyncRequest {
                 operation_id: resync_operation,
@@ -13358,7 +13358,7 @@ mod tests {
         .unwrap();
         let starting_resync = get_installed_plugin(&connection, installed.plugin_id).unwrap();
         let resync_operation = OperationId::new();
-        let session = begin_plugin_resync(
+        let session = open_plugin_resync_session(
             &mut connection,
             BeginPluginResyncRequest {
                 operation_id: resync_operation,
@@ -13423,8 +13423,8 @@ mod tests {
             resync_session: None,
         };
         let http_operation = OperationId::new();
-        reserve_plugin_invocation(&mut connection, reserve(http_operation), now).unwrap();
-        transition_plugin_invocation(
+        reserve_invocation_for_test(&mut connection, reserve(http_operation), now).unwrap();
+        transition_invocation_for_test(
             &mut connection,
             TransitionPluginInvocationRequest {
                 operation_id: http_operation,
@@ -13462,7 +13462,7 @@ mod tests {
         )
         .unwrap();
         let active = get_installed_plugin(&connection, starting.plugin_id).unwrap();
-        let retry = transition_plugin_invocation(
+        let retry = transition_invocation_for_test(
             &mut connection,
             TransitionPluginInvocationRequest {
                 operation_id: http_operation,
@@ -13477,7 +13477,7 @@ mod tests {
         .unwrap();
         assert_eq!(retry.state, PluginInvocationState::DispatchingHttp);
         assert_eq!(retry.error_code, None);
-        complete_plugin_invocation(
+        terminalize_invocation_for_test(
             &mut connection,
             http_operation,
             retry.plugin_id,
@@ -13535,8 +13535,8 @@ mod tests {
             delivery_operation_id,
             resync_session: None,
         };
-        reserve_plugin_invocation(&mut connection, reservation.clone(), now).unwrap();
-        transition_plugin_invocation(
+        reserve_invocation_for_test(&mut connection, reservation.clone(), now).unwrap();
+        transition_invocation_for_test(
             &mut connection,
             TransitionPluginInvocationRequest {
                 operation_id,
@@ -13582,11 +13582,11 @@ mod tests {
         due_reservation.operation_id = OperationId::new();
         due_reservation.activation_epoch = degraded.activation_epoch;
         assert_eq!(
-            reserve_plugin_invocation(&mut connection, due_reservation, retry_at).unwrap_err(),
+            reserve_invocation_for_test(&mut connection, due_reservation, retry_at).unwrap_err(),
             RepositoryError::Conflict
         );
         assert_eq!(
-            transition_plugin_invocation(
+            transition_invocation_for_test(
                 &mut connection,
                 TransitionPluginInvocationRequest {
                     operation_id,
@@ -13615,7 +13615,7 @@ mod tests {
             PluginInvocationState::EffectCommitting,
         ] {
             assert_eq!(
-                transition_plugin_invocation(
+                transition_invocation_for_test(
                     &mut connection,
                     TransitionPluginInvocationRequest {
                         operation_id,
@@ -13632,7 +13632,7 @@ mod tests {
             );
         }
         assert_eq!(
-            complete_plugin_invocation(
+            terminalize_invocation_for_test(
                 &mut connection,
                 operation_id,
                 degraded.plugin_id.clone(),
@@ -13665,7 +13665,7 @@ mod tests {
 
         for activation_epoch in [degraded.activation_epoch, starting.activation_epoch] {
             assert_eq!(
-                transition_plugin_invocation(
+                transition_invocation_for_test(
                     &mut connection,
                     TransitionPluginInvocationRequest {
                         operation_id,
@@ -13690,7 +13690,7 @@ mod tests {
             )
             .unwrap();
         assert_eq!(
-            complete_plugin_invocation(
+            terminalize_invocation_for_test(
                 &mut connection,
                 operation_id,
                 starting.plugin_id.clone(),
@@ -13702,7 +13702,7 @@ mod tests {
             RepositoryError::Conflict
         );
         assert_eq!(
-            commit_plugin_invocation(
+            commit_invocation_for_test(
                 &mut connection,
                 plan(CommitPluginInvocationRequest {
                     invocation_operation_id: operation_id,
@@ -13755,7 +13755,7 @@ mod tests {
         assert_eq!(active.runtime_state, PluginRuntimeState::Active);
         assert_eq!(active.activation_epoch, starting.activation_epoch);
         assert_eq!(
-            transition_plugin_invocation(
+            transition_invocation_for_test(
                 &mut connection,
                 TransitionPluginInvocationRequest {
                     operation_id,
@@ -13770,7 +13770,7 @@ mod tests {
             .unwrap_err(),
             RepositoryError::Conflict
         );
-        let dispatch = transition_plugin_invocation(
+        let dispatch = transition_invocation_for_test(
             &mut connection,
             TransitionPluginInvocationRequest {
                 operation_id,
@@ -13784,7 +13784,7 @@ mod tests {
         )
         .unwrap();
         assert_eq!(dispatch.delivery_operation_id, delivery_operation_id);
-        let terminal = complete_plugin_invocation(
+        let terminal = terminalize_invocation_for_test(
             &mut connection,
             operation_id,
             active.plugin_id.clone(),
@@ -13797,7 +13797,7 @@ mod tests {
 
         let mut replay_request = reservation.clone();
         replay_request.activation_epoch = active.activation_epoch;
-        let replay = reserve_plugin_invocation(&mut connection, replay_request, retry_at)
+        let replay = reserve_invocation_for_test(&mut connection, replay_request, retry_at)
             .unwrap()
             .terminal()
             .unwrap()
@@ -13805,7 +13805,7 @@ mod tests {
         assert!(replay.replayed);
         assert_eq!(replay.terminal_kind, PluginInvocationTerminalKind::Http);
         assert_eq!(
-            reserve_plugin_invocation(&mut connection, reservation, retry_at).unwrap_err(),
+            reserve_invocation_for_test(&mut connection, reservation, retry_at).unwrap_err(),
             RepositoryError::IdempotencyMismatch
         );
         assert_eq!(
@@ -13835,7 +13835,7 @@ mod tests {
         );
         let plugin = activate_plugin(&mut connection, &store, &granted, now);
         let operation_id = OperationId::new();
-        reserve_plugin_invocation(
+        reserve_invocation_for_test(
             &mut connection,
             ReservePluginInvocationRequest {
                 operation_id,
@@ -13853,7 +13853,7 @@ mod tests {
             now,
         )
         .unwrap();
-        transition_plugin_invocation(
+        transition_invocation_for_test(
             &mut connection,
             TransitionPluginInvocationRequest {
                 operation_id,
@@ -13913,7 +13913,7 @@ mod tests {
         assert_eq!(ambiguous.state, PluginInvocationState::AmbiguousHttp);
         assert_eq!(ambiguous.activation_epoch, disabled.activation_epoch);
         assert_eq!(
-            transition_plugin_invocation(
+            transition_invocation_for_test(
                 &mut connection,
                 TransitionPluginInvocationRequest {
                     operation_id,
@@ -13950,7 +13950,7 @@ mod tests {
         );
         let plugin = activate_plugin(&mut connection, &store, &granted, now);
         let operation_id = OperationId::new();
-        reserve_plugin_invocation(
+        reserve_invocation_for_test(
             &mut connection,
             ReservePluginInvocationRequest {
                 operation_id,
@@ -13968,7 +13968,7 @@ mod tests {
             now,
         )
         .unwrap();
-        transition_plugin_invocation(
+        transition_invocation_for_test(
             &mut connection,
             TransitionPluginInvocationRequest {
                 operation_id,
@@ -14075,7 +14075,7 @@ mod tests {
             let barrier = Arc::clone(&barrier);
             handles.push(std::thread::spawn(move || {
                 barrier.wait();
-                reserve_plugin_invocation(&mut connection, candidate, now)
+                reserve_invocation_for_test(&mut connection, candidate, now)
             }));
         }
         barrier.wait();
@@ -14093,7 +14093,7 @@ mod tests {
         );
         let winner = if results[0].is_ok() { first } else { second };
         let mut connection = profile.connection();
-        transition_plugin_invocation(
+        transition_invocation_for_test(
             &mut connection,
             TransitionPluginInvocationRequest {
                 operation_id: winner.operation_id,
@@ -14106,7 +14106,7 @@ mod tests {
             now,
         )
         .unwrap();
-        transition_plugin_invocation(
+        transition_invocation_for_test(
             &mut connection,
             TransitionPluginInvocationRequest {
                 operation_id: winner.operation_id,
@@ -14120,9 +14120,9 @@ mod tests {
         )
         .unwrap();
         let newcomer = request(OperationId::new());
-        reserve_plugin_invocation(&mut connection, newcomer.clone(), now).unwrap();
+        reserve_invocation_for_test(&mut connection, newcomer.clone(), now).unwrap();
         assert_eq!(
-            transition_plugin_invocation(
+            transition_invocation_for_test(
                 &mut connection,
                 TransitionPluginInvocationRequest {
                     operation_id: winner.operation_id,
@@ -14137,7 +14137,7 @@ mod tests {
             .unwrap_err(),
             RepositoryError::Conflict
         );
-        complete_plugin_invocation(
+        terminalize_invocation_for_test(
             &mut connection,
             newcomer.operation_id,
             plugin.plugin_id.clone(),
@@ -14147,7 +14147,7 @@ mod tests {
         )
         .unwrap();
         assert_eq!(
-            transition_plugin_invocation(
+            transition_invocation_for_test(
                 &mut connection,
                 TransitionPluginInvocationRequest {
                     operation_id: winner.operation_id,
@@ -14193,7 +14193,7 @@ mod tests {
                 delivery_operation_id: OperationId::new(),
                 resync_session: None,
             };
-            reserve_plugin_invocation(&mut connection, request.clone(), now).unwrap();
+            reserve_invocation_for_test(&mut connection, request.clone(), now).unwrap();
 
             let complete_connection = crate::open_connection(&database).unwrap();
             let retry_connection = crate::open_connection(&database).unwrap();
@@ -14203,7 +14203,7 @@ mod tests {
             let complete = std::thread::spawn(move || {
                 let mut connection = complete_connection;
                 complete_barrier.wait();
-                complete_plugin_invocation(
+                terminalize_invocation_for_test(
                     &mut connection,
                     operation_id,
                     complete_plugin.plugin_id,
@@ -14217,7 +14217,7 @@ mod tests {
             let retry = std::thread::spawn(move || {
                 let mut connection = retry_connection;
                 retry_barrier.wait();
-                reserve_plugin_invocation(&mut connection, retry_request, now)
+                reserve_invocation_for_test(&mut connection, retry_request, now)
             });
             barrier.wait();
             complete.join().unwrap().unwrap();
@@ -14227,7 +14227,7 @@ mod tests {
                     | ReservedPluginInvocation::TerminalReplay(_)
             ));
 
-            let terminal = reserve_plugin_invocation(&mut connection, request, now).unwrap();
+            let terminal = reserve_invocation_for_test(&mut connection, request, now).unwrap();
             assert!(matches!(
                 terminal,
                 ReservedPluginInvocation::TerminalReplay(_)
@@ -14279,13 +14279,13 @@ mod tests {
             delivery_operation_id: OperationId::new(),
             resync_session: None,
         };
-        reserve_plugin_invocation(&mut connection, reserve(OperationId::new()), now).unwrap();
+        reserve_invocation_for_test(&mut connection, reserve(OperationId::new()), now).unwrap();
         assert_eq!(list_plugin_invocations(&connection).unwrap().len(), 1);
         let later = now.checked_add((31 * 24).hours()).unwrap();
         let current = OperationId::new();
-        reserve_plugin_invocation(&mut connection, reserve(current), later).unwrap();
+        reserve_invocation_for_test(&mut connection, reserve(current), later).unwrap();
         assert_eq!(list_plugin_invocations(&connection).unwrap().len(), 1);
-        complete_plugin_invocation(
+        terminalize_invocation_for_test(
             &mut connection,
             current,
             plugin.plugin_id.clone(),
@@ -14302,17 +14302,17 @@ mod tests {
         let limit_operation = OperationId::new();
         let limit_request = reserve(limit_operation);
         assert_eq!(
-            reserve_plugin_invocation(&mut connection, limit_request.clone(), later).unwrap_err(),
+            reserve_invocation_for_test(&mut connection, limit_request.clone(), later).unwrap_err(),
             RepositoryError::OperationTooLarge
         );
         assert_eq!(
-            reserve_plugin_invocation(&mut connection, limit_request.clone(), later).unwrap_err(),
+            reserve_invocation_for_test(&mut connection, limit_request.clone(), later).unwrap_err(),
             RepositoryError::OperationTooLarge
         );
         let mut changed_limit = limit_request;
         changed_limit.request_sha256 = Sha256Digest::of(b"changed-resource-limit");
         assert_eq!(
-            reserve_plugin_invocation(&mut connection, changed_limit, later).unwrap_err(),
+            reserve_invocation_for_test(&mut connection, changed_limit, later).unwrap_err(),
             RepositoryError::IdempotencyMismatch
         );
         let suspended = get_installed_plugin(&connection, plugin.plugin_id).unwrap();
@@ -14657,7 +14657,7 @@ mod tests {
             );
             if effect_committing {
                 assert_eq!(
-                    commit_plugin_invocation(
+                    commit_invocation_for_test(
                         &mut connection,
                         plan(CommitPluginInvocationRequest {
                             invocation_operation_id: operation_id,
@@ -14678,7 +14678,7 @@ mod tests {
                 );
             } else {
                 assert_eq!(
-                    transition_plugin_invocation(
+                    transition_invocation_for_test(
                         &mut connection,
                         TransitionPluginInvocationRequest {
                             operation_id,
@@ -15156,7 +15156,7 @@ mod tests {
 
         let http_operation = OperationId::new();
         let delivery_operation_id = OperationId::new();
-        reserve_plugin_invocation(
+        reserve_invocation_for_test(
             &mut connection,
             ReservePluginInvocationRequest {
                 operation_id: http_operation,
@@ -15174,7 +15174,7 @@ mod tests {
             now,
         )
         .unwrap();
-        transition_plugin_invocation(
+        transition_invocation_for_test(
             &mut connection,
             TransitionPluginInvocationRequest {
                 operation_id: http_operation,

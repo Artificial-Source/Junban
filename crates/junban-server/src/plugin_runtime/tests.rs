@@ -13,14 +13,18 @@ use std::{
 };
 
 use junban_app::{
-    CommunityPluginPolicy, PluginEventCursor, PluginInvocation, PluginInvocationState,
-    PluginInvocationTerminalKind, PluginManifestEntry,
+    AffectedIds, CommittedEvent, CommunityPluginPolicy, EventType, PluginEventCursor,
+    PluginInvocation, PluginInvocationState, PluginInvocationTerminalKind, PluginManifestEntry,
+    ResourceRef, ResourceSnapshot, ResyncScope,
 };
+use junban_domain::{Task, TaskId, TaskTitle};
 use junban_plugin_sdk::{
-    Capability, CommandDeclaration, Dependency, Permission, PermissionScope, Publisher,
-    RuntimeManifest, RuntimeProfile, ServiceConsumeScope, ServiceDeclaration, ServiceReference,
-    UnscopedPermission, WitAuthority, canonical_permission_hash, permission_set_hash,
-    private_body_types::{CommandCall, PluginOutcome, WitResult},
+    Capability, CommandDeclaration, DataKind, Dependency, EventKind, EventScope, Permission,
+    PermissionScope, Publisher, RuntimeManifest, RuntimeProfile, ServiceConsumeScope,
+    ServiceDeclaration, ServiceField, ServiceReference, SurfaceDeclaration, SurfaceKind,
+    SurfaceLocation, UnscopedPermission, WitAuthority, canonical_permission_hash,
+    permission_set_hash,
+    private_body_types::{self as wit, CommandCall, SurfaceAction},
     scope_hash,
 };
 use junban_storage::ProfileOwner;
@@ -30,6 +34,141 @@ use tokio::sync::Semaphore;
 
 use crate::{BroadcastEventSink, reminder_wake::ReminderWakeHub};
 
+struct DenyCallbacks;
+
+impl PluginCallbackPort for DenyCallbacks {
+    fn authority(
+        &self,
+        _plugin_id: PluginId,
+    ) -> crate::plugin_callbacks::PluginCallbackFuture<crate::plugin_callbacks::PluginLiveAuthority>
+    {
+        Box::pin(async { Err(PluginCallbackError::Unavailable) })
+    }
+
+    fn query_tasks(
+        &self,
+        _request: wit::TaskQuery,
+    ) -> crate::plugin_callbacks::PluginCallbackFuture<wit::TaskPage> {
+        Box::pin(async { Err(PluginCallbackError::Unavailable) })
+    }
+
+    fn query_projects(
+        &self,
+        _request: wit::CatalogQuery,
+    ) -> crate::plugin_callbacks::PluginCallbackFuture<wit::ProjectPage> {
+        Box::pin(async { Err(PluginCallbackError::Unavailable) })
+    }
+
+    fn query_tags(
+        &self,
+        _request: wit::CatalogQuery,
+    ) -> crate::plugin_callbacks::PluginCallbackFuture<wit::TagPage> {
+        Box::pin(async { Err(PluginCallbackError::Unavailable) })
+    }
+
+    fn settings(
+        &self,
+        _plugin_id: PluginId,
+    ) -> crate::plugin_callbacks::PluginCallbackFuture<Vec<junban_app::PluginSetting>> {
+        Box::pin(async { Err(PluginCallbackError::Unavailable) })
+    }
+
+    fn kv(
+        &self,
+        _plugin_id: PluginId,
+    ) -> crate::plugin_callbacks::PluginCallbackFuture<Vec<junban_app::PluginKvEntry>> {
+        Box::pin(async { Err(PluginCallbackError::Unavailable) })
+    }
+
+    fn transition_invocation(
+        &self,
+        _request: AuthorizedTransitionPluginInvocationRequest,
+    ) -> crate::plugin_callbacks::PluginCallbackFuture<()> {
+        Box::pin(async { Err(PluginCallbackError::Unavailable) })
+    }
+}
+
+struct BlockingSettingsCallbacks {
+    service: Arc<MockService>,
+    entered: Arc<Semaphore>,
+    release: Arc<Semaphore>,
+}
+
+impl PluginCallbackPort for BlockingSettingsCallbacks {
+    fn authority(
+        &self,
+        plugin_id: PluginId,
+    ) -> crate::plugin_callbacks::PluginCallbackFuture<crate::plugin_callbacks::PluginLiveAuthority>
+    {
+        let profile = self.service.lock().profile.clone();
+        Box::pin(async move {
+            let plugin = profile
+                .plugins
+                .iter()
+                .find(|plugin| plugin.plugin_id == plugin_id)
+                .cloned()
+                .ok_or(PluginCallbackError::Unavailable)?;
+            Ok(crate::plugin_callbacks::PluginLiveAuthority {
+                grants: plugin.manifest.permissions.clone(),
+                plugin,
+                profile,
+            })
+        })
+    }
+
+    fn query_tasks(
+        &self,
+        _request: wit::TaskQuery,
+    ) -> crate::plugin_callbacks::PluginCallbackFuture<wit::TaskPage> {
+        Box::pin(async { Err(PluginCallbackError::Unavailable) })
+    }
+
+    fn query_projects(
+        &self,
+        _request: wit::CatalogQuery,
+    ) -> crate::plugin_callbacks::PluginCallbackFuture<wit::ProjectPage> {
+        Box::pin(async { Err(PluginCallbackError::Unavailable) })
+    }
+
+    fn query_tags(
+        &self,
+        _request: wit::CatalogQuery,
+    ) -> crate::plugin_callbacks::PluginCallbackFuture<wit::TagPage> {
+        Box::pin(async { Err(PluginCallbackError::Unavailable) })
+    }
+
+    fn settings(
+        &self,
+        _plugin_id: PluginId,
+    ) -> crate::plugin_callbacks::PluginCallbackFuture<Vec<junban_app::PluginSetting>> {
+        let entered = Arc::clone(&self.entered);
+        let release = Arc::clone(&self.release);
+        Box::pin(async move {
+            entered.add_permits(1);
+            release
+                .acquire_owned()
+                .await
+                .map_err(|_| PluginCallbackError::Unavailable)?
+                .forget();
+            Ok(Vec::new())
+        })
+    }
+
+    fn kv(
+        &self,
+        _plugin_id: PluginId,
+    ) -> crate::plugin_callbacks::PluginCallbackFuture<Vec<junban_app::PluginKvEntry>> {
+        Box::pin(async { Err(PluginCallbackError::Unavailable) })
+    }
+
+    fn transition_invocation(
+        &self,
+        _request: AuthorizedTransitionPluginInvocationRequest,
+    ) -> crate::plugin_callbacks::PluginCallbackFuture<()> {
+        Box::pin(async { Err(PluginCallbackError::Unavailable) })
+    }
+}
+
 use super::*;
 use crate::plugin_host_process::ProcessDeadlines;
 
@@ -37,12 +176,50 @@ fn timestamp(raw: &str) -> Timestamp {
     raw.parse().expect("test timestamp")
 }
 
+const EVENT_EPOCH: &str = "70000000-0000-7000-8000-000000000001";
+
 fn operation(index: u64) -> OperationId {
     OperationId::parse(&format!("00000000-0000-4000-8000-{index:012}")).expect("test operation")
 }
 
 fn session(index: u64) -> Uuid {
     Uuid::parse_str(&format!("00000000-0000-4000-9000-{index:012}")).expect("test session")
+}
+
+fn catch_up_event(revision: u64, event_type: &str) -> CommittedEvent {
+    CommittedEvent {
+        revision,
+        operation_id: operation(500 + revision),
+        event_type: EventType::new(event_type),
+        occurred_at: timestamp("2026-01-01T00:00:00Z"),
+        primary: None,
+        snapshot: None,
+        affected: AffectedIds::default(),
+        resync: ResyncScope::NONE,
+    }
+}
+
+fn represented_task_event(revision: u64) -> CommittedEvent {
+    let task_id = TaskId::parse("70000000-0000-7000-8000-000000000010").expect("retained task id");
+    let task = Task::new(
+        task_id,
+        TaskTitle::new("Retained task").expect("retained task title"),
+        None,
+        timestamp("2026-01-01T00:00:00Z"),
+        revision,
+    );
+    let mut event = catch_up_event(revision, EventType::TASK_CREATED);
+    event.primary = Some(ResourceRef::task(task_id));
+    event.snapshot = Some(ResourceSnapshot::task(task));
+    event.affected.task_ids = vec![task_id];
+    event
+}
+
+fn active_cursor_only_event(revision: u64) -> CommittedEvent {
+    let task_id = TaskId::parse("70000000-0000-7000-8000-000000000011").expect("moved task id");
+    let mut event = catch_up_event(revision, EventType::TASK_MOVED);
+    event.affected.task_ids = vec![task_id];
+    event
 }
 
 fn manifest(id: &str, dependencies: Vec<Dependency>) -> RuntimeManifest {
@@ -92,6 +269,10 @@ fn installed_plugin(
     let component = [u8::try_from(generation).unwrap_or(1)];
     let mut manifest = manifest(id, dependencies);
     manifest.component_sha256 = Sha256Digest::of(&component).to_string();
+    manifest.permissions = vec![Permission {
+        capability: Capability::Commands,
+        scope: PermissionScope::Unscoped(UnscopedPermission {}),
+    }];
     InstalledPlugin {
         plugin_id: PluginId::parse(id.to_owned()).expect("test plugin id"),
         manifest,
@@ -162,7 +343,7 @@ fn chain_profile(count: usize, state: PluginRuntimeState) -> InstalledPluginProf
     }
 }
 
-#[derive(Default)]
+#[derive(Debug, Default)]
 struct ServiceCounts {
     profile: usize,
     open_sources: usize,
@@ -170,8 +351,11 @@ struct ServiceCounts {
     due_retries: usize,
     activations: usize,
     reservations: usize,
+    transitions: usize,
     completions: usize,
     failures: usize,
+    retention_losses: usize,
+    verified_skips: usize,
 }
 
 struct MockState {
@@ -183,6 +367,11 @@ struct MockState {
     failure_requests: Vec<RecordPluginAttemptFailureRequest>,
     fence_requests: Vec<PluginGraphFenceRequest>,
     resync_required: BTreeSet<PluginId>,
+    cursor_revision: u64,
+    sync_revision: u64,
+    catch_up_events: Vec<CommittedEvent>,
+    retention_lost: bool,
+    retention_modes: Vec<junban_app::PluginDeliveryMode>,
     fail_activation: bool,
     fail_completion: bool,
     fail_fence: bool,
@@ -216,6 +405,11 @@ impl MockService {
                 failure_requests: Vec::new(),
                 fence_requests: Vec::new(),
                 resync_required: BTreeSet::new(),
+                cursor_revision: 0,
+                sync_revision: 0,
+                catch_up_events: Vec::new(),
+                retention_lost: false,
+                retention_modes: Vec::new(),
                 fail_activation: false,
                 fail_completion: false,
                 fail_fence: false,
@@ -438,21 +632,118 @@ impl RuntimeServicePort for MockService {
     }
 
     fn cursor(&self, plugin_id: PluginId) -> ServiceFuture<PluginEventCursor> {
-        let resync_required = self.lock().resync_required.contains(&plugin_id);
+        let (resync_required, revision) = {
+            let state = self.lock();
+            (
+                state.resync_required.contains(&plugin_id),
+                state.cursor_revision,
+            )
+        };
         Box::pin(async move {
             Ok(PluginEventCursor {
                 plugin_id,
-                event_epoch: "event-epoch".to_owned(),
-                revision: 0,
+                event_epoch: EVENT_EPOCH.to_owned(),
+                revision,
                 resync_required,
                 updated_at: timestamp("2026-01-01T00:00:00Z"),
             })
         })
     }
 
+    fn events(&self, since: u64) -> ServiceFuture<junban_app::EventCatchUp> {
+        let (retention_lost, events, latest_revision) = {
+            let state = self.lock();
+            (
+                state.retention_lost,
+                state
+                    .catch_up_events
+                    .iter()
+                    .filter(|event| event.revision > since)
+                    .cloned()
+                    .collect(),
+                state.sync_revision,
+            )
+        };
+        Box::pin(async move {
+            if retention_lost {
+                Ok(junban_app::EventCatchUp::ResyncRequired { latest_revision })
+            } else {
+                Ok(junban_app::EventCatchUp::Page {
+                    events,
+                    has_more: false,
+                    latest_revision,
+                })
+            }
+        })
+    }
+
+    fn sync_state(&self) -> ServiceFuture<junban_app::SyncState> {
+        let revision = self.lock().sync_revision;
+        Box::pin(async move {
+            Ok(junban_app::SyncState {
+                event_epoch: EVENT_EPOCH.to_owned(),
+                revision,
+            })
+        })
+    }
+
+    fn verified_skip(
+        &self,
+        request: junban_app::VerifiedPluginCursorSkipRequest,
+        now: Timestamp,
+    ) -> ServiceFuture<PluginEventCursor> {
+        {
+            let mut state = self.lock();
+            state.cursor_revision = request.next_cursor.revision;
+            state.counts.verified_skips += 1;
+        }
+        Box::pin(async move {
+            Ok(PluginEventCursor {
+                plugin_id: request.authority.plugin_id,
+                event_epoch: request.next_cursor.event_epoch,
+                revision: request.next_cursor.revision,
+                resync_required: false,
+                updated_at: now,
+            })
+        })
+    }
+
+    fn mark_retention_loss(
+        &self,
+        request: junban_app::MarkPluginRetentionLossRequest,
+        now: Timestamp,
+    ) -> ServiceFuture<PluginEventCursor> {
+        let plugin_id = request.authority.plugin_id.clone();
+        {
+            let mut state = self.lock();
+            state.counts.retention_losses += 1;
+            state.retention_modes.push(request.authority.mode);
+            state.retention_lost = false;
+            state.resync_required.insert(plugin_id.clone());
+            if let Some(plugin) = state
+                .profile
+                .plugins
+                .iter_mut()
+                .find(|plugin| plugin.plugin_id == plugin_id)
+            {
+                plugin.activation_epoch += 1;
+                plugin.runtime_state = PluginRuntimeState::Starting;
+            }
+        }
+        Box::pin(async move {
+            Ok(PluginEventCursor {
+                plugin_id,
+                event_epoch: request.expected_cursor.event_epoch,
+                revision: request.expected_cursor.revision,
+                resync_required: true,
+                updated_at: now,
+            })
+        })
+    }
+
     fn reserve_invocation(
         &self,
-        request: ReservePluginInvocationRequest,
+        request: AuthorizedReservePluginInvocationRequest,
         now: Timestamp,
     ) -> ServiceFuture<ReservedPluginInvocation> {
         let gate = {
@@ -468,6 +759,7 @@ impl RuntimeServicePort for MockService {
                     .map_err(|_| AppError::Storage)?
                     .forget();
             }
+            let request = request.request;
             Ok(ReservedPluginInvocation::Reserved(PluginInvocation {
                 operation_id: request.operation_id,
                 plugin_id: request.plugin_id,
@@ -488,10 +780,7 @@ impl RuntimeServicePort for MockService {
 
     fn complete_invocation(
         &self,
-        _operation_id: OperationId,
-        _plugin_id: PluginId,
-        _package_generation: u64,
-        _activation_epoch: u64,
+        _request: junban_app::CompletePluginInvocationRequest,
         _now: Timestamp,
     ) -> ServiceFuture<CommittedPluginInvocation> {
         let fail = {
@@ -513,6 +802,71 @@ impl RuntimeServicePort for MockService {
             };
             completion_events.add_permits(1);
             result
+        })
+    }
+
+    fn commit_invocation(
+        &self,
+        request: AuthorizedCommitPluginInvocationRequest,
+        _now: Timestamp,
+    ) -> ServiceFuture<CommittedPluginInvocation> {
+        let cursor = request.request.cursor.map(|cursor| PluginEventCursor {
+            plugin_id: cursor.plugin_id,
+            event_epoch: cursor.next.event_epoch,
+            revision: cursor.next.revision,
+            resync_required: cursor.next.resync_required,
+            updated_at: timestamp("2026-01-01T00:00:00Z"),
+        });
+        let fail = {
+            let mut state = self.lock();
+            state.counts.completions += 1;
+            if let Some(cursor) = &cursor {
+                state.cursor_revision = cursor.revision;
+            }
+            state.fail_completion
+        };
+        let completion_events = Arc::clone(&self.completion_events);
+        Box::pin(async move {
+            let result = if fail {
+                Err(AppError::Conflict)
+            } else {
+                Ok(CommittedPluginInvocation {
+                    terminal_kind: PluginInvocationTerminalKind::ReadOnly,
+                    mutation: None,
+                    cursor,
+                    replayed: false,
+                })
+            };
+            completion_events.add_permits(1);
+            result
+        })
+    }
+
+    fn transition_invocation(
+        &self,
+        request: AuthorizedTransitionPluginInvocationRequest,
+        now: Timestamp,
+    ) -> ServiceFuture<PluginInvocation> {
+        self.lock().counts.transitions += 1;
+        let request = request.request;
+        Box::pin(async move {
+            Ok(PluginInvocation {
+                operation_id: request.operation_id,
+                plugin_id: request.plugin_id,
+                package_generation: request.package_generation,
+                activation_epoch: request.activation_epoch,
+                hook_kind: PluginHookKind::InvokeCommand,
+                entry: PluginManifestEntry::Command {
+                    command_id: PluginId::parse("command").expect("command id"),
+                },
+                request_sha256: Sha256Digest::of(b"request"),
+                delivery_operation_id: OperationId::new(),
+                state: request.next_state,
+                error_code: None,
+                created_at: now,
+                updated_at: now,
+                retain_until: now,
+            })
         })
     }
 
@@ -589,6 +943,139 @@ impl RuntimeServicePort for MockService {
         };
         self.fence_events.add_permits(1);
         Box::pin(async move { result })
+    }
+}
+
+impl PluginCallbackPort for MockService {
+    fn authority(
+        &self,
+        plugin_id: PluginId,
+    ) -> crate::plugin_callbacks::PluginCallbackFuture<crate::plugin_callbacks::PluginLiveAuthority>
+    {
+        let result = {
+            let state = self.lock();
+            state
+                .profile
+                .plugins
+                .iter()
+                .find(|plugin| plugin.plugin_id == plugin_id)
+                .cloned()
+                .map(|plugin| crate::plugin_callbacks::PluginLiveAuthority {
+                    grants: plugin.manifest.permissions.clone(),
+                    plugin,
+                    profile: state.profile.clone(),
+                })
+                .ok_or(PluginCallbackError::StaleAuthority)
+        };
+        Box::pin(async move { result })
+    }
+
+    fn query_tasks(
+        &self,
+        _request: wit::TaskQuery,
+    ) -> crate::plugin_callbacks::PluginCallbackFuture<wit::TaskPage> {
+        Box::pin(async { Err(PluginCallbackError::Unavailable) })
+    }
+
+    fn query_projects(
+        &self,
+        _request: wit::CatalogQuery,
+    ) -> crate::plugin_callbacks::PluginCallbackFuture<wit::ProjectPage> {
+        Box::pin(async { Err(PluginCallbackError::Unavailable) })
+    }
+
+    fn query_tags(
+        &self,
+        _request: wit::CatalogQuery,
+    ) -> crate::plugin_callbacks::PluginCallbackFuture<wit::TagPage> {
+        Box::pin(async { Err(PluginCallbackError::Unavailable) })
+    }
+
+    fn settings(
+        &self,
+        _plugin_id: PluginId,
+    ) -> crate::plugin_callbacks::PluginCallbackFuture<Vec<junban_app::PluginSetting>> {
+        Box::pin(async { Ok(Vec::new()) })
+    }
+
+    fn kv(
+        &self,
+        _plugin_id: PluginId,
+    ) -> crate::plugin_callbacks::PluginCallbackFuture<Vec<junban_app::PluginKvEntry>> {
+        Box::pin(async { Ok(Vec::new()) })
+    }
+
+    fn transition_invocation(
+        &self,
+        _request: AuthorizedTransitionPluginInvocationRequest,
+    ) -> crate::plugin_callbacks::PluginCallbackFuture<()> {
+        Box::pin(async { Ok(()) })
+    }
+}
+
+impl PluginResyncPort for MockService {
+    fn begin(
+        &self,
+        plugin_id: PluginId,
+        package_generation: u64,
+        activation_epoch: u64,
+        operation_id: OperationId,
+    ) -> resync::PluginResyncFuture<junban_app::PluginResyncSession> {
+        Box::pin(async move {
+            Ok(junban_app::PluginResyncSession {
+                operation_id,
+                plugin_id,
+                package_generation,
+                activation_epoch,
+                expected_cursor: junban_app::PluginCursorPosition {
+                    event_epoch: EVENT_EPOCH.to_owned(),
+                    revision: 0,
+                    resync_required: true,
+                },
+                snapshot_event_epoch: EVENT_EPOCH.to_owned(),
+                snapshot_revision: 1,
+            })
+        })
+    }
+
+    fn page(
+        &self,
+        request: junban_app::PluginResyncPageRequest,
+    ) -> resync::PluginResyncFuture<junban_app::PluginResyncPage> {
+        Box::pin(async move {
+            Ok(junban_app::PluginResyncPage {
+                operation_id: request.session.operation_id,
+                kind: request.kind,
+                items: Vec::new(),
+                next_after_id: request.after_id,
+                exhausted: true,
+                material_bytes: 0,
+            })
+        })
+    }
+
+    fn finalize(
+        &self,
+        request: junban_app::FinalizePluginResyncRequest,
+    ) -> resync::PluginResyncFuture<junban_app::FinalizePluginResyncOutcome> {
+        let now = Timestamp::now();
+        {
+            let mut state = self.lock();
+            state.resync_required.remove(&request.session.plugin_id);
+            state.cursor_revision = request.session.snapshot_revision;
+            state.sync_revision = request.session.snapshot_revision;
+        }
+        Box::pin(async move {
+            Ok(junban_app::FinalizePluginResyncOutcome::Committed(
+                PluginEventCursor {
+                    plugin_id: request.session.plugin_id,
+                    event_epoch: request.session.snapshot_event_epoch,
+                    revision: request.session.snapshot_revision,
+                    resync_required: false,
+                    updated_at: now,
+                },
+            ))
+        })
     }
 }
 
@@ -726,21 +1213,50 @@ impl RuntimeServicePort for SqliteRuntimeService {
         Box::pin(async move { service.get_plugin_cursor(plugin_id).await })
     }
 
+    fn events(&self, since: u64) -> ServiceFuture<junban_app::EventCatchUp> {
+        let service = self.service.clone();
+        Box::pin(async move { service.list_events(since).await })
+    }
+
+    fn sync_state(&self) -> ServiceFuture<junban_app::SyncState> {
+        let service = self.service.clone();
+        Box::pin(async move { service.get_sync_state().await })
+    }
+
+    fn verified_skip(
+        &self,
+        request: junban_app::VerifiedPluginCursorSkipRequest,
+        now: Timestamp,
+    ) -> ServiceFuture<PluginEventCursor> {
+        let service = self.service.clone();
+        Box::pin(async move { service.verified_skip_plugin_cursor(request, now).await })
+    }
+
+    fn mark_retention_loss(
+        &self,
+        request: junban_app::MarkPluginRetentionLossRequest,
+        now: Timestamp,
+    ) -> ServiceFuture<PluginEventCursor> {
+        let service = self.service.clone();
+        Box::pin(async move { service.mark_plugin_retention_loss(request, now).await })
+    }
+
     fn reserve_invocation(
         &self,
-        request: ReservePluginInvocationRequest,
+        request: AuthorizedReservePluginInvocationRequest,
         now: Timestamp,
     ) -> ServiceFuture<ReservedPluginInvocation> {
         let service = self.service.clone();
-        Box::pin(async move { service.reserve_plugin_invocation(request, now).await })
+        Box::pin(async move {
+            service
+                .reserve_authorized_plugin_invocation(request, now)
+                .await
+        })
     }
 
     fn complete_invocation(
         &self,
-        operation_id: OperationId,
-        plugin_id: PluginId,
-        package_generation: u64,
-        activation_epoch: u64,
+        request: junban_app::CompletePluginInvocationRequest,
         now: Timestamp,
     ) -> ServiceFuture<CommittedPluginInvocation> {
         let service = self.service.clone();
@@ -755,19 +1271,39 @@ impl RuntimeServicePort for SqliteRuntimeService {
                 .map_err(|_| AppError::Storage)?
                 .forget();
             let result = service
-                .complete_plugin_invocation(
-                    operation_id,
-                    plugin_id,
-                    package_generation,
-                    activation_epoch,
-                    now,
-                )
+                .complete_authorized_plugin_invocation(request, now)
                 .await;
             if result.is_ok() {
                 order.lock().unwrap().push("complete");
                 committed.add_permits(1);
             }
             result
+        })
+    }
+
+    fn commit_invocation(
+        &self,
+        request: AuthorizedCommitPluginInvocationRequest,
+        now: Timestamp,
+    ) -> ServiceFuture<CommittedPluginInvocation> {
+        let service = self.service.clone();
+        Box::pin(async move {
+            service
+                .commit_authorized_plugin_invocation(request, now)
+                .await
+        })
+    }
+
+    fn transition_invocation(
+        &self,
+        request: AuthorizedTransitionPluginInvocationRequest,
+        now: Timestamp,
+    ) -> ServiceFuture<PluginInvocation> {
+        let service = self.service.clone();
+        Box::pin(async move {
+            service
+                .transition_authorized_plugin_invocation(request, now)
+                .await
         })
     }
 
@@ -809,10 +1345,67 @@ impl RuntimeServicePort for SqliteRuntimeService {
     }
 }
 
+impl PluginResyncPort for SqliteRuntimeService {
+    fn begin(
+        &self,
+        plugin_id: PluginId,
+        package_generation: u64,
+        activation_epoch: u64,
+        operation_id: OperationId,
+    ) -> resync::PluginResyncFuture<junban_app::PluginResyncSession> {
+        let service = self.service.clone();
+        Box::pin(async move {
+            service
+                .open_plugin_resync_session(
+                    plugin_id,
+                    package_generation,
+                    activation_epoch,
+                    operation_id,
+                    Timestamp::now(),
+                )
+                .await
+                .map_err(resync::map_app_error)
+        })
+    }
+
+    fn page(
+        &self,
+        request: junban_app::PluginResyncPageRequest,
+    ) -> resync::PluginResyncFuture<junban_app::PluginResyncPage> {
+        let service = self.service.clone();
+        Box::pin(async move {
+            service
+                .list_plugin_resync_page(request, Timestamp::now())
+                .await
+                .map_err(resync::map_app_error)
+        })
+    }
+
+    fn finalize(
+        &self,
+        request: junban_app::FinalizePluginResyncRequest,
+    ) -> resync::PluginResyncFuture<junban_app::FinalizePluginResyncOutcome> {
+        let service = self.service.clone();
+        Box::pin(async move {
+            service
+                .finalize_plugin_resync(request, Timestamp::now())
+                .await
+                .map_err(resync::map_app_error)
+        })
+    }
+}
+
 fn seed_sqlite_active_plugins(profile_dir: &Path, count: usize) {
     let mut connection = Connection::open(profile_dir.join("junban.sqlite3")).unwrap();
     let transaction = connection.transaction().unwrap();
     let now = "2020-01-01T00:00:00Z";
+    let event_epoch: String = transaction
+        .query_row(
+            "SELECT event_epoch FROM app_state WHERE singleton = 1",
+            [],
+            |row| row.get(0),
+        )
+        .unwrap();
     transaction
         .execute(
             "INSERT INTO plugin_publisher_trust(
@@ -878,11 +1471,53 @@ fn seed_sqlite_active_plugins(profile_dir: &Path, count: usize) {
                 "INSERT INTO plugin_event_cursors(
                     plugin_id, event_epoch, revision, resync_required, updated_at
                  ) VALUES (?1, ?2, 0, 0, ?3)",
-                params![id, Uuid::nil().to_string(), now],
+                params![id, &event_epoch, now],
             )
             .unwrap();
     }
     transaction.commit().unwrap();
+}
+
+fn seed_sqlite_retention_gap(profile_dir: &Path) {
+    let connection = Connection::open(profile_dir.join("junban.sqlite3")).unwrap();
+    let event = CommittedEvent {
+        revision: 3,
+        operation_id: operation(903),
+        event_type: EventType::new(EventType::SETTINGS_UPDATED),
+        occurred_at: timestamp("2026-01-01T00:00:00Z"),
+        primary: None,
+        snapshot: None,
+        affected: AffectedIds::default(),
+        resync: ResyncScope::SETTINGS,
+    };
+    connection
+        .execute_batch("BEGIN IMMEDIATE")
+        .expect("begin retention-gap seed");
+    connection
+        .execute(
+            "UPDATE plugins SET runtime_state = 'starting' WHERE plugin_id = 'plugin-00'",
+            [],
+        )
+        .unwrap();
+    connection
+        .execute(
+            "INSERT INTO events(revision, event_type, operation_id, event_json, occurred_at)
+             VALUES (3, ?1, ?2, ?3, ?4)",
+            params![
+                EventType::SETTINGS_UPDATED,
+                event.operation_id.to_string(),
+                serde_json::to_string(&event).unwrap(),
+                event.occurred_at.to_string(),
+            ],
+        )
+        .unwrap();
+    connection
+        .execute(
+            "UPDATE app_state SET global_revision = 3 WHERE singleton = 1",
+            [],
+        )
+        .unwrap();
+    connection.execute_batch("COMMIT").unwrap();
 }
 
 fn sqlite_app_service(owner: &ProfileOwner) -> AppService {
@@ -1032,14 +1667,54 @@ def send(frame, body=b""):
     stdout.write(body)
     stdout.flush()
 
-def outcome_body(kind):
+def outcome_body(kind, request_body=None, mode="success"):
     tag = kind.replace("_", "-")
     if kind in ("invoke_command", "handle_event", "handle_surface_action"):
-        value = {"tag": "ok", "val": {"effect": None}}
+        effect = None
+        if mode == "kv_effect":
+            effect = {
+                "tag": "kv-patch",
+                "val": {
+                    "operations": [
+                        {"tag": "set", "val": {"key": "runtime", "value": "AQ"}}
+                    ]
+                },
+            }
+        value = {"tag": "ok", "val": {"effect": effect}}
     elif kind == "call_service":
         value = {"tag": "ok", "val": {"values": []}}
     elif kind == "activate" or kind == "deactivate":
         value = {"tag": "ok", "val": None}
+    elif kind == "resync":
+        request = json.loads(request_body)
+        page = request["val"]["argument"]
+        fields = page["val"]
+        if page["tag"] == "snapshot":
+            result = {
+                "tag": "snapshot-ack",
+                "val": {
+                    "session-id": fields["session-id"],
+                    "page-index": fields["page-index"],
+                    "kind": fields["kind"],
+                    "segment": None,
+                },
+            }
+        elif page["tag"] == "flush-staged-kv":
+            result = {
+                "tag": "flush-ack",
+                "val": {
+                    "session-id": fields["session-id"],
+                    "request-index": fields["request-index"],
+                    "segment": None,
+                    "state": "complete",
+                },
+            }
+        else:
+            result = {
+                "tag": "finalized",
+                "val": {"session-id": fields["session-id"], "choice": "leave-kv"},
+            }
+        value = {"tag": "ok", "val": result}
     else:
         value = {"tag": "err", "val": {"code": "unavailable", "field": None, "message": "fixture"}}
     return json.dumps({"tag": tag, "val": value}, separators=(",", ":")).encode()
@@ -1047,7 +1722,7 @@ def outcome_body(kind):
 def send_outcome(invoke, mode="success"):
     fence = copy.deepcopy(invoke["fence"])
     kind = invoke["kind"]
-    body = outcome_body(kind)
+    body = outcome_body(kind, invoke.get("_request_body"), mode)
     if mode == "wrong_plugin":
         fence["plugin_id"] = "other-plugin"
     elif mode == "wrong_generation":
@@ -1094,6 +1769,9 @@ def send_callback(invoke, mode):
     if mode == "service_callback":
         body = b'{"tag":"call-service","val":{"plugin-id":"service-target","service-id":"service","values":[]}}'
         kind = "call_service"
+    elif mode == "settings_callback":
+        body = b'{"tag":"get-settings","val":null}'
+        kind = "get_settings"
     else:
         body = b'{"tag":"monotonic-ms","val":null}'
         kind = "monotonic_ms"
@@ -1163,20 +1841,23 @@ if runtime_fault == "stalled":
     sys.exit(0)
 
 while True:
-    frame, _ = read_message()
+    frame, body = read_message()
     if frame is None:
         break
     kind = frame.get("type")
     if kind == "invoke":
         invocation_id = frame["fence"]["invocation_id"]
+        frame["_request_body"] = body.decode()
         invocations[invocation_id] = frame
         modes = CFG.get("invoke_modes", {})
         mode = modes.get(frame["fence"]["plugin_id"], CFG.get("invoke", "success"))
+        if frame["kind"] == "deactivate":
+            mode = "settings_callback" if CFG.get("deactivate_callback", False) else CFG.get("deactivate", "success")
         if mode == "guest_error":
             send({"type": "failed", "fence": frame["fence"], "code": "guest_error"})
-        elif mode in ("callback", "callback_wrong_id", "service_callback"):
+        elif mode in ("callback", "callback_wrong_id", "service_callback", "settings_callback"):
             send_callback(frame, mode)
-        elif mode != "hold":
+        elif mode != "hold" and not (mode == "hold_call_service" and frame["kind"] == "call_service"):
             send_outcome(frame, mode)
     elif kind == "cancel":
         invoke = invocations.get(frame["fence"]["invocation_id"])
@@ -1299,24 +1980,23 @@ fn dispatch(plugin: &InstalledPlugin, index: u64) -> PluginInvocationDispatch {
                 host_session_id: session(999).to_string(),
                 invocation_id: operation(index).to_string(),
             },
-            canonical_permission_hash(&[]).expect("permission hash"),
+            canonical_permission_hash(&plugin.manifest.permissions).expect("permission hash"),
         )
         .expect("fixture invocation")
         .into_parts();
     PluginInvocationDispatch {
-        reservation: ReservePluginInvocationRequest {
-            operation_id: operation(index),
-            plugin_id: plugin.plugin_id.clone(),
-            package_generation: plugin.package_generation,
-            activation_epoch: plugin.activation_epoch,
-            hook_kind: PluginHookKind::InvokeCommand,
-            entry: PluginManifestEntry::Command {
-                command_id: PluginId::parse("command").expect("command id"),
-            },
-            request_sha256: Sha256Digest::of(&body),
-            delivery_operation_id: operation(index + 10_000),
-            resync_session: None,
+        operation_id: operation(index),
+        plugin_id: plugin.plugin_id.clone(),
+        package_generation: plugin.package_generation,
+        activation_epoch: plugin.activation_epoch,
+        hook_kind: PluginHookKind::InvokeCommand,
+        entry: PluginManifestEntry::Command {
+            command_id: PluginId::parse("command").expect("command id"),
         },
+        payload_sha256: Sha256Digest::of(&body),
+        delivery_operation_id: operation(index + 10_000),
+        mode: junban_app::PluginDeliveryMode::Active,
+        retained_event_source: None,
         request,
     }
 }
@@ -1336,12 +2016,14 @@ fn loaded_node(plugin: InstalledPlugin) -> LoadedNode {
             import_export_fingerprint: "2".repeat(64),
             runtime_profile: RuntimeProfile::Typescript,
             component_size: 1,
-            grants: Vec::new(),
-            permission_hash: canonical_permission_hash(&[]).expect("permission hash"),
+            grants: plugin.manifest.permissions.clone(),
+            permission_hash: canonical_permission_hash(&plugin.manifest.permissions)
+                .expect("permission hash"),
             limits: RuntimeLimits::for_profile(RuntimeProfile::Typescript),
         },
         plugin,
         admitting: true,
+        activated: true,
     }
 }
 
@@ -1487,10 +2169,17 @@ fn dependency_order_bound_and_graph_fence_shapes_are_exact() {
 async fn parent_admission_enforces_four_per_plugin_cycles_and_depth_eight() {
     let service = MockService::new("admission", chain_profile(0, PluginRuntimeState::Active));
     let (_commands, receiver) = mpsc::channel(1);
-    let mut actor = RuntimeActor::new(
-        service,
-        PluginHostLaunchPolicy::default(),
+    let runtime_service: Arc<dyn RuntimeServicePort> = service.clone();
+    let resync_port: Arc<dyn PluginResyncPort> = service;
+    let callback_adapter = Arc::new(PluginCallbackAdapter::new(
         Arc::new(DenyCallbacks),
+        Arc::new(PluginHttpTransport::new()),
+    ));
+    let mut actor = RuntimeActor::new(
+        runtime_service,
+        resync_port,
+        PluginHostLaunchPolicy::default(),
+        callback_adapter,
         Arc::new(AtomicBool::new(false)),
         receiver,
     );
@@ -1510,20 +2199,21 @@ async fn parent_admission_enforces_four_per_plugin_cycles_and_depth_eight() {
     }
     let target = PluginId::parse("admit-4").unwrap();
     assert_eq!(
-        actor.check_invocation_admission(&target, false, &[], 8),
+        actor.check_invocation_admission(&target, false, false, &[], 8),
         Ok(())
     );
     assert_eq!(
-        actor.check_invocation_admission(&target, false, &[], 9),
+        actor.check_invocation_admission(&target, false, false, &[], 9),
         Err(PluginRuntimeError::ServiceDepth)
     );
     assert_eq!(
-        actor.check_invocation_admission(&target, false, std::slice::from_ref(&target), 1),
+        actor.check_invocation_admission(&target, false, false, std::slice::from_ref(&target), 1,),
         Err(PluginRuntimeError::ReentrantService)
     );
     assert_eq!(
         actor.check_invocation_admission(
             &target,
+            false,
             false,
             &[target.clone(), PluginId::parse("admit-0").unwrap()],
             2,
@@ -1536,7 +2226,7 @@ async fn parent_admission_enforces_four_per_plugin_cycles_and_depth_eight() {
         let plugin = actor.nodes.get(&plugin_id).unwrap().plugin.clone();
         let dispatch = dispatch(&plugin, u64::try_from(index + 1).unwrap());
         let request = dispatch.request;
-        let permission_hash = canonical_permission_hash(&[]).unwrap();
+        let permission_hash = canonical_permission_hash(&plugin.manifest.permissions).unwrap();
         let fence = AuthorityFence {
             plugin_id: plugin_id.to_string(),
             package_generation: plugin.package_generation,
@@ -1560,28 +2250,31 @@ async fn parent_admission_enforces_four_per_plugin_cycles_and_depth_eight() {
                 kind: request.kind(),
                 invoke_frame,
                 body,
+                authority_plugin: plugin.clone(),
+                grants: plugin.manifest.permissions.clone(),
+                delivery: None,
+                cursor: None,
+                callback_state: None,
                 phase: InvocationPhase::Running,
-                ancestry: Vec::new(),
-                service_depth: 0,
-                next_callback_id: 1,
                 expected_callback: None,
                 deadline: None,
                 awaiting_child_terminal: false,
                 cancel_requested: Arc::new(AtomicBool::new(false)),
                 terminal: None,
+                raw_terminal: None,
                 nested_parent: None,
                 durable: false,
             },
         );
     }
     assert_eq!(
-        actor.check_invocation_admission(&target, false, &[], 0),
+        actor.check_invocation_admission(&target, false, false, &[], 0),
         Err(PluginRuntimeError::InvocationLimit)
     );
     let busy = PluginId::parse("admit-0").unwrap();
     actor.invocations.remove(&operation(4));
     assert_eq!(
-        actor.check_invocation_admission(&busy, false, &[], 0),
+        actor.check_invocation_admission(&busy, false, false, &[], 0),
         Err(PluginRuntimeError::PluginBusy)
     );
 }
@@ -1675,12 +2368,24 @@ async fn source_sorting_cannot_change_dependency_first_wire_order() {
 async fn reconfigure_reaps_the_old_graph_before_spawning_its_replacement() {
     let fixture = HostFixture::new(
         "reconfigure",
-        json!({"loads_by_launch": [1, 1], "shutdown": "graceful"}),
+        json!({
+            "loads_by_launch": [1, 1],
+            "shutdown": "graceful",
+            "deactivate_callback": true
+        }),
     );
-    let service = MockService::new(
-        "reconfigure",
-        chain_profile(1, PluginRuntimeState::Starting),
-    );
+    let with_settings = || {
+        let mut profile = chain_profile(1, PluginRuntimeState::Starting);
+        profile.plugins[0]
+            .granted_capabilities
+            .push(Capability::Settings);
+        profile.plugins[0].manifest.permissions.push(Permission {
+            capability: Capability::Settings,
+            scope: PermissionScope::Unscoped(UnscopedPermission {}),
+        });
+        profile
+    };
+    let service = MockService::new("reconfigure", with_settings());
     let pids = Arc::new(Mutex::new(Vec::new()));
     let supervisor = PluginRuntimeSupervisor::for_test(
         service.clone(),
@@ -1688,13 +2393,16 @@ async fn reconfigure_reaps_the_old_graph_before_spawning_its_replacement() {
         Arc::new(DenyCallbacks),
     );
     supervisor.reconcile().await.unwrap();
-    let mut replacement = chain_profile(1, PluginRuntimeState::Starting);
+    let mut replacement = with_settings();
     replacement.plugins[0].activation_epoch += 1;
     service.update_profile(replacement);
     supervisor.reconcile().await.unwrap();
     let pids = pids.lock().unwrap().clone();
     assert_eq!(pids.len(), 2);
     assert!(process_is_absent(pids[0]));
+    assert!(fixture.captured_frames().iter().any(|capture| {
+        capture["frame"]["type"] == "capability_reply" && capture["frame"]["kind"] == "get_settings"
+    }));
     assert!(!fixture.violation_file.exists());
     supervisor.shutdown().await.unwrap();
     assert!(process_is_absent(pids[1]));
@@ -1783,7 +2491,7 @@ async fn duplicate_operation_id_is_rejected_across_two_plugins() {
     let first = supervisor.invoke(dispatch(&plugins[0], 47)).await.unwrap();
     service.wait_reservation().await;
     let mut live_collision = dispatch(&plugins[1], 48);
-    live_collision.reservation.operation_id = operation(47);
+    live_collision.operation_id = operation(47);
     assert!(matches!(
         supervisor.invoke(live_collision).await,
         Err(PluginRuntimeError::AuthorityRejected)
@@ -1794,7 +2502,7 @@ async fn duplicate_operation_id_is_rejected_across_two_plugins() {
         InvocationOutcome::Cancelled
     ));
     let mut cancelled_collision = dispatch(&plugins[1], 49);
-    cancelled_collision.reservation.operation_id = operation(47);
+    cancelled_collision.operation_id = operation(47);
     assert!(matches!(
         supervisor.invoke(cancelled_collision).await,
         Err(PluginRuntimeError::AuthorityRejected)
@@ -1840,10 +2548,8 @@ async fn parent_four_total_and_per_plugin_limits_hold_without_child_trust() {
     ));
     assert_eq!(supervisor.snapshot().await.unwrap().active_invocations, 4);
     drop((first, second, third, fourth));
-    // A cancellation burst may find the intentionally four-slot driver full;
-    // that bounded fail-closed path must fence and reap rather than detach.
-    assert_eq!(supervisor.shutdown().await, Err(PluginRuntimeError::Closed));
-    assert_eq!(service.lock().fence_requests.len(), 1);
+    supervisor.shutdown().await.unwrap();
+    assert!(service.lock().fence_requests.is_empty());
     assert!(process_is_absent(pids.lock().unwrap()[0]));
 }
 
@@ -1885,6 +2591,449 @@ async fn stale_invocation_completion_cas_fences_and_reaps_without_graph_mutation
 
 #[cfg(unix)]
 #[tokio::test]
+async fn starting_catch_up_delivers_represented_events_and_skips_only_irrelevant_events() {
+    let fixture = HostFixture::new("catch-up", json!({"loads": 1}));
+    let mut plugin = installed_plugin("catch-up", 1, 10, PluginRuntimeState::Starting, Vec::new());
+    plugin.manifest.subscriptions = vec![EventKind::TaskCreated];
+    plugin
+        .granted_capabilities
+        .push(Capability::EventsSubscribe);
+    plugin.manifest.permissions.push(Permission {
+        capability: Capability::EventsSubscribe,
+        scope: PermissionScope::Events(EventScope {
+            event_kinds: vec![EventKind::TaskCreated],
+        }),
+    });
+    let service = MockService::new("catch-up", profile(vec![plugin.clone()], vec!["catch-up"]));
+    {
+        let mut state = service.lock();
+        state.catch_up_events = vec![
+            represented_task_event(1),
+            catch_up_event(2, "fixture.changed"),
+        ];
+        state.sync_revision = 2;
+    }
+    let pids = Arc::new(Mutex::new(Vec::new()));
+    let supervisor = PluginRuntimeSupervisor::for_test(
+        service.clone(),
+        fixture.policy(vec![session(57)], Arc::clone(&pids)),
+        Arc::new(DenyCallbacks),
+    );
+
+    let result = supervisor.reconcile().await;
+    assert!(
+        result.is_ok(),
+        "catch-up failed: {result:?}; counts: {:?}; frames: {:?}",
+        service.lock().counts,
+        fixture.captured_frames()
+    );
+    let snapshot = result.unwrap();
+    assert_eq!(snapshot.admitting_plugins, vec![plugin.plugin_id]);
+    {
+        let state = service.lock();
+        assert_eq!(state.cursor_revision, 2);
+        assert_eq!(state.counts.reservations, 1);
+        assert_eq!(state.counts.completions, 1);
+        assert_eq!(state.counts.verified_skips, 1);
+        assert_eq!(state.counts.activations, 1);
+    }
+    let kinds: Vec<_> = fixture
+        .captured_frames()
+        .into_iter()
+        .filter(|capture| capture["frame"]["type"] == "invoke")
+        .filter_map(|capture| capture["frame"]["kind"].as_str().map(str::to_owned))
+        .collect();
+    assert_eq!(kinds, ["handle_event", "activate"]);
+
+    supervisor.shutdown().await.unwrap();
+    assert!(process_is_absent(pids.lock().unwrap()[0]));
+}
+
+#[cfg(unix)]
+#[tokio::test]
+async fn starting_catch_up_guest_failure_uses_plugin_health_not_active_completion() {
+    let fixture = HostFixture::new(
+        "catch-up-guest-failure",
+        json!({
+            "loads": 1,
+            "invoke_modes": {"catch-up-failure": "guest_error"}
+        }),
+    );
+    let mut plugin = installed_plugin(
+        "catch-up-failure",
+        1,
+        10,
+        PluginRuntimeState::Starting,
+        Vec::new(),
+    );
+    plugin.manifest.subscriptions = vec![EventKind::TaskCreated];
+    plugin
+        .granted_capabilities
+        .push(Capability::EventsSubscribe);
+    plugin.manifest.permissions.push(Permission {
+        capability: Capability::EventsSubscribe,
+        scope: PermissionScope::Events(EventScope {
+            event_kinds: vec![EventKind::TaskCreated],
+        }),
+    });
+    let service = MockService::new(
+        "catch-up-guest-failure",
+        profile(vec![plugin], vec!["catch-up-failure"]),
+    );
+    {
+        let mut state = service.lock();
+        state.catch_up_events = vec![represented_task_event(1)];
+        state.sync_revision = 1;
+    }
+    let pids = Arc::new(Mutex::new(Vec::new()));
+    let supervisor = PluginRuntimeSupervisor::for_test(
+        service.clone(),
+        fixture.policy(vec![session(85)], Arc::clone(&pids)),
+        Arc::new(DenyCallbacks),
+    );
+
+    let snapshot = supervisor.reconcile().await.unwrap();
+    assert!(snapshot.admitting_plugins.is_empty());
+    {
+        let state = service.lock();
+        assert_eq!(state.counts.completions, 0);
+        assert_eq!(state.counts.failures, 1);
+        assert_eq!(
+            state.failure_requests[0].cause,
+            PluginAttemptFailureCause::GuestTrap
+        );
+        assert!(state.fence_requests.is_empty());
+        assert_eq!(
+            state.profile.plugins[0].runtime_state,
+            PluginRuntimeState::Degraded
+        );
+    }
+
+    supervisor.shutdown().await.unwrap();
+    assert!(process_is_absent(pids.lock().unwrap()[0]));
+}
+
+#[cfg(unix)]
+#[tokio::test]
+async fn active_event_worker_delivers_subscribed_work_and_skips_cursor_only_work() {
+    let fixture = HostFixture::new("active-events", json!({"loads": 1}));
+    let mut plugin = installed_plugin(
+        "active-events",
+        1,
+        10,
+        PluginRuntimeState::Active,
+        Vec::new(),
+    );
+    plugin.manifest.subscriptions = vec![EventKind::TaskCreated];
+    plugin
+        .granted_capabilities
+        .push(Capability::EventsSubscribe);
+    plugin.manifest.permissions.push(Permission {
+        capability: Capability::EventsSubscribe,
+        scope: PermissionScope::Events(EventScope {
+            event_kinds: vec![EventKind::TaskCreated],
+        }),
+    });
+    let service = MockService::new(
+        "active-events",
+        profile(vec![plugin.clone()], vec!["active-events"]),
+    );
+    {
+        let mut state = service.lock();
+        state.catch_up_events = vec![represented_task_event(1), active_cursor_only_event(2)];
+        state.sync_revision = 2;
+    }
+    let pids = Arc::new(Mutex::new(Vec::new()));
+    let supervisor = PluginRuntimeSupervisor::for_test(
+        service.clone(),
+        fixture.policy(vec![session(57)], Arc::clone(&pids)),
+        Arc::new(DenyCallbacks),
+    );
+
+    let result = supervisor.reconcile().await;
+    assert!(
+        result.is_ok(),
+        "active catch-up failed with {result:?}; service state: {:?}",
+        service.lock().counts
+    );
+    let snapshot = result.unwrap();
+    assert_eq!(snapshot.admitting_plugins, vec![plugin.plugin_id]);
+    {
+        let state = service.lock();
+        assert_eq!(state.cursor_revision, 2);
+        assert_eq!(state.counts.reservations, 1);
+        assert_eq!(state.counts.completions, 1);
+        assert_eq!(state.counts.verified_skips, 1);
+        assert_eq!(state.counts.activations, 0);
+    }
+    let kinds: Vec<_> = fixture
+        .captured_frames()
+        .into_iter()
+        .filter(|capture| capture["frame"]["type"] == "invoke")
+        .filter_map(|capture| capture["frame"]["kind"].as_str().map(str::to_owned))
+        .collect();
+    assert_eq!(kinds, ["handle_event"]);
+
+    supervisor.shutdown().await.unwrap();
+    assert!(process_is_absent(pids.lock().unwrap()[0]));
+}
+
+#[cfg(unix)]
+#[tokio::test]
+async fn invalidating_starting_catch_up_never_advances_or_opens_admission() {
+    let fixture = HostFixture::new("catch-up-invalidating", json!({"loads": 1}));
+    let plugin = installed_plugin(
+        "catch-up-invalidating",
+        1,
+        10,
+        PluginRuntimeState::Starting,
+        Vec::new(),
+    );
+    let service = MockService::new(
+        "catch-up-invalidating",
+        profile(vec![plugin.clone()], vec!["catch-up-invalidating"]),
+    );
+    {
+        let mut state = service.lock();
+        state.catch_up_events = vec![catch_up_event(1, EventType::TASK_MOVED)];
+        state.sync_revision = 1;
+    }
+    let pids = Arc::new(Mutex::new(Vec::new()));
+    let supervisor = PluginRuntimeSupervisor::for_test(
+        service.clone(),
+        fixture.policy(vec![session(58)], Arc::clone(&pids)),
+        Arc::new(DenyCallbacks),
+    );
+
+    let result = supervisor.reconcile().await;
+    assert!(
+        matches!(
+            result,
+            Err(PluginRuntimeError::SessionLost | PluginRuntimeError::Fenced)
+        ),
+        "unexpected invalidating catch-up result: {result:?}"
+    );
+    service.wait_fence().await;
+    {
+        let state = service.lock();
+        assert_eq!(state.cursor_revision, 0);
+        assert_eq!(state.counts.reservations, 0);
+        assert_eq!(state.counts.completions, 0);
+        assert_eq!(state.counts.verified_skips, 0);
+        assert_eq!(state.counts.activations, 0);
+        assert_eq!(state.fence_requests.len(), 1);
+    }
+    assert!(process_is_absent(pids.lock().unwrap()[0]));
+}
+
+#[cfg(unix)]
+#[tokio::test]
+async fn retention_loss_replaces_the_child_session_without_fencing_the_new_authority() {
+    let fixture = HostFixture::new(
+        "retention-loss",
+        json!({"loads_by_launch": [1, 1], "shutdown": "graceful"}),
+    );
+    let service = MockService::new(
+        "retention-loss",
+        chain_profile(1, PluginRuntimeState::Starting),
+    );
+    let original = service.lock().profile.plugins[0].clone();
+    {
+        let mut state = service.lock();
+        state.retention_lost = true;
+        state.sync_revision = 1;
+    }
+    let pids = Arc::new(Mutex::new(Vec::new()));
+    let supervisor = PluginRuntimeSupervisor::for_test(
+        service.clone(),
+        fixture.policy(vec![session(59), session(60)], Arc::clone(&pids)),
+        Arc::new(DenyCallbacks),
+    );
+
+    let snapshot = supervisor.reconcile().await.unwrap();
+    assert_eq!(snapshot.lifecycle, PluginRuntimeLifecycle::Running);
+    assert_eq!(snapshot.admitting_plugins, vec![original.plugin_id.clone()]);
+    {
+        let state = service.lock();
+        assert_eq!(state.counts.retention_losses, 1);
+        assert_eq!(
+            state.retention_modes,
+            [junban_app::PluginDeliveryMode::StartingCatchUp]
+        );
+        assert!(state.fence_requests.is_empty());
+        assert_eq!(state.counts.activations, 1);
+        let current = &state.profile.plugins[0];
+        assert_eq!(current.package_generation, original.package_generation);
+        assert_eq!(current.activation_epoch, original.activation_epoch + 1);
+        assert_eq!(current.runtime_state, PluginRuntimeState::Active);
+    }
+    supervisor.shutdown().await.unwrap();
+    let pids = pids.lock().unwrap();
+    assert_eq!(pids.len(), 2);
+    assert!(pids.iter().copied().all(process_is_absent));
+}
+
+#[cfg(unix)]
+#[tokio::test]
+async fn active_retention_loss_uses_active_authority_then_restarts_from_resync() {
+    let fixture = HostFixture::new(
+        "active-retention-loss",
+        json!({"loads_by_launch": [1, 1], "shutdown": "graceful"}),
+    );
+    let service = MockService::new(
+        "active-retention-loss",
+        chain_profile(1, PluginRuntimeState::Active),
+    );
+    let original = service.lock().profile.plugins[0].clone();
+    {
+        let mut state = service.lock();
+        state.retention_lost = true;
+        state.sync_revision = 1;
+    }
+    let pids = Arc::new(Mutex::new(Vec::new()));
+    let supervisor = PluginRuntimeSupervisor::for_test(
+        service.clone(),
+        fixture.policy(vec![session(84), session(85)], Arc::clone(&pids)),
+        Arc::new(DenyCallbacks),
+    );
+
+    let snapshot = supervisor.reconcile().await.unwrap();
+    assert_eq!(snapshot.admitting_plugins, vec![original.plugin_id]);
+    {
+        let state = service.lock();
+        assert_eq!(state.counts.retention_losses, 1);
+        assert_eq!(
+            state.retention_modes,
+            [junban_app::PluginDeliveryMode::Active]
+        );
+        assert!(state.fence_requests.is_empty());
+        assert_eq!(
+            state.profile.plugins[0].activation_epoch,
+            original.activation_epoch + 1
+        );
+        assert_eq!(
+            state.profile.plugins[0].runtime_state,
+            PluginRuntimeState::Active
+        );
+    }
+    supervisor.shutdown().await.unwrap();
+    assert_eq!(pids.lock().unwrap().len(), 2);
+    wait_pids_reaped(&fixture.pid_file).await;
+}
+
+#[cfg(unix)]
+#[tokio::test]
+async fn resync_guest_failure_is_plugin_local_and_does_not_stall_the_graph() {
+    let fixture = HostFixture::new(
+        "resync-guest-failure",
+        json!({
+            "loads": 2,
+            "invoke_modes": {
+                "plugin-00": "guest_error",
+                "plugin-01": "success"
+            }
+        }),
+    );
+    let first = installed_plugin("plugin-00", 1, 10, PluginRuntimeState::Starting, Vec::new());
+    let second = installed_plugin("plugin-01", 1, 10, PluginRuntimeState::Starting, Vec::new());
+    let service = MockService::new(
+        "resync-guest-failure",
+        profile(
+            vec![first.clone(), second.clone()],
+            vec!["plugin-00", "plugin-01"],
+        ),
+    );
+    service
+        .lock()
+        .resync_required
+        .insert(first.plugin_id.clone());
+    let pids = Arc::new(Mutex::new(Vec::new()));
+    let supervisor = PluginRuntimeSupervisor::for_test(
+        service.clone(),
+        fixture.policy(vec![session(84)], Arc::clone(&pids)),
+        Arc::new(DenyCallbacks),
+    );
+
+    let snapshot = supervisor.reconcile().await.unwrap();
+    assert_eq!(snapshot.admitting_plugins, [second.plugin_id]);
+    {
+        let state = service.lock();
+        assert_eq!(state.counts.failures, 1);
+        assert_eq!(
+            state.failure_requests[0].cause,
+            PluginAttemptFailureCause::GuestTrap
+        );
+        assert!(state.fence_requests.is_empty());
+        assert_eq!(
+            state.profile.plugins[0].runtime_state,
+            PluginRuntimeState::Degraded
+        );
+        assert_eq!(
+            state.profile.plugins[1].runtime_state,
+            PluginRuntimeState::Active
+        );
+    }
+
+    supervisor.shutdown().await.unwrap();
+    assert!(process_is_absent(pids.lock().unwrap()[0]));
+}
+
+#[cfg(unix)]
+#[tokio::test]
+async fn retention_loss_teardown_failure_fences_the_refreshed_graph_once() {
+    let fixture = HostFixture::new(
+        "retention-loss-forced",
+        json!({"loads": 1, "shutdown": "forced"}),
+    );
+    let service = MockService::new(
+        "retention-loss-forced",
+        chain_profile(1, PluginRuntimeState::Starting),
+    );
+    let original = service.lock().profile.plugins[0].clone();
+    {
+        let mut state = service.lock();
+        state.retention_lost = true;
+        state.sync_revision = 1;
+    }
+    let pids = Arc::new(Mutex::new(Vec::new()));
+    let supervisor = PluginRuntimeSupervisor::for_test(
+        service.clone(),
+        fixture.policy(vec![session(61)], Arc::clone(&pids)),
+        Arc::new(DenyCallbacks),
+    );
+
+    assert!(matches!(
+        supervisor.reconcile().await,
+        Err(PluginRuntimeError::SessionLost | PluginRuntimeError::Fenced)
+    ));
+    service.wait_fence().await;
+    {
+        let state = service.lock();
+        assert_eq!(state.counts.retention_losses, 1);
+        assert_eq!(
+            state.retention_modes,
+            [junban_app::PluginDeliveryMode::StartingCatchUp]
+        );
+        assert_eq!(state.fence_requests.len(), 1);
+        assert_eq!(state.fence_requests[0].entries.len(), 1);
+        assert_eq!(
+            state.fence_requests[0].entries[0].activation_epoch,
+            original.activation_epoch + 1
+        );
+        let current = &state.profile.plugins[0];
+        assert_eq!(current.activation_epoch, original.activation_epoch + 2);
+        assert_eq!(current.runtime_state, PluginRuntimeState::Degraded);
+    }
+    assert!(process_is_absent(pids.lock().unwrap()[0]));
+    assert_eq!(
+        supervisor.reconcile().await.unwrap(),
+        PluginRuntimeSnapshot::dormant()
+    );
+    assert_eq!(service.lock().fence_requests.len(), 1);
+}
+
+#[cfg(unix)]
+#[tokio::test]
 async fn resync_and_stale_activation_cas_never_open_admission() {
     let fixture = HostFixture::new(
         "resync-cas",
@@ -1900,13 +3049,8 @@ async fn resync_and_stale_activation_cas_never_open_admission() {
         Arc::new(DenyCallbacks),
     );
     let snapshot = supervisor.reconcile().await.unwrap();
-    assert!(snapshot.admitting_plugins.is_empty());
-    assert_eq!(service.lock().counts.activations, 0);
-    let plugin = service.lock().profile.plugins[0].clone();
-    assert!(matches!(
-        supervisor.invoke(dispatch(&plugin, 200)).await,
-        Err(PluginRuntimeError::NotAdmitting)
-    ));
+    assert_eq!(snapshot.admitting_plugins, vec![plugin_id.clone()]);
+    assert_eq!(service.lock().counts.activations, 1);
     supervisor.shutdown().await.unwrap();
 
     service.lock().resync_required.clear();
@@ -1974,6 +3118,184 @@ async fn plugin_local_failure_keeps_the_sibling_and_process_alive() {
     assert!(service.lock().fence_requests.is_empty());
     supervisor.shutdown().await.unwrap();
     assert!(process_is_absent(pid));
+}
+
+#[cfg(unix)]
+#[tokio::test]
+async fn starting_dependency_waits_without_graph_fencing_after_provider_failure() {
+    let base = installed_plugin(
+        "dependency-base",
+        1,
+        10,
+        PluginRuntimeState::Starting,
+        Vec::new(),
+    );
+    let dependent = installed_plugin(
+        "dependency-client",
+        2,
+        10,
+        PluginRuntimeState::Starting,
+        vec![Dependency {
+            id: "dependency-base".to_owned(),
+            requirement: "^1.0.0".to_owned(),
+            services: Vec::new(),
+        }],
+    );
+    let service = MockService::new(
+        "dependency-local-failure",
+        profile(
+            vec![dependent.clone(), base.clone()],
+            vec!["dependency-base", "dependency-client"],
+        ),
+    );
+    let fixture = HostFixture::new(
+        "dependency-local-failure",
+        json!({
+            "loads": 2,
+            "invoke_modes": {
+                "dependency-base": "guest_error",
+                "dependency-client": "success"
+            }
+        }),
+    );
+    let pids = Arc::new(Mutex::new(Vec::new()));
+    let supervisor = PluginRuntimeSupervisor::for_test(
+        service.clone(),
+        fixture.policy(vec![session(87)], Arc::clone(&pids)),
+        Arc::new(DenyCallbacks),
+    );
+
+    let snapshot = supervisor.reconcile().await.unwrap();
+    assert!(snapshot.admitting_plugins.is_empty());
+    {
+        let state = service.lock();
+        assert_eq!(state.counts.failures, 1);
+        assert!(state.fence_requests.is_empty());
+        assert_eq!(
+            state
+                .profile
+                .plugins
+                .iter()
+                .find(|plugin| plugin.plugin_id == base.plugin_id)
+                .unwrap()
+                .runtime_state,
+            PluginRuntimeState::Degraded
+        );
+        assert_eq!(
+            state
+                .profile
+                .plugins
+                .iter()
+                .find(|plugin| plugin.plugin_id == dependent.plugin_id)
+                .unwrap()
+                .runtime_state,
+            PluginRuntimeState::Starting
+        );
+    }
+    let invoked_plugins: Vec<_> = fixture
+        .captured_frames()
+        .into_iter()
+        .filter(|capture| capture["frame"]["type"] == "invoke")
+        .filter_map(|capture| {
+            capture["frame"]["fence"]["plugin_id"]
+                .as_str()
+                .map(str::to_owned)
+        })
+        .collect();
+    assert_eq!(invoked_plugins, ["dependency-base".to_owned()]);
+
+    supervisor.shutdown().await.unwrap();
+    assert!(process_is_absent(pids.lock().unwrap()[0]));
+}
+
+#[cfg(unix)]
+#[tokio::test]
+async fn sqlite_retention_loss_rotates_then_resyncs_without_rerunning_guest_work() {
+    let profile_dir = unique_root("sqlite-retention-loss");
+    let owner = ProfileOwner::open(&profile_dir).unwrap();
+    seed_sqlite_active_plugins(&profile_dir, 1);
+    seed_sqlite_retention_gap(&profile_dir);
+    let runtime = SqliteRuntimeService::new(
+        sqlite_app_service(&owner),
+        profile_dir.join("runtime-sources"),
+    );
+    let initial = runtime
+        .service
+        .get_installed_plugin_profile()
+        .await
+        .unwrap();
+    let plugin = initial.plugins[0].clone();
+    assert_eq!(plugin.runtime_state, PluginRuntimeState::Starting);
+    let fixture = HostFixture::new(
+        "sqlite-retention-loss",
+        json!({"loads_by_launch": [1, 1], "shutdown": "graceful"}),
+    );
+    let pids = Arc::new(Mutex::new(Vec::new()));
+    let supervisor = PluginRuntimeSupervisor::for_test(
+        runtime.clone(),
+        fixture.policy(vec![session(82), session(83)], Arc::clone(&pids)),
+        Arc::new(DenyCallbacks),
+    );
+
+    let snapshot = supervisor.reconcile().await.unwrap();
+    assert_eq!(snapshot.admitting_plugins, vec![plugin.plugin_id.clone()]);
+    let current = runtime
+        .service
+        .get_installed_plugin_profile()
+        .await
+        .unwrap();
+    let current = &current.plugins[0];
+    assert_eq!(current.activation_epoch, plugin.activation_epoch + 1);
+    assert_eq!(current.runtime_state, PluginRuntimeState::Active);
+    let cursor = runtime
+        .service
+        .get_plugin_cursor(plugin.plugin_id.clone())
+        .await
+        .unwrap();
+    assert_eq!(cursor.revision, 4);
+    assert!(!cursor.resync_required);
+    assert!(runtime.fence_requests.lock().unwrap().is_empty());
+
+    let invocations: Vec<_> = fixture
+        .captured_frames()
+        .into_iter()
+        .filter(|capture| capture["frame"]["type"] == "invoke")
+        .filter_map(|capture| capture["frame"]["kind"].as_str().map(str::to_owned))
+        .collect();
+    assert_eq!(
+        invocations
+            .iter()
+            .filter(|kind| kind.as_str() == "activate")
+            .count(),
+        1
+    );
+    assert!(invocations.iter().any(|kind| kind == "resync"));
+    assert!(
+        invocations
+            .iter()
+            .all(|kind| matches!(kind.as_str(), "activate" | "resync"))
+    );
+
+    let connection = Connection::open(profile_dir.join("junban.sqlite3")).unwrap();
+    let (receipt_count, raw_session_count): (i64, i64) = connection
+        .query_row(
+            "SELECT COUNT(*), COALESCE(SUM(INSTR(request_json, ?1) > 0), 0)
+             FROM operation_receipts
+             WHERE request_json LIKE '%\"op\":\"mark_plugin_retention_loss\"%'",
+            [session(82).to_string()],
+            |row| Ok((row.get(0)?, row.get(1)?)),
+        )
+        .unwrap();
+    assert_eq!(receipt_count, 1);
+    assert_eq!(raw_session_count, 0);
+
+    supervisor.shutdown().await.unwrap();
+    assert_eq!(pids.lock().unwrap().len(), 2);
+    wait_pids_reaped(&fixture.pid_file).await;
+    drop(supervisor);
+    drop(runtime);
+    drop(owner);
+    fs::remove_dir_all(profile_dir).unwrap();
 }
 
 #[cfg(unix)]
@@ -2135,7 +3457,282 @@ async fn sqlite_local_failure_terminalizes_before_health_and_later_fences_only_a
 
 #[cfg(unix)]
 #[tokio::test]
-async fn callbacks_are_staged_and_default_denied_without_slice_two_d_authority() {
+async fn durable_effects_transition_before_the_authorized_terminal_commit() {
+    let fixture = HostFixture::new("durable-effect", json!({"loads": 1, "invoke": "kv_effect"}));
+    let mut plugin = installed_plugin(
+        "durable-effect",
+        1,
+        8,
+        PluginRuntimeState::Active,
+        Vec::new(),
+    );
+    let storage = Permission {
+        capability: Capability::Storage,
+        scope: PermissionScope::Unscoped(UnscopedPermission {}),
+    };
+    plugin.granted_capabilities.push(Capability::Storage);
+    plugin.manifest.permissions.push(storage);
+    let service = MockService::new(
+        "durable-effect",
+        profile(vec![plugin.clone()], vec!["durable-effect"]),
+    );
+    let pids = Arc::new(Mutex::new(Vec::new()));
+    let supervisor = PluginRuntimeSupervisor::for_test(
+        service.clone(),
+        fixture.policy(vec![session(74)], Arc::clone(&pids)),
+        Arc::new(DenyCallbacks),
+    );
+    supervisor.reconcile().await.unwrap();
+
+    assert!(matches!(
+        supervisor
+            .invoke(dispatch(&plugin, 349))
+            .await
+            .unwrap()
+            .outcome()
+            .await
+            .unwrap(),
+        InvocationOutcome::Completed(_)
+    ));
+    service.wait_completion().await;
+    {
+        let state = service.lock();
+        assert_eq!(state.counts.reservations, 1);
+        assert_eq!(state.counts.transitions, 1);
+        assert_eq!(state.counts.completions, 1);
+    }
+
+    supervisor.shutdown().await.unwrap();
+    assert!(process_is_absent(pids.lock().unwrap()[0]));
+}
+
+#[cfg(unix)]
+#[tokio::test]
+async fn durable_surface_actions_use_the_manifest_bound_action_authority() {
+    let fixture = HostFixture::new("durable-action", json!({"loads": 1}));
+    let mut plugin = installed_plugin(
+        "durable-action",
+        1,
+        8,
+        PluginRuntimeState::Active,
+        Vec::new(),
+    );
+    plugin.granted_capabilities.push(Capability::UiView);
+    plugin.manifest.permissions.push(Permission {
+        capability: Capability::UiView,
+        scope: PermissionScope::Unscoped(UnscopedPermission {}),
+    });
+    plugin.manifest.surfaces = vec![SurfaceDeclaration {
+        id: "view".to_owned(),
+        kind: SurfaceKind::View,
+        title: "View".to_owned(),
+        icon: None,
+        location: SurfaceLocation::Workspace,
+        actions: vec!["apply".to_owned()],
+    }];
+    let service = MockService::new(
+        "durable-action",
+        profile(vec![plugin.clone()], vec!["durable-action"]),
+    );
+    let pids = Arc::new(Mutex::new(Vec::new()));
+    let supervisor = PluginRuntimeSupervisor::for_test(
+        service.clone(),
+        fixture.policy(vec![session(78)], Arc::clone(&pids)),
+        Arc::new(DenyCallbacks),
+    );
+    supervisor.reconcile().await.unwrap();
+
+    let request = InvocationRequest::handle_surface_action(
+        Some("view".to_owned()),
+        SurfaceAction {
+            surface_id: "view".to_owned(),
+            action_id: "apply".to_owned(),
+            values: Vec::new(),
+        },
+    );
+    let (_, body) = request
+        .clone()
+        .into_parent_message(
+            AuthorityFence {
+                plugin_id: plugin.plugin_id.to_string(),
+                package_generation: plugin.package_generation,
+                activation_epoch: plugin.activation_epoch,
+                host_session_id: session(999).to_string(),
+                invocation_id: operation(353).to_string(),
+            },
+            canonical_permission_hash(&plugin.manifest.permissions).unwrap(),
+        )
+        .unwrap()
+        .into_parts();
+    let dispatch = PluginInvocationDispatch {
+        operation_id: operation(353),
+        plugin_id: plugin.plugin_id.clone(),
+        package_generation: plugin.package_generation,
+        activation_epoch: plugin.activation_epoch,
+        hook_kind: PluginHookKind::HandleSurfaceAction,
+        entry: PluginManifestEntry::SurfaceAction {
+            surface_id: PluginId::parse("view").unwrap(),
+            action_id: PluginId::parse("apply").unwrap(),
+        },
+        payload_sha256: Sha256Digest::of(&body),
+        delivery_operation_id: operation(1_353),
+        mode: junban_app::PluginDeliveryMode::Active,
+        retained_event_source: None,
+        request,
+    };
+    let mut mismatched = dispatch.clone();
+    mismatched.operation_id = operation(352);
+    mismatched.delivery_operation_id = operation(1_352);
+    mismatched.request = InvocationRequest::handle_surface_action(
+        Some("view".to_owned()),
+        SurfaceAction {
+            surface_id: "view".to_owned(),
+            action_id: "other".to_owned(),
+            values: Vec::new(),
+        },
+    );
+    let (_, mismatched_body) = mismatched
+        .request
+        .clone()
+        .into_parent_message(
+            AuthorityFence {
+                plugin_id: plugin.plugin_id.to_string(),
+                package_generation: plugin.package_generation,
+                activation_epoch: plugin.activation_epoch,
+                host_session_id: session(999).to_string(),
+                invocation_id: mismatched.operation_id.to_string(),
+            },
+            canonical_permission_hash(&plugin.manifest.permissions).unwrap(),
+        )
+        .unwrap()
+        .into_parts();
+    mismatched.payload_sha256 = Sha256Digest::of(&mismatched_body);
+    assert!(matches!(
+        supervisor.invoke(mismatched).await,
+        Err(PluginRuntimeError::AuthorityRejected)
+    ));
+    assert_eq!(service.lock().counts.reservations, 0);
+
+    assert!(matches!(
+        supervisor
+            .invoke(dispatch)
+            .await
+            .unwrap()
+            .outcome()
+            .await
+            .unwrap(),
+        InvocationOutcome::Completed(_)
+    ));
+    service.wait_completion().await;
+    {
+        let state = service.lock();
+        assert_eq!(state.counts.reservations, 1);
+        assert_eq!(state.counts.completions, 1);
+    }
+    assert!(fixture.captured_frames().iter().any(|capture| {
+        capture["frame"]["type"] == "invoke" && capture["frame"]["kind"] == "handle_surface_action"
+    }));
+
+    supervisor.shutdown().await.unwrap();
+    assert!(process_is_absent(pids.lock().unwrap()[0]));
+}
+
+#[cfg(unix)]
+#[tokio::test]
+async fn transient_lifecycle_render_and_settings_calls_never_reserve_durable_work() {
+    let fixture = HostFixture::new("transient-modes", json!({"loads": 1}));
+    let mut plugin = installed_plugin(
+        "transient-modes",
+        1,
+        12,
+        PluginRuntimeState::Starting,
+        Vec::new(),
+    );
+    for capability in [Capability::Settings, Capability::UiView] {
+        plugin.granted_capabilities.push(capability);
+        plugin.manifest.permissions.push(Permission {
+            capability,
+            scope: PermissionScope::Unscoped(UnscopedPermission {}),
+        });
+    }
+    plugin.manifest.surfaces.push(SurfaceDeclaration {
+        id: "main".to_owned(),
+        kind: SurfaceKind::View,
+        title: "Main".to_owned(),
+        icon: None,
+        location: SurfaceLocation::Workspace,
+        actions: Vec::new(),
+    });
+    let service = MockService::new(
+        "transient-modes",
+        profile(vec![plugin.clone()], vec!["transient-modes"]),
+    );
+    let pids = Arc::new(Mutex::new(Vec::new()));
+    let supervisor = PluginRuntimeSupervisor::for_test(
+        service.clone(),
+        fixture.policy(vec![session(73)], Arc::clone(&pids)),
+        service.clone(),
+    );
+    supervisor.reconcile().await.unwrap();
+    let active = service.lock().profile.plugins[0].clone();
+
+    let rendered = supervisor
+        .invoke_transient(
+            active.plugin_id.clone(),
+            InvocationRequest::render_surface(
+                Some("main".to_owned()),
+                wit::SurfaceRequest {
+                    surface_id: "main".to_owned(),
+                },
+            ),
+        )
+        .await
+        .unwrap()
+        .outcome()
+        .await
+        .unwrap();
+    assert!(matches!(rendered, InvocationOutcome::Completed(_)));
+    let validated = supervisor
+        .invoke_transient(
+            active.plugin_id.clone(),
+            InvocationRequest::validate_settings(None, wit::SettingValues { values: Vec::new() }),
+        )
+        .await
+        .unwrap()
+        .outcome()
+        .await
+        .unwrap();
+    assert!(matches!(validated, InvocationOutcome::Completed(_)));
+    assert_eq!(service.lock().counts.reservations, 0);
+
+    supervisor.shutdown().await.unwrap();
+    {
+        let state = service.lock();
+        assert_eq!(state.counts.activations, 1);
+        assert_eq!(state.counts.reservations, 0);
+        assert_eq!(state.counts.completions, 0);
+    }
+    let transient_kinds: Vec<_> = fixture
+        .captured_frames()
+        .into_iter()
+        .filter(|capture| capture["frame"]["type"] == "invoke")
+        .filter_map(|capture| capture["frame"]["kind"].as_str().map(str::to_owned))
+        .collect();
+    assert_eq!(
+        transient_kinds,
+        [
+            "activate",
+            "render_surface",
+            "validate_settings",
+            "deactivate"
+        ]
+    );
+    assert!(process_is_absent(pids.lock().unwrap()[0]));
+}
+
+#[cfg(unix)]
+#[tokio::test]
+async fn callbacks_bridge_exact_child_messages_through_the_typed_adapter() {
     let fixture = HostFixture::new("callback", json!({"loads": 1, "invoke": "callback"}));
     let service = MockService::new("callback", chain_profile(1, PluginRuntimeState::Active));
     let plugin = service.lock().profile.plugins[0].clone();
@@ -2195,7 +3792,68 @@ async fn callbacks_are_staged_and_default_denied_without_slice_two_d_authority()
 
 #[cfg(unix)]
 #[tokio::test]
-async fn authorized_nested_service_uses_parent_authority_without_durable_reservation() {
+async fn callback_authority_drift_after_await_cancels_without_transmitting_a_reply() {
+    let fixture = HostFixture::new(
+        "callback-drift",
+        json!({"loads": 1, "invoke": "settings_callback"}),
+    );
+    let mut plugin = installed_plugin(
+        "callback-drift",
+        1,
+        10,
+        PluginRuntimeState::Active,
+        Vec::new(),
+    );
+    plugin.granted_capabilities.push(Capability::Settings);
+    plugin.manifest.permissions.push(Permission {
+        capability: Capability::Settings,
+        scope: PermissionScope::Unscoped(UnscopedPermission {}),
+    });
+    let service = MockService::new(
+        "callback-drift",
+        profile(vec![plugin.clone()], vec!["callback-drift"]),
+    );
+    let entered = Arc::new(Semaphore::new(0));
+    let release = Arc::new(Semaphore::new(0));
+    let callback_port = Arc::new(BlockingSettingsCallbacks {
+        service: service.clone(),
+        entered: Arc::clone(&entered),
+        release: Arc::clone(&release),
+    });
+    let pids = Arc::new(Mutex::new(Vec::new()));
+    let supervisor = PluginRuntimeSupervisor::for_test(
+        service.clone(),
+        fixture.policy(vec![session(77)], Arc::clone(&pids)),
+        callback_port,
+    );
+    supervisor.reconcile().await.unwrap();
+
+    let handle = supervisor.invoke(dispatch(&plugin, 352)).await.unwrap();
+    tokio::time::timeout(Duration::from_secs(3), entered.acquire())
+        .await
+        .expect("callback entry deadline")
+        .expect("callback entry semaphore")
+        .forget();
+    service.lock().profile.plugins[0].activation_epoch += 1;
+    release.add_permits(1);
+
+    assert!(matches!(
+        handle.outcome().await.unwrap(),
+        InvocationOutcome::Cancelled
+    ));
+    assert!(
+        !fixture
+            .captured_frames()
+            .iter()
+            .any(|capture| capture["frame"]["type"] == "capability_reply")
+    );
+    assert_eq!(service.lock().counts.completions, 1);
+
+    supervisor.shutdown().await.unwrap();
+    assert!(process_is_absent(pids.lock().unwrap()[0]));
+}
+
+fn nested_service_plugins() -> (InstalledPlugin, InstalledPlugin) {
     let mut target = installed_plugin(
         "service-target",
         1,
@@ -2203,6 +3861,13 @@ async fn authorized_nested_service_uses_parent_authority_without_durable_reserva
         PluginRuntimeState::Active,
         Vec::new(),
     );
+    target
+        .granted_capabilities
+        .push(Capability::ServicesProvide);
+    target.manifest.permissions.push(Permission {
+        capability: Capability::ServicesProvide,
+        scope: PermissionScope::Unscoped(UnscopedPermission {}),
+    });
     target.manifest.services = vec![ServiceDeclaration {
         id: "service".to_owned(),
         title: "Service".to_owned(),
@@ -2232,6 +3897,13 @@ async fn authorized_nested_service_uses_parent_authority_without_durable_reserva
             }],
         }),
     });
+    (caller, target)
+}
+
+#[cfg(unix)]
+#[tokio::test]
+async fn authorized_nested_service_uses_parent_authority_without_durable_reservation() {
+    let (caller, target) = nested_service_plugins();
     let service = MockService::new(
         "nested-service",
         profile(
@@ -2253,7 +3925,7 @@ async fn authorized_nested_service_uses_parent_authority_without_durable_reserva
     let supervisor = PluginRuntimeSupervisor::for_test(
         service.clone(),
         fixture.policy(vec![session(77)], Arc::clone(&pids)),
-        Arc::new(DenyCallbacks),
+        service.clone(),
     );
     supervisor.reconcile().await.unwrap();
     assert!(matches!(
@@ -2283,6 +3955,134 @@ async fn authorized_nested_service_uses_parent_authority_without_durable_reserva
         nested_invokes[1]["frame"]["fence"]["plugin_id"],
         "service-target"
     );
+    supervisor.shutdown().await.unwrap();
+    assert!(process_is_absent(pids.lock().unwrap()[0]));
+}
+
+#[cfg(unix)]
+#[tokio::test]
+async fn invalid_nested_service_output_records_provider_health_before_unblocking_the_caller() {
+    let (caller, mut target) = nested_service_plugins();
+    target.manifest.services[0].response = vec![ServiceField {
+        id: "found".to_owned(),
+        kind: DataKind::Boolean,
+        required: true,
+    }];
+    let service = MockService::new(
+        "nested-invalid-output",
+        profile(
+            vec![caller.clone(), target.clone()],
+            vec!["service-target", "service-caller"],
+        ),
+    );
+    let fixture = HostFixture::new(
+        "nested-invalid-output",
+        json!({
+            "loads": 2,
+            "invoke_modes": {
+                "service-caller": "service_callback",
+                "service-target": "success"
+            }
+        }),
+    );
+    let pids = Arc::new(Mutex::new(Vec::new()));
+    let supervisor = PluginRuntimeSupervisor::for_test(
+        service.clone(),
+        fixture.policy(vec![session(86)], Arc::clone(&pids)),
+        service.clone(),
+    );
+    supervisor.reconcile().await.unwrap();
+
+    assert!(matches!(
+        supervisor
+            .invoke(dispatch(&caller, 354))
+            .await
+            .unwrap()
+            .outcome()
+            .await
+            .unwrap(),
+        InvocationOutcome::Completed(_)
+    ));
+    service.wait_completion().await;
+    {
+        let state = service.lock();
+        assert_eq!(state.counts.reservations, 1);
+        assert_eq!(state.counts.completions, 1);
+        assert_eq!(state.counts.failures, 1);
+        assert_eq!(
+            state.failure_requests[0].cause,
+            PluginAttemptFailureCause::InvalidOutput
+        );
+        assert_eq!(
+            state
+                .profile
+                .plugins
+                .iter()
+                .find(|plugin| plugin.plugin_id == target.plugin_id)
+                .unwrap()
+                .runtime_state,
+            PluginRuntimeState::Degraded
+        );
+    }
+
+    supervisor.shutdown().await.unwrap();
+    assert!(process_is_absent(pids.lock().unwrap()[0]));
+}
+
+#[cfg(unix)]
+#[tokio::test]
+async fn cancelling_a_service_root_cancels_the_nested_guest_and_suppresses_its_reply() {
+    let (caller, target) = nested_service_plugins();
+    let service = MockService::new(
+        "nested-cancel",
+        profile(
+            vec![caller.clone(), target],
+            vec!["service-target", "service-caller"],
+        ),
+    );
+    let fixture = HostFixture::new(
+        "nested-cancel",
+        json!({
+            "loads": 2,
+            "invoke_modes": {
+                "service-caller": "service_callback",
+                "service-target": "hold_call_service"
+            }
+        }),
+    );
+    let pids = Arc::new(Mutex::new(Vec::new()));
+    let supervisor = PluginRuntimeSupervisor::for_test(
+        service.clone(),
+        fixture.policy(vec![session(78)], Arc::clone(&pids)),
+        service.clone(),
+    );
+    supervisor.reconcile().await.unwrap();
+
+    let handle = supervisor.invoke(dispatch(&caller, 353)).await.unwrap();
+    wait_active_invocations(&supervisor, 2).await;
+    handle.cancel();
+    assert!(matches!(
+        handle.outcome().await.unwrap(),
+        InvocationOutcome::Cancelled
+    ));
+    service.wait_completion().await;
+    wait_active_invocations(&supervisor, 0).await;
+    let cancelled_plugins: BTreeSet<_> = fixture
+        .captured_frames()
+        .into_iter()
+        .filter(|capture| capture["frame"]["type"] == "cancel")
+        .filter_map(|capture| {
+            capture["frame"]["fence"]["plugin_id"]
+                .as_str()
+                .map(str::to_owned)
+        })
+        .collect();
+    assert_eq!(
+        cancelled_plugins,
+        BTreeSet::from(["service-caller".to_owned(), "service-target".to_owned()])
+    );
+    assert_eq!(service.lock().counts.reservations, 1);
+
     supervisor.shutdown().await.unwrap();
     assert!(process_is_absent(pids.lock().unwrap()[0]));
 }
@@ -2402,6 +4202,7 @@ async fn cancellation_before_reservation_never_reaches_the_child() {
     );
     supervisor.reconcile().await.unwrap();
     let handle = supervisor.invoke(dispatch(&plugin, 399)).await.unwrap();
+    assert_eq!(supervisor.reconcile().await, Err(PluginRuntimeError::Busy));
     handle.cancel();
     assert!(matches!(
         handle.outcome().await.unwrap(),
@@ -3019,22 +4820,4 @@ async fn due_retry_startup_and_restore_paths_preserve_dormancy_rules() {
     let state = service.lock();
     assert_eq!(state.counts.open_sources, 1);
     assert!(state.fence_requests.is_empty());
-}
-
-#[test]
-fn slice_two_c_does_not_commit_deferred_effects_or_expose_http_authority() {
-    let deferred = GuestInvocationOutcome::InvokeCommand(WitResult::Ok(PluginOutcome {
-        effect: Some(
-            junban_plugin_sdk::private_body_types::PluginEffect::KvPatch(
-                junban_plugin_sdk::private_body_types::KvPatch {
-                    operations: Vec::new(),
-                },
-            ),
-        ),
-    }));
-    assert!(outcome_has_deferred_effect(&deferred));
-    assert!(matches!(
-        denied_host_reply(HostCallKind::HttpRequest),
-        HostCallReply::HttpRequest(WitResult::Err(_))
-    ));
 }

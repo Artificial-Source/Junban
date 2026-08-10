@@ -55,7 +55,7 @@ impl PluginResyncPort for AppService {
         let service = self.clone();
         Box::pin(async move {
             service
-                .begin_plugin_resync(
+                .open_plugin_resync_session(
                     plugin_id,
                     package_generation,
                     activation_epoch,
@@ -636,7 +636,7 @@ fn decode_resync_outcome(body: &[u8]) -> Result<ResyncPageOutcome, PluginResyncD
     }
 }
 
-fn map_app_error(error: AppError) -> PluginResyncDriverError {
+pub(super) fn map_app_error(error: AppError) -> PluginResyncDriverError {
     match error {
         AppError::Conflict | AppError::NotFound => PluginResyncDriverError::StaleAuthority,
         AppError::OperationTooLarge => PluginResyncDriverError::OperationTooLarge,

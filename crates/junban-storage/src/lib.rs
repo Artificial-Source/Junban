@@ -1405,13 +1405,13 @@ impl PluginRepository for SqliteRepository {
         })
     }
 
-    fn begin_plugin_resync(
+    fn open_plugin_resync_session(
         &self,
         request: junban_app::BeginPluginResyncRequest,
         now: Timestamp,
     ) -> RepositoryFuture<'_, junban_app::PluginResyncSession> {
         self.plugin_request(move |connection, _| {
-            plugin_ops::begin_plugin_resync(connection, request, now)
+            plugin_ops::open_plugin_resync_session(connection, request, now)
         })
     }
 
@@ -1432,16 +1432,6 @@ impl PluginRepository for SqliteRepository {
     ) -> RepositoryFuture<'_, junban_app::FinalizePluginResyncOutcome> {
         self.plugin_request(move |connection, _| {
             plugin_ops::finalize_plugin_resync(connection, request, now)
-        })
-    }
-
-    fn advance_plugin_cursor(
-        &self,
-        request: junban_app::AdvancePluginCursorRequest,
-        now: Timestamp,
-    ) -> RepositoryFuture<'_, junban_app::PluginEventCursor> {
-        self.plugin_request(move |connection, _| {
-            plugin_ops::advance_plugin_cursor(connection, request, now)
         })
     }
 
@@ -1475,17 +1465,6 @@ impl PluginRepository for SqliteRepository {
         })
     }
 
-    // P7-2D-DB-002 REMOVAL BLOCKER: unwrapped supervisor path.
-    fn reserve_plugin_invocation(
-        &self,
-        request: junban_app::ReservePluginInvocationRequest,
-        now: Timestamp,
-    ) -> RepositoryFuture<'_, junban_app::ReservedPluginInvocation> {
-        self.plugin_request(move |connection, _| {
-            plugin_ops::reserve_plugin_invocation(connection, request, now)
-        })
-    }
-
     fn reserve_authorized_plugin_invocation(
         &self,
         request: junban_app::AuthorizedReservePluginInvocationRequest,
@@ -1493,17 +1472,6 @@ impl PluginRepository for SqliteRepository {
     ) -> RepositoryFuture<'_, junban_app::ReservedPluginInvocation> {
         self.plugin_request(move |connection, _| {
             plugin_ops::reserve_authorized_plugin_invocation(connection, request, now)
-        })
-    }
-
-    // P7-2D-DB-002 REMOVAL BLOCKER: unwrapped supervisor path.
-    fn transition_plugin_invocation(
-        &self,
-        request: junban_app::TransitionPluginInvocationRequest,
-        now: Timestamp,
-    ) -> RepositoryFuture<'_, junban_app::PluginInvocation> {
-        self.plugin_request(move |connection, _| {
-            plugin_ops::transition_plugin_invocation(connection, request, now)
         })
     }
 
@@ -1521,27 +1489,6 @@ impl PluginRepository for SqliteRepository {
         self.plugin_request(|connection, _| plugin_ops::list_plugin_invocations(connection))
     }
 
-    // P7-2D-DB-002 REMOVAL BLOCKER: unwrapped supervisor path.
-    fn complete_plugin_invocation(
-        &self,
-        operation_id: OperationId,
-        plugin_id: junban_plugin_sdk::PluginId,
-        package_generation: u64,
-        activation_epoch: u64,
-        now: Timestamp,
-    ) -> RepositoryFuture<'_, junban_app::CommittedPluginInvocation> {
-        self.plugin_request(move |connection, _| {
-            plugin_ops::complete_plugin_invocation(
-                connection,
-                operation_id,
-                plugin_id,
-                package_generation,
-                activation_epoch,
-                now,
-            )
-        })
-    }
-
     fn complete_authorized_plugin_invocation(
         &self,
         request: junban_app::CompletePluginInvocationRequest,
@@ -1549,17 +1496,6 @@ impl PluginRepository for SqliteRepository {
     ) -> RepositoryFuture<'_, junban_app::CommittedPluginInvocation> {
         self.plugin_request(move |connection, _| {
             plugin_ops::complete_authorized_plugin_invocation(connection, request, now)
-        })
-    }
-
-    // P7-2D-DB-002 REMOVAL BLOCKER: unwrapped supervisor path.
-    fn commit_plugin_invocation(
-        &self,
-        request: junban_app::PlannedPluginInvocationCommit,
-        now: Timestamp,
-    ) -> RepositoryFuture<'_, junban_app::CommittedPluginInvocation> {
-        self.plugin_request(move |connection, _| {
-            plugin_ops::commit_plugin_invocation(connection, request, now)
         })
     }
 

@@ -2431,7 +2431,7 @@ where
             .map_err(AppError::from)
     }
 
-    pub async fn begin_plugin_resync(
+    pub async fn open_plugin_resync_session(
         &self,
         plugin_id: junban_plugin_sdk::PluginId,
         package_generation: u64,
@@ -2440,7 +2440,7 @@ where
         now: Timestamp,
     ) -> Result<crate::PluginResyncSession, AppError> {
         self.repository
-            .begin_plugin_resync(
+            .open_plugin_resync_session(
                 crate::BeginPluginResyncRequest {
                     operation_id,
                     plugin_id,
@@ -2471,17 +2471,6 @@ where
     ) -> Result<crate::FinalizePluginResyncOutcome, AppError> {
         self.repository
             .finalize_plugin_resync(request, now)
-            .await
-            .map_err(AppError::from)
-    }
-
-    pub async fn advance_plugin_cursor(
-        &self,
-        request: crate::AdvancePluginCursorRequest,
-        now: Timestamp,
-    ) -> Result<crate::PluginEventCursor, AppError> {
-        self.repository
-            .advance_plugin_cursor(request, now)
             .await
             .map_err(AppError::from)
     }
@@ -2525,19 +2514,6 @@ where
             .map_err(AppError::from)
     }
 
-    // P7-2D-DB-002 REMOVAL BLOCKER: retained only for the pre-integration
-    // supervisor. New delivery code must use the authorized wrapper.
-    pub async fn reserve_plugin_invocation(
-        &self,
-        request: crate::ReservePluginInvocationRequest,
-        now: Timestamp,
-    ) -> Result<crate::ReservedPluginInvocation, AppError> {
-        self.repository
-            .reserve_plugin_invocation(request, now)
-            .await
-            .map_err(AppError::from)
-    }
-
     pub async fn reserve_authorized_plugin_invocation(
         &self,
         request: crate::AuthorizedReservePluginInvocationRequest,
@@ -2545,19 +2521,6 @@ where
     ) -> Result<crate::ReservedPluginInvocation, AppError> {
         self.repository
             .reserve_authorized_plugin_invocation(request, now)
-            .await
-            .map_err(AppError::from)
-    }
-
-    // P7-2D-DB-002 REMOVAL BLOCKER: retained only for the pre-integration
-    // supervisor. New delivery code must use the authorized wrapper.
-    pub async fn transition_plugin_invocation(
-        &self,
-        request: crate::TransitionPluginInvocationRequest,
-        now: Timestamp,
-    ) -> Result<crate::PluginInvocation, AppError> {
-        self.repository
-            .transition_plugin_invocation(request, now)
             .await
             .map_err(AppError::from)
     }
@@ -2580,28 +2543,6 @@ where
             .map_err(AppError::from)
     }
 
-    // P7-2D-DB-002 REMOVAL BLOCKER: retained only for the pre-integration
-    // supervisor. New delivery code must use the authorized wrapper.
-    pub async fn complete_plugin_invocation(
-        &self,
-        operation_id: OperationId,
-        plugin_id: junban_plugin_sdk::PluginId,
-        package_generation: u64,
-        activation_epoch: u64,
-        now: Timestamp,
-    ) -> Result<crate::CommittedPluginInvocation, AppError> {
-        self.repository
-            .complete_plugin_invocation(
-                operation_id,
-                plugin_id,
-                package_generation,
-                activation_epoch,
-                now,
-            )
-            .await
-            .map_err(AppError::from)
-    }
-
     pub async fn complete_authorized_plugin_invocation(
         &self,
         request: crate::CompletePluginInvocationRequest,
@@ -2611,27 +2552,6 @@ where
             .complete_authorized_plugin_invocation(request, now)
             .await
             .map_err(AppError::from)
-    }
-
-    // P7-2D-DB-002 REMOVAL BLOCKER: retained only for the pre-integration
-    // supervisor. New delivery code must use the authorized wrapper.
-    pub async fn commit_plugin_invocation(
-        &self,
-        request: crate::CommitPluginInvocationRequest,
-        now: Timestamp,
-    ) -> Result<crate::CommittedPluginInvocation, AppError> {
-        let planned = crate::plan_plugin_invocation_commit(request).map_err(AppError::from)?;
-        let committed = self
-            .repository
-            .commit_plugin_invocation(planned, now)
-            .await
-            .map_err(AppError::from)?;
-        if let Some(mutation) = &committed.mutation
-            && mutation.newly_committed
-        {
-            self.events.publish(mutation.event.clone());
-        }
-        Ok(committed)
     }
 
     pub async fn commit_authorized_plugin_invocation(
@@ -2945,9 +2865,9 @@ mod tests {
             self.response("plugin-retry")
         }
 
-        fn commit_plugin_invocation(
+        fn commit_authorized_plugin_invocation(
             &self,
-            _: crate::PlannedPluginInvocationCommit,
+            _: crate::AuthorizedPlannedPluginInvocationCommit,
             _: Timestamp,
         ) -> crate::RepositoryFuture<'_, crate::CommittedPluginInvocation> {
             self.calls.lock().unwrap().push("plugin-commit");
@@ -4176,21 +4096,39 @@ mod tests {
         let sink = Arc::new(RecordingSink::default());
         let service = JunbanService::new(Arc::clone(&repository), Arc::clone(&sink));
         let plugin_id = junban_plugin_sdk::PluginId::parse("test-plugin").unwrap();
-        let request = crate::CommitPluginInvocationRequest {
-            invocation_operation_id: OperationId::new(),
-            plugin_id,
-            package_generation: 1,
-            activation_epoch: 0,
-            child_operation_id: None,
-            domain_effect: None,
-            kv_patch: None,
-            cursor: None,
-            resync_session: None,
-            resync_kv: None,
+        let invocation_operation_id = OperationId::new();
+        let delivery = crate::PluginInvocationDelivery::new(
+            crate::PluginDeliveryAuthority {
+                plugin_id: plugin_id.clone(),
+                package_generation: 1,
+                activation_epoch: 1,
+                host_session_id: OperationId::new(),
+                invocation_id: invocation_operation_id,
+                payload_sha256: junban_plugin_sdk::Sha256Digest::of(b"request"),
+                mode: crate::PluginDeliveryMode::Active,
+            },
+            crate::PluginHookKind::InvokeCommand,
+            junban_plugin_sdk::PluginId::parse("command").unwrap(),
+        )
+        .unwrap();
+        let request = || crate::AuthorizedCommitPluginInvocationRequest {
+            request: crate::CommitPluginInvocationRequest {
+                invocation_operation_id,
+                plugin_id: plugin_id.clone(),
+                package_generation: 1,
+                activation_epoch: 1,
+                child_operation_id: None,
+                domain_effect: None,
+                kv_patch: None,
+                cursor: None,
+                resync_session: None,
+                resync_kv: None,
+            },
+            delivery: delivery.clone(),
         };
 
         let committed = service
-            .commit_plugin_invocation(request.clone(), Timestamp::constant(1_700_000_000, 0))
+            .commit_authorized_plugin_invocation(request(), Timestamp::constant(1_700_000_000, 0))
             .await
             .unwrap();
         assert_eq!(committed.mutation, Some(expected.clone()));
@@ -4198,7 +4136,7 @@ mod tests {
 
         *repository.result.lock().unwrap() = Ok(mutation_with_flag(false));
         service
-            .commit_plugin_invocation(request, Timestamp::constant(1_700_000_001, 0))
+            .commit_authorized_plugin_invocation(request(), Timestamp::constant(1_700_000_001, 0))
             .await
             .unwrap();
         assert_eq!(sink.0.lock().unwrap().len(), 1);

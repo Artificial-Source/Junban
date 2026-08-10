@@ -1744,7 +1744,7 @@ pub trait PluginRepository: Send + Sync + 'static {
         plugin_unavailable()
     }
 
-    fn begin_plugin_resync(
+    fn open_plugin_resync_session(
         &self,
         _request: BeginPluginResyncRequest,
         _now: Timestamp,
@@ -1765,17 +1765,6 @@ pub trait PluginRepository: Send + Sync + 'static {
         _request: crate::FinalizePluginResyncRequest,
         _now: Timestamp,
     ) -> RepositoryFuture<'_, crate::FinalizePluginResyncOutcome> {
-        plugin_unavailable()
-    }
-
-    // P7-2D-DB-002 REMOVAL BLOCKER: the pre-integration supervisor still calls
-    // this unwrapped cursor mutation. New event delivery must use the verified
-    // retained-event terminal or skip paths instead.
-    fn advance_plugin_cursor(
-        &self,
-        _request: AdvancePluginCursorRequest,
-        _now: Timestamp,
-    ) -> RepositoryFuture<'_, PluginEventCursor> {
         plugin_unavailable()
     }
 
@@ -1805,31 +1794,11 @@ pub trait PluginRepository: Send + Sync + 'static {
         plugin_unavailable()
     }
 
-    // P7-2D-DB-002 REMOVAL BLOCKER: remove after the supervisor migrates to
-    // `reserve_authorized_plugin_invocation`.
-    fn reserve_plugin_invocation(
-        &self,
-        _request: ReservePluginInvocationRequest,
-        _now: Timestamp,
-    ) -> RepositoryFuture<'_, ReservedPluginInvocation> {
-        plugin_unavailable()
-    }
-
     fn reserve_authorized_plugin_invocation(
         &self,
         _request: AuthorizedReservePluginInvocationRequest,
         _now: Timestamp,
     ) -> RepositoryFuture<'_, ReservedPluginInvocation> {
-        plugin_unavailable()
-    }
-
-    // P7-2D-DB-002 REMOVAL BLOCKER: remove after the supervisor migrates to
-    // `transition_authorized_plugin_invocation`.
-    fn transition_plugin_invocation(
-        &self,
-        _request: TransitionPluginInvocationRequest,
-        _now: Timestamp,
-    ) -> RepositoryFuture<'_, PluginInvocation> {
         plugin_unavailable()
     }
 
@@ -1845,32 +1814,9 @@ pub trait PluginRepository: Send + Sync + 'static {
         plugin_unavailable()
     }
 
-    // P7-2D-DB-002 REMOVAL BLOCKER: remove after the supervisor migrates to
-    // `complete_authorized_plugin_invocation`.
-    fn complete_plugin_invocation(
-        &self,
-        _operation_id: OperationId,
-        _plugin_id: PluginId,
-        _package_generation: u64,
-        _activation_epoch: u64,
-        _now: Timestamp,
-    ) -> RepositoryFuture<'_, CommittedPluginInvocation> {
-        plugin_unavailable()
-    }
-
     fn complete_authorized_plugin_invocation(
         &self,
         _request: CompletePluginInvocationRequest,
-        _now: Timestamp,
-    ) -> RepositoryFuture<'_, CommittedPluginInvocation> {
-        plugin_unavailable()
-    }
-
-    // P7-2D-DB-002 REMOVAL BLOCKER: remove after the supervisor migrates to
-    // `commit_authorized_plugin_invocation`.
-    fn commit_plugin_invocation(
-        &self,
-        _request: PlannedPluginInvocationCommit,
         _now: Timestamp,
     ) -> RepositoryFuture<'_, CommittedPluginInvocation> {
         plugin_unavailable()

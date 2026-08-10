@@ -30,9 +30,9 @@ use junban_domain::{
 use junban_plugin_sdk::{
     CallbackFence, Capability, ChildFrame, HostCallKind, HostCallReply, HostCallRequest, HttpScope,
     InvocationKind, InvocationMode, InvocationOutcome, Permission, PermissionScope, PluginId,
-    RuntimeManifest, Sha256Digest, canonical_permission_hash, decode_host_call_request,
-    decode_invocation_outcome, private_body_types as wit, validate_child_body,
-    validate_host_call_authority,
+    RuntimeManifest, Sha256Digest, SurfaceKind, canonical_permission_hash,
+    decode_host_call_request, decode_invocation_outcome, decode_invocation_request,
+    private_body_types as wit, validate_child_body, validate_host_call_authority,
 };
 use sha2::{Digest as _, Sha256};
 use uuid::Uuid;
@@ -77,7 +77,7 @@ pub enum PluginCallbackError {
 }
 
 impl PluginCallbackError {
-    fn host(self) -> wit::HostError {
+    pub(crate) fn host(self) -> wit::HostError {
         let (code, message) = match self {
             Self::InvalidBody | Self::InvalidInput => (
                 wit::ErrorCode::InvalidInput,
@@ -249,16 +249,191 @@ impl PluginCallbackHttp for PluginHttpTransport {
 }
 
 #[derive(Clone, Debug, Eq, PartialEq)]
+enum PluginInvocationAuthority {
+    Durable {
+        delivery: PluginInvocationDelivery,
+        entry: PluginManifestEntry,
+        plugin: InstalledPlugin,
+        grants: Vec<Permission>,
+    },
+    Transient(PluginTransientInvocationAuthority),
+}
+
+/// Server-private authority for exports that intentionally have no durable
+/// invocation row. The runtime actor is the only production constructor.
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub(crate) struct PluginTransientInvocationAuthority {
+    plugin: InstalledPlugin,
+    host_session_id: OperationId,
+    invocation_id: OperationId,
+    call: PluginTransientCall,
+    grants: Vec<Permission>,
+    permission_set_sha256: Sha256Digest,
+    request_sha256: Sha256Digest,
+    canonical_request_body: Box<[u8]>,
+    ancestors: Vec<PluginId>,
+}
+
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub(crate) enum PluginTransientCall {
+    Activate,
+    Deactivate,
+    RenderSurface {
+        surface_id: PluginId,
+    },
+    ValidateSettings,
+    CallService {
+        service_id: PluginId,
+        parent_callback: CallbackFence,
+    },
+}
+
+impl PluginTransientCall {
+    const fn kind(&self) -> InvocationKind {
+        match self {
+            Self::Activate => InvocationKind::Activate,
+            Self::Deactivate => InvocationKind::Deactivate,
+            Self::RenderSurface { .. } => InvocationKind::RenderSurface,
+            Self::ValidateSettings => InvocationKind::ValidateSettings,
+            Self::CallService { .. } => InvocationKind::CallService,
+        }
+    }
+}
+
+impl PluginTransientInvocationAuthority {
+    pub(crate) fn new(
+        plugin: InstalledPlugin,
+        host_session_id: OperationId,
+        invocation_id: OperationId,
+        call: PluginTransientCall,
+        grants: Vec<Permission>,
+        canonical_request_body: Vec<u8>,
+        ancestors: Vec<PluginId>,
+    ) -> Result<Self, PluginCallbackError> {
+        let permission_set_sha256 = Sha256Digest::parse(
+            canonical_permission_hash(&grants).ok_or(PluginCallbackError::StaleAuthority)?,
+        )
+        .map_err(|_| PluginCallbackError::StaleAuthority)?;
+        let authority = Self {
+            plugin,
+            host_session_id,
+            invocation_id,
+            call,
+            grants,
+            permission_set_sha256,
+            request_sha256: Sha256Digest::of(&canonical_request_body),
+            canonical_request_body: canonical_request_body.into_boxed_slice(),
+            ancestors,
+        };
+        validate_transient_authority(&authority)?;
+        Ok(authority)
+    }
+
+    pub(crate) fn canonical_request_body(&self) -> &[u8] {
+        &self.canonical_request_body
+    }
+}
+
+#[derive(Clone, Debug, Eq, PartialEq)]
 pub struct PluginCallbackAuthority {
-    pub delivery: PluginInvocationDelivery,
-    pub callback: CallbackFence,
-    pub invocation_kind: InvocationKind,
-    pub invocation_mode: InvocationMode,
-    pub manifest_entry: PluginManifestEntry,
-    pub plugin: InstalledPlugin,
-    pub grants: Vec<Permission>,
-    pub ancestry: Vec<PluginId>,
-    pub service_depth: u8,
+    invocation: PluginInvocationAuthority,
+    callback: CallbackFence,
+}
+
+impl PluginCallbackAuthority {
+    pub(crate) fn durable(
+        delivery: PluginInvocationDelivery,
+        entry: PluginManifestEntry,
+        plugin: InstalledPlugin,
+        grants: Vec<Permission>,
+        callback: CallbackFence,
+    ) -> Self {
+        Self {
+            invocation: PluginInvocationAuthority::Durable {
+                delivery,
+                entry,
+                plugin,
+                grants,
+            },
+            callback,
+        }
+    }
+
+    pub(crate) fn transient(
+        authority: PluginTransientInvocationAuthority,
+        callback: CallbackFence,
+    ) -> Self {
+        Self {
+            invocation: PluginInvocationAuthority::Transient(authority),
+            callback,
+        }
+    }
+
+    fn plugin(&self) -> &InstalledPlugin {
+        match &self.invocation {
+            PluginInvocationAuthority::Durable { plugin, .. } => plugin,
+            PluginInvocationAuthority::Transient(authority) => &authority.plugin,
+        }
+    }
+
+    fn grants(&self) -> &[Permission] {
+        match &self.invocation {
+            PluginInvocationAuthority::Durable { grants, .. } => grants,
+            PluginInvocationAuthority::Transient(authority) => &authority.grants,
+        }
+    }
+
+    fn delivery(&self) -> Option<&PluginInvocationDelivery> {
+        match &self.invocation {
+            PluginInvocationAuthority::Durable { delivery, .. } => Some(delivery),
+            PluginInvocationAuthority::Transient(_) => None,
+        }
+    }
+
+    fn durable_entry(&self) -> Option<&PluginManifestEntry> {
+        match &self.invocation {
+            PluginInvocationAuthority::Durable { entry, .. } => Some(entry),
+            PluginInvocationAuthority::Transient(_) => None,
+        }
+    }
+
+    fn transient_authority(&self) -> Option<&PluginTransientInvocationAuthority> {
+        match &self.invocation {
+            PluginInvocationAuthority::Durable { .. } => None,
+            PluginInvocationAuthority::Transient(authority) => Some(authority),
+        }
+    }
+
+    pub(crate) fn kind(&self) -> InvocationKind {
+        match &self.invocation {
+            PluginInvocationAuthority::Durable { entry, .. } => match durable_hook(entry) {
+                junban_app::PluginHookKind::InvokeCommand => InvocationKind::InvokeCommand,
+                junban_app::PluginHookKind::HandleEvent => InvocationKind::HandleEvent,
+                junban_app::PluginHookKind::HandleSurfaceAction => {
+                    InvocationKind::HandleSurfaceAction
+                }
+                junban_app::PluginHookKind::Resync => InvocationKind::Resync,
+            },
+            PluginInvocationAuthority::Transient(authority) => authority.call.kind(),
+        }
+    }
+
+    fn mode(&self) -> InvocationMode {
+        self.kind().mode()
+    }
+
+    fn ancestors(&self) -> &[PluginId] {
+        self.transient_authority()
+            .map_or(&[], |authority| authority.ancestors.as_slice())
+    }
+
+    fn service_depth(&self) -> u8 {
+        u8::try_from(self.ancestors().len()).unwrap_or(u8::MAX)
+    }
+
+    pub(crate) fn callback(&self) -> &CallbackFence {
+        &self.callback
+    }
 }
 
 #[derive(Clone, Debug, Eq, PartialEq)]
@@ -271,6 +446,7 @@ pub struct PluginLogRecord {
 #[derive(Clone)]
 struct RetainedHttp {
     process_lost: bool,
+    durable_transitioned: bool,
 }
 
 pub struct PluginInvocationCallbackState {
@@ -325,9 +501,15 @@ impl PluginInvocationCallbackState {
         &self.authority
     }
 
+    pub(crate) fn next_callback_id(&self) -> u32 {
+        self.next_callback_id
+    }
+
     #[must_use]
     pub fn http_consumed(&self) -> bool {
-        self.http.is_some()
+        self.http
+            .as_ref()
+            .is_some_and(|retained| retained.durable_transitioned)
     }
 
     #[must_use]
@@ -342,16 +524,10 @@ impl PluginInvocationCallbackState {
     }
 
     fn verify_live(&self, live: &PluginLiveAuthority) -> Result<(), PluginCallbackError> {
-        let expected = &self.authority.plugin;
+        let expected = self.authority.plugin();
         let current = &live.plugin;
-        if current.plugin_id != expected.plugin_id
-            || current.package_generation != expected.package_generation
-            || current.activation_epoch != expected.activation_epoch
-            || current.manifest != expected.manifest
-            || current.runtime_state != expected.runtime_state
-            || current.desired_enabled != expected.desired_enabled
-            || canonical_grants(&live.grants) != canonical_grants(&self.authority.grants)
-            || current.granted_capabilities != expected.granted_capabilities
+        if current != expected
+            || canonical_grants(&live.grants) != canonical_grants(self.authority.grants())
         {
             return Err(PluginCallbackError::StaleAuthority);
         }
@@ -409,6 +585,31 @@ impl PluginCallbackAdapter {
         frame: &ChildFrame,
         body: &[u8],
     ) -> Result<PluginCallbackDispatch, PluginCallbackError> {
+        let (callback, request) = Self::admit_message(state, frame, body)?;
+        self.dispatch(state, callback, request).await
+    }
+
+    pub(crate) fn cancel_message(
+        &self,
+        state: &mut PluginInvocationCallbackState,
+        frame: &ChildFrame,
+        body: &[u8],
+    ) -> Result<PluginCallbackDispatch, PluginCallbackError> {
+        let (callback, request) = Self::admit_message(state, frame, body)?;
+        let reply = HostCallReply::Cancelled(request.kind());
+        let (frame, canonical_body) = Self::encode_reply(callback, reply.clone())?;
+        Ok(PluginCallbackDispatch::Reply(EncodedPluginCallbackReply {
+            reply,
+            frame,
+            canonical_body,
+        }))
+    }
+
+    fn admit_message(
+        state: &mut PluginInvocationCallbackState,
+        frame: &ChildFrame,
+        body: &[u8],
+    ) -> Result<(CallbackFence, HostCallRequest), PluginCallbackError> {
         let (callback, kind) = match frame {
             ChildFrame::CapabilityRequest { callback, kind, .. } => (callback, *kind),
             _ => return Err(PluginCallbackError::InvalidBody),
@@ -430,7 +631,7 @@ impl PluginCallbackAdapter {
             .next_callback_id
             .checked_add(1)
             .ok_or(PluginCallbackError::OperationTooLarge)?;
-        self.dispatch(state, callback.clone(), request).await
+        Ok((callback.clone(), request))
     }
 
     async fn dispatch(
@@ -439,11 +640,18 @@ impl PluginCallbackAdapter {
         callback: CallbackFence,
         request: HostCallRequest,
     ) -> Result<PluginCallbackDispatch, PluginCallbackError> {
-        let live = self
-            .port
-            .authority(state.authority.plugin.plugin_id.clone())
-            .await?;
-        state.verify_live(&live)?;
+        let actor_owned_deactivation = state.authority.kind() == InvocationKind::Deactivate;
+        let live = if actor_owned_deactivation {
+            validate_static_authority(&state.authority)?;
+            None
+        } else {
+            let live = self
+                .port
+                .authority(state.authority.plugin().plugin_id.clone())
+                .await?;
+            state.verify_live(&live)?;
+            Some(live)
+        };
         authorize_request(state, &request)?;
 
         let dispatch = match request {
@@ -462,9 +670,9 @@ impl PluginCallbackAdapter {
             HostCallRequest::GetSettings(()) => {
                 let settings = self
                     .port
-                    .settings(state.authority.plugin.plugin_id.clone())
+                    .settings(state.authority.plugin().plugin_id.clone())
                     .await
-                    .and_then(|values| merge_settings(&state.authority.plugin.manifest, values));
+                    .and_then(|values| merge_settings(&state.authority.plugin().manifest, values));
                 PendingPluginCallbackDispatch::Reply(HostCallReply::GetSettings(map_wit(settings)))
             }
             HostCallRequest::GetKv(keys) => {
@@ -498,22 +706,34 @@ impl PluginCallbackAdapter {
                 PendingPluginCallbackDispatch::CallService(Box::new(validate_service_call(
                     state,
                     callback.clone(),
-                    &live.profile,
+                    &live
+                        .as_ref()
+                        .ok_or(PluginCallbackError::StaleAuthority)?
+                        .profile,
                     call,
                 )?))
             }
         };
 
-        let current = self
-            .port
-            .authority(state.authority.plugin.plugin_id.clone())
-            .await?;
-        state.verify_live(&current)?;
+        let current = if actor_owned_deactivation {
+            validate_static_authority(&state.authority)?;
+            None
+        } else {
+            let current = self
+                .port
+                .authority(state.authority.plugin().plugin_id.clone())
+                .await?;
+            state.verify_live(&current)?;
+            Some(current)
+        };
         if let PendingPluginCallbackDispatch::CallService(action) = &dispatch {
             let current_action = validate_service_call(
                 state,
                 action.callback.clone(),
-                &current.profile,
+                &current
+                    .as_ref()
+                    .ok_or(PluginCallbackError::StaleAuthority)?
+                    .profile,
                 action.call.clone(),
             )?;
             if current_action != **action {
@@ -548,18 +768,22 @@ impl PluginCallbackAdapter {
         if state.http.is_some() {
             return wit::WitResult::Err(http_denied("plugin HTTP callback was already consumed"));
         }
-        let Some(scope) = http_scope(&state.authority.grants).cloned() else {
+        let Some(delivery) = state.authority.delivery().cloned() else {
+            return wit::WitResult::Err(http_denied("plugin HTTP requires durable authority"));
+        };
+        let Some(scope) = http_scope(state.authority.grants()).cloned() else {
             return wit::WitResult::Err(http_denied("plugin HTTP scope is unavailable"));
         };
 
         state.http = Some(RetainedHttp {
             process_lost: false,
+            durable_transitioned: false,
         });
-        let delivery_id = derive_delivery_id(&state.authority.delivery);
+        let delivery_id = derive_delivery_id(&delivery);
         if self
             .port
             .transition_invocation(http_transition(
-                &state.authority,
+                &delivery,
                 PluginInvocationState::Reserved,
                 PluginInvocationState::DispatchingHttp,
             ))
@@ -568,9 +792,14 @@ impl PluginCallbackAdapter {
         {
             return wit::WitResult::Err(http_denied("plugin HTTP durable transition failed"));
         }
+        state
+            .http
+            .as_mut()
+            .expect("HTTP callback retains consume-once state")
+            .durable_transitioned = true;
         let authority_current = self
             .port
-            .authority(state.authority.plugin.plugin_id.clone())
+            .authority(state.authority.plugin().plugin_id.clone())
             .await
             .and_then(|live| state.verify_live(&live));
         if authority_current.is_err() {
@@ -595,7 +824,7 @@ impl PluginCallbackAdapter {
         if self
             .port
             .transition_invocation(http_transition(
-                &state.authority,
+                &delivery,
                 PluginInvocationState::DispatchingHttp,
                 PluginInvocationState::AmbiguousHttp,
             ))
@@ -611,14 +840,14 @@ impl PluginCallbackAdapter {
 
         let authority_current = self
             .port
-            .authority(state.authority.plugin.plugin_id.clone())
+            .authority(state.authority.plugin().plugin_id.clone())
             .await
             .and_then(|live| state.verify_live(&live));
         if authority_current.is_err()
             || self
                 .port
                 .transition_invocation(http_transition(
-                    &state.authority,
+                    &delivery,
                     PluginInvocationState::AmbiguousHttp,
                     PluginInvocationState::DispatchingHttp,
                 ))
@@ -640,7 +869,7 @@ impl PluginCallbackAdapter {
                     let _ = self
                         .port
                         .transition_invocation(http_transition(
-                            &state.authority,
+                            &delivery,
                             PluginInvocationState::DispatchingHttp,
                             PluginInvocationState::AmbiguousHttp,
                         ))
@@ -663,98 +892,235 @@ impl PluginCallbackAdapter {
     }
 }
 
+fn durable_hook(entry: &PluginManifestEntry) -> junban_app::PluginHookKind {
+    match entry {
+        PluginManifestEntry::Command { .. } => junban_app::PluginHookKind::InvokeCommand,
+        PluginManifestEntry::Event { .. } => junban_app::PluginHookKind::HandleEvent,
+        PluginManifestEntry::SurfaceAction { .. } => {
+            junban_app::PluginHookKind::HandleSurfaceAction
+        }
+        PluginManifestEntry::Resync => junban_app::PluginHookKind::Resync,
+    }
+}
+
 fn validate_static_authority(
     authority: &PluginCallbackAuthority,
 ) -> Result<(), PluginCallbackError> {
-    let delivery = &authority.delivery.authority;
     let callback = &authority.callback;
-    let nested_service = authority.invocation_mode == InvocationMode::Service;
-    let unique_ancestry =
-        authority.ancestry.iter().collect::<BTreeSet<_>>().len() == authority.ancestry.len();
-    let service_chain_valid = if nested_service {
-        authority.service_depth > 0
-            && authority.service_depth <= PLUGIN_SERVICE_DEPTH_MAX
-            && authority.ancestry.len() == usize::from(authority.service_depth)
-            && unique_ancestry
-            && !authority.ancestry.contains(&authority.plugin.plugin_id)
-    } else {
-        authority.service_depth == 0 && authority.ancestry.is_empty()
-    };
-    let mode_matches_kind = authority.invocation_kind.mode() == authority.invocation_mode;
-    let delivery_mode_matches = match delivery.mode {
-        PluginDeliveryMode::StartingResync => authority.invocation_kind == InvocationKind::Resync,
-        PluginDeliveryMode::StartingCatchUp => {
-            authority.invocation_kind == InvocationKind::HandleEvent
-        }
-        PluginDeliveryMode::Active => authority.invocation_kind != InvocationKind::Resync,
-    };
-    if !mode_matches_kind
-        || !delivery_mode_matches
-        || callback.package_generation == 0
-        || callback.activation_epoch == 0
-        || callback.callback_id == 0
-        || callback.host_session_id != delivery.host_session_id.to_string()
-        || !service_chain_valid
-        || authority.plugin.plugin_id.as_str() != callback.plugin_id
-        || authority.plugin.package_generation != callback.package_generation
-        || authority.plugin.activation_epoch != callback.activation_epoch
-        || (!nested_service
-            && (callback.plugin_id != delivery.plugin_id.as_str()
-                || callback.invocation_id != delivery.invocation_id.to_string()))
+    let plugin = authority.plugin();
+    let grants = authority.grants();
+    if callback.callback_id != 1
+        || callback.plugin_id != plugin.plugin_id.as_str()
+        || callback.package_generation != plugin.package_generation
+        || callback.activation_epoch != plugin.activation_epoch
+        || callback.validate().is_err()
     {
         return Err(PluginCallbackError::StaleAuthority);
     }
-    if !nested_service && let Some(hook) = authority.durable_delivery_hook() {
-        let entry = plugin_manifest_entry_authority(
-            &authority.plugin.manifest,
-            hook,
-            PluginManifestEntrySelector::Requested(&authority.manifest_entry),
-        )
-        .ok_or(PluginCallbackError::StaleAuthority)?;
-        if entry.persisted_id != authority.delivery.persisted_entry_id {
-            return Err(PluginCallbackError::StaleAuthority);
+
+    match &authority.invocation {
+        PluginInvocationAuthority::Durable {
+            delivery, entry, ..
+        } => {
+            let durable = &delivery.authority;
+            let hook = durable_hook(entry);
+            let delivery_mode_matches = match durable.mode {
+                PluginDeliveryMode::StartingResync => hook == junban_app::PluginHookKind::Resync,
+                PluginDeliveryMode::StartingCatchUp => {
+                    hook == junban_app::PluginHookKind::HandleEvent
+                }
+                PluginDeliveryMode::Active => hook != junban_app::PluginHookKind::Resync,
+            };
+            if !delivery_mode_matches
+                || callback.host_session_id != durable.host_session_id.to_string()
+                || callback.invocation_id != durable.invocation_id.to_string()
+                || callback.plugin_id != durable.plugin_id.as_str()
+                || durable.package_generation != plugin.package_generation
+                || durable.activation_epoch != plugin.activation_epoch
+            {
+                return Err(PluginCallbackError::StaleAuthority);
+            }
+            let manifest_entry = plugin_manifest_entry_authority(
+                &plugin.manifest,
+                hook,
+                PluginManifestEntrySelector::Requested(entry),
+            )
+            .ok_or(PluginCallbackError::StaleAuthority)?;
+            if manifest_entry.persisted_id != delivery.persisted_entry_id {
+                return Err(PluginCallbackError::StaleAuthority);
+            }
+        }
+        PluginInvocationAuthority::Transient(transient) => {
+            validate_transient_authority(transient)?;
+            if callback.host_session_id != transient.host_session_id.to_string()
+                || callback.invocation_id != transient.invocation_id.to_string()
+            {
+                return Err(PluginCallbackError::StaleAuthority);
+            }
         }
     }
-    let granted: BTreeSet<_> = authority
-        .grants
-        .iter()
-        .map(|grant| grant.capability)
-        .collect();
-    let reported: BTreeSet<_> = authority
-        .plugin
-        .granted_capabilities
-        .iter()
-        .copied()
-        .collect();
+
+    let granted: BTreeSet<_> = grants.iter().map(|grant| grant.capability).collect();
+    let reported: BTreeSet<_> = plugin.granted_capabilities.iter().copied().collect();
     if granted != reported
-        || reported.len() != authority.plugin.granted_capabilities.len()
-        || canonical_permission_hash(&authority.grants).is_none()
+        || granted.len() != grants.len()
+        || reported.len() != plugin.granted_capabilities.len()
+        || canonical_permission_hash(grants).is_none()
     {
         return Err(PluginCallbackError::StaleAuthority);
     }
     Ok(())
 }
 
-impl PluginCallbackAuthority {
-    fn durable_delivery_hook(&self) -> Option<junban_app::PluginHookKind> {
-        match self.delivery.authority.mode {
-            PluginDeliveryMode::StartingResync => Some(junban_app::PluginHookKind::Resync),
-            PluginDeliveryMode::StartingCatchUp => Some(junban_app::PluginHookKind::HandleEvent),
-            PluginDeliveryMode::Active => match self.invocation_kind {
-                InvocationKind::InvokeCommand => Some(junban_app::PluginHookKind::InvokeCommand),
-                InvocationKind::HandleEvent => Some(junban_app::PluginHookKind::HandleEvent),
-                InvocationKind::HandleSurfaceAction => {
-                    Some(junban_app::PluginHookKind::HandleSurfaceAction)
-                }
-                InvocationKind::Activate
-                | InvocationKind::Deactivate
-                | InvocationKind::RenderSurface
-                | InvocationKind::ValidateSettings
-                | InvocationKind::CallService => None,
-                InvocationKind::Resync => Some(junban_app::PluginHookKind::Resync),
-            },
-        }
+fn validate_transient_authority(
+    authority: &PluginTransientInvocationAuthority,
+) -> Result<(), PluginCallbackError> {
+    let kind = authority.call.kind();
+    let request = decode_invocation_request(kind, &authority.canonical_request_body)
+        .map_err(|_| PluginCallbackError::InvalidBody)?;
+    let expected_permission_hash = Sha256Digest::parse(
+        canonical_permission_hash(&authority.grants).ok_or(PluginCallbackError::StaleAuthority)?,
+    )
+    .map_err(|_| PluginCallbackError::StaleAuthority)?;
+    let unique_ancestors =
+        authority.ancestors.iter().collect::<BTreeSet<_>>().len() == authority.ancestors.len();
+    if authority.request_sha256 != Sha256Digest::of(&authority.canonical_request_body)
+        || authority.permission_set_sha256 != expected_permission_hash
+        || authority.host_session_id == authority.invocation_id
+        || !unique_ancestors
+        || authority.ancestors.contains(&authority.plugin.plugin_id)
+        || authority.ancestors.len() > usize::from(PLUGIN_SERVICE_DEPTH_MAX)
+    {
+        return Err(PluginCallbackError::StaleAuthority);
     }
+
+    let plugin = &authority.plugin;
+    let admitted = plugin.desired_enabled && plugin.dependencies_satisfied;
+    let matches = match (&authority.call, request) {
+        (
+            PluginTransientCall::Activate,
+            junban_plugin_sdk::InvocationRequest::Activate(payload),
+        ) => {
+            admitted
+                && plugin.runtime_state == junban_app::PluginRuntimeState::Starting
+                && payload.entry_id().is_none()
+                && authority.ancestors.is_empty()
+        }
+        (
+            PluginTransientCall::Deactivate,
+            junban_plugin_sdk::InvocationRequest::Deactivate(payload),
+        ) => {
+            admitted
+                && matches!(
+                    plugin.runtime_state,
+                    junban_app::PluginRuntimeState::Starting
+                        | junban_app::PluginRuntimeState::Active
+                )
+                && payload.entry_id().is_none()
+                && authority.ancestors.is_empty()
+        }
+        (
+            PluginTransientCall::RenderSurface { surface_id },
+            junban_plugin_sdk::InvocationRequest::RenderSurface(payload),
+        ) => {
+            let required = plugin
+                .manifest
+                .surfaces
+                .iter()
+                .find(|surface| surface.id == surface_id.as_str())
+                .map(|surface| match surface.kind {
+                    SurfaceKind::View => Capability::UiView,
+                    SurfaceKind::Panel => Capability::UiPanel,
+                    SurfaceKind::Status => Capability::UiStatus,
+                });
+            admitted
+                && plugin.runtime_state == junban_app::PluginRuntimeState::Active
+                && payload.entry_id() == Some(surface_id.as_str())
+                && payload.argument().surface_id == surface_id.as_str()
+                && required.is_some_and(|required| has_grant(&authority.grants, required))
+                && authority.ancestors.is_empty()
+        }
+        (
+            PluginTransientCall::ValidateSettings,
+            junban_plugin_sdk::InvocationRequest::ValidateSettings(payload),
+        ) => {
+            admitted
+                && plugin.runtime_state == junban_app::PluginRuntimeState::Active
+                && payload.entry_id().is_none()
+                && has_grant(&authority.grants, Capability::Settings)
+                && valid_candidate_settings(&plugin.manifest, &payload.argument().values)
+                && authority.ancestors.is_empty()
+        }
+        (
+            PluginTransientCall::CallService {
+                service_id,
+                parent_callback,
+            },
+            junban_plugin_sdk::InvocationRequest::CallService(payload),
+        ) => {
+            let declaration = plugin
+                .manifest
+                .services
+                .iter()
+                .find(|service| service.id == service_id.as_str());
+            admitted
+                && plugin.runtime_state == junban_app::PluginRuntimeState::Active
+                && payload.entry_id() == Some(service_id.as_str())
+                && payload.argument().plugin_id == plugin.plugin_id.as_str()
+                && payload.argument().service_id == service_id.as_str()
+                && declaration.is_some_and(|declaration| {
+                    validate_named_values(&payload.argument().values, &declaration.request).is_ok()
+                })
+                && has_grant(&authority.grants, Capability::ServicesProvide)
+                && !authority.ancestors.is_empty()
+                && parent_callback.validate().is_ok()
+        }
+        _ => false,
+    };
+    if matches {
+        Ok(())
+    } else {
+        Err(PluginCallbackError::StaleAuthority)
+    }
+}
+
+fn valid_candidate_settings(manifest: &RuntimeManifest, values: &[wit::NamedSetting]) -> bool {
+    if values.len() != manifest.settings.len()
+        || values.windows(2).any(|pair| pair[0].id >= pair[1].id)
+    {
+        return false;
+    }
+    values.iter().all(|candidate| {
+        let Some(declaration) = manifest
+            .settings
+            .iter()
+            .find(|declaration| declaration.id == candidate.id)
+        else {
+            return false;
+        };
+        use junban_plugin_sdk::SettingSchema as S;
+        match (&declaration.schema, &candidate.value) {
+            (
+                S::Text {
+                    min_bytes,
+                    max_bytes,
+                    ..
+                },
+                wit::SettingValue::Text(value),
+            ) => value.len() >= usize::from(*min_bytes) && value.len() <= usize::from(*max_bytes),
+            (S::Integer { min, max, step, .. }, wit::SettingValue::Integer(value)) => {
+                *step > 0
+                    && value >= min
+                    && value <= max
+                    && (i128::from(*value) - i128::from(*min)) % i128::from(*step) == 0
+            }
+            (S::Boolean { .. }, wit::SettingValue::Boolean(_)) => true,
+            (S::Select { options, .. }, wit::SettingValue::OptionId(value)) => {
+                options.iter().any(|option| option.id == *value)
+            }
+            _ => false,
+        }
+    })
 }
 
 fn authorize_request(
@@ -762,14 +1128,13 @@ fn authorize_request(
     request: &HostCallRequest,
 ) -> Result<(), PluginCallbackError> {
     let kind = request.kind();
-    validate_host_call_authority(
-        kind,
-        state.authority.invocation_mode,
-        &state.authority.grants,
-    )
-    .map_err(|_| PluginCallbackError::PermissionDenied)?;
+    validate_host_call_authority(kind, state.authority.mode(), state.authority.grants())
+        .map_err(|_| PluginCallbackError::PermissionDenied)?;
     if kind == HostCallKind::HttpRequest
-        && state.authority.delivery.authority.mode != PluginDeliveryMode::Active
+        && !state
+            .authority
+            .delivery()
+            .is_some_and(|delivery| delivery.authority.mode == PluginDeliveryMode::Active)
     {
         return Err(PluginCallbackError::PermissionDenied);
     }
@@ -806,7 +1171,7 @@ async fn ensure_kv_snapshot(
     if state.kv_snapshot.is_some() {
         return Ok(());
     }
-    let entries = port.kv(state.authority.plugin.plugin_id.clone()).await?;
+    let entries = port.kv(state.authority.plugin().plugin_id.clone()).await?;
     let mut map = BTreeMap::new();
     let mut bytes = 0_usize;
     for entry in entries {
@@ -1102,15 +1467,15 @@ fn validate_service_call(
     profile: &InstalledPluginProfile,
     call: wit::ServiceCall,
 ) -> Result<ValidatedPluginServiceCall, PluginCallbackError> {
-    if state.authority.service_depth >= PLUGIN_SERVICE_DEPTH_MAX {
+    if state.authority.service_depth() >= PLUGIN_SERVICE_DEPTH_MAX {
         return Err(PluginCallbackError::InvalidInput);
     }
-    let caller = &state.authority.plugin;
+    let caller = state.authority.plugin();
     let target_id =
         PluginId::parse(call.plugin_id.clone()).map_err(|_| PluginCallbackError::Unavailable)?;
     let service_id =
         PluginId::parse(call.service_id.clone()).map_err(|_| PluginCallbackError::Unavailable)?;
-    if target_id == caller.plugin_id || state.authority.ancestry.contains(&target_id) {
+    if target_id == caller.plugin_id || state.authority.ancestors().contains(&target_id) {
         return Err(PluginCallbackError::PermissionDenied);
     }
     let dependency = caller
@@ -1121,7 +1486,7 @@ fn validate_service_call(
             dependency.id == call.plugin_id && dependency.services.contains(&call.service_id)
         })
         .ok_or(PluginCallbackError::Unavailable)?;
-    let allowed = state.authority.grants.iter().any(|grant| {
+    let allowed = state.authority.grants().iter().any(|grant| {
         grant.capability == Capability::ServicesConsume
             && matches!(&grant.scope, PermissionScope::Services(scope)
                 if scope.services.iter().any(|service|
@@ -1153,7 +1518,7 @@ fn validate_service_call(
         .find(|service| service.id == call.service_id)
         .ok_or(PluginCallbackError::Unavailable)?;
     validate_named_values(&call.values, &declaration.request)?;
-    let mut ancestry = state.authority.ancestry.clone();
+    let mut ancestry = state.authority.ancestors().to_vec();
     if ancestry.last() != Some(&caller.plugin_id) {
         ancestry.push(caller.plugin_id.clone());
     }
@@ -1166,7 +1531,7 @@ fn validate_service_call(
         service_id,
         call,
         ancestry,
-        service_depth: state.authority.service_depth + 1,
+        service_depth: state.authority.service_depth() + 1,
     })
 }
 
@@ -1381,7 +1746,7 @@ pub fn adapt_plugin_effect_message(
         host_session_id: state.authority.callback.host_session_id.clone(),
         invocation_id: state.authority.callback.invocation_id.clone(),
     };
-    let kind = state.authority.invocation_kind;
+    let kind = state.authority.kind();
     if !matches!(frame, ChildFrame::Outcome { fence, kind: frame_kind, .. }
         if fence == &expected && *frame_kind == kind)
     {
@@ -1400,10 +1765,14 @@ fn adapt_decoded_plugin_effect(
     cursor: Option<AdvancePluginCursorRequest>,
 ) -> Result<AuthorizedCommitPluginInvocationRequest, PluginCallbackError> {
     validate_static_authority(&state.authority)?;
-    if state.authority.invocation_mode != InvocationMode::Effect {
+    let delivery = state
+        .authority
+        .delivery()
+        .ok_or(PluginCallbackError::PermissionDenied)?;
+    if state.authority.mode() != InvocationMode::Effect {
         return Err(PluginCallbackError::PermissionDenied);
     }
-    let effect = match (state.authority.invocation_kind, outcome) {
+    let effect = match (state.authority.kind(), outcome) {
         (
             InvocationKind::InvokeCommand,
             InvocationOutcome::InvokeCommand(wit::WitResult::Ok(outcome)),
@@ -1419,16 +1788,15 @@ fn adapt_decoded_plugin_effect(
         _ => return Err(PluginCallbackError::InvalidInput),
     };
     if effect.is_some()
-        && (state.http_consumed()
-            || state.authority.delivery.authority.mode != PluginDeliveryMode::Active)
+        && (state.http.is_some() || delivery.authority.mode != PluginDeliveryMode::Active)
     {
         return Err(PluginCallbackError::PermissionDenied);
     }
     let mut request = CommitPluginInvocationRequest {
-        invocation_operation_id: state.authority.delivery.authority.invocation_id,
-        plugin_id: state.authority.delivery.authority.plugin_id.clone(),
-        package_generation: state.authority.delivery.authority.package_generation,
-        activation_epoch: state.authority.delivery.authority.activation_epoch,
+        invocation_operation_id: delivery.authority.invocation_id,
+        plugin_id: delivery.authority.plugin_id.clone(),
+        package_generation: delivery.authority.package_generation,
+        activation_epoch: delivery.authority.activation_epoch,
         child_operation_id: None,
         domain_effect: None,
         kv_patch: None,
@@ -1441,14 +1809,14 @@ fn adapt_decoded_plugin_effect(
         match effect {
             wit::PluginEffect::DomainMutation(mutation) => {
                 let domain = convert_domain_mutation(mutation, child, &state.effect_temporal)?;
-                if !has_grant(&state.authority.grants, domain.required_capability()) {
+                if !has_grant(state.authority.grants(), domain.required_capability()) {
                     return Err(PluginCallbackError::PermissionDenied);
                 }
                 request.child_operation_id = Some(child);
                 request.domain_effect = Some(domain);
             }
             wit::PluginEffect::KvPatch(patch) => {
-                if !has_grant(&state.authority.grants, Capability::Storage) {
+                if !has_grant(state.authority.grants(), Capability::Storage) {
                     return Err(PluginCallbackError::PermissionDenied);
                 }
                 request.kv_patch = Some(convert_kv_patch(patch)?);
@@ -1457,7 +1825,7 @@ fn adapt_decoded_plugin_effect(
     }
     Ok(AuthorizedCommitPluginInvocationRequest {
         request,
-        delivery: state.authority.delivery.clone(),
+        delivery: delivery.clone(),
     })
 }
 
@@ -1494,7 +1862,8 @@ fn derive_effect_operation(
     effect: &[u8],
 ) -> Result<OperationId, PluginCallbackError> {
     let delivery_sha256 = authority
-        .delivery
+        .delivery()
+        .ok_or(PluginCallbackError::PermissionDenied)?
         .authority
         .digest()
         .map_err(|_| PluginCallbackError::StaleAuthority)?;
@@ -1981,20 +2350,20 @@ fn valid_kv_key(value: &str) -> bool {
 }
 
 fn http_transition(
-    authority: &PluginCallbackAuthority,
+    delivery: &PluginInvocationDelivery,
     expected_state: PluginInvocationState,
     next_state: PluginInvocationState,
 ) -> AuthorizedTransitionPluginInvocationRequest {
     AuthorizedTransitionPluginInvocationRequest {
         request: TransitionPluginInvocationRequest {
-            operation_id: authority.delivery.authority.invocation_id,
-            plugin_id: authority.delivery.authority.plugin_id.clone(),
-            package_generation: authority.delivery.authority.package_generation,
-            activation_epoch: authority.delivery.authority.activation_epoch,
+            operation_id: delivery.authority.invocation_id,
+            plugin_id: delivery.authority.plugin_id.clone(),
+            package_generation: delivery.authority.package_generation,
+            activation_epoch: delivery.authority.activation_epoch,
             expected_state,
             next_state,
         },
-        delivery: authority.delivery.clone(),
+        delivery: delivery.clone(),
     }
 }
 
@@ -2056,7 +2425,7 @@ mod tests {
         collections::VecDeque,
         sync::{
             Mutex,
-            atomic::{AtomicUsize, Ordering},
+            atomic::{AtomicBool, AtomicUsize, Ordering},
         },
     };
 
@@ -2066,8 +2435,8 @@ mod tests {
     };
     use junban_plugin_sdk::{
         CommandDeclaration, DataKind, Dependency, HttpMethod as ManifestHttpMethod, HttpOrigin,
-        Publisher, RuntimeProfile, ServiceConsumeScope, ServiceDeclaration, ServiceField,
-        ServiceReference, UnscopedPermission, WitAuthority,
+        InvocationRequest, Publisher, RuntimeProfile, ServiceConsumeScope, ServiceDeclaration,
+        ServiceField, ServiceReference, UnscopedPermission, WitAuthority,
         private_body_types::{PluginOutcome, WitResult},
     };
 
@@ -2170,9 +2539,12 @@ mod tests {
             PluginId::parse("command").expect("persisted entry id"),
         )
         .expect("delivery");
-        PluginInvocationCallbackState::new(PluginCallbackAuthority {
+        PluginInvocationCallbackState::new(PluginCallbackAuthority::durable(
             delivery,
-            callback: CallbackFence {
+            entry,
+            plugin.clone(),
+            grants,
+            CallbackFence {
                 plugin_id: plugin.plugin_id.to_string(),
                 package_generation: plugin.package_generation,
                 activation_epoch: plugin.activation_epoch,
@@ -2180,15 +2552,84 @@ mod tests {
                 invocation_id: invocation_id.to_string(),
                 callback_id: 1,
             },
-            invocation_kind: InvocationKind::InvokeCommand,
-            invocation_mode: InvocationMode::Effect,
-            manifest_entry: entry,
-            grants,
-            plugin,
-            ancestry: Vec::new(),
-            service_depth: 0,
-        })
+        ))
         .expect("callback state")
+    }
+
+    fn authority_plugin_mut(state: &mut PluginInvocationCallbackState) -> &mut InstalledPlugin {
+        match &mut state.authority.invocation {
+            PluginInvocationAuthority::Durable { plugin, .. }
+            | PluginInvocationAuthority::Transient(PluginTransientInvocationAuthority {
+                plugin,
+                ..
+            }) => plugin,
+        }
+    }
+
+    fn as_service_callback_state(
+        state: &PluginInvocationCallbackState,
+        ancestors: Vec<PluginId>,
+    ) -> PluginInvocationCallbackState {
+        let mut plugin = state.authority.plugin().clone();
+        let provide = permission(Capability::ServicesProvide);
+        plugin.manifest.permissions.push(provide.clone());
+        plugin
+            .granted_capabilities
+            .push(Capability::ServicesProvide);
+        plugin.manifest.services = vec![ServiceDeclaration {
+            id: "provider".to_owned(),
+            title: "Provider".to_owned(),
+            request: Vec::new(),
+            response: Vec::new(),
+        }];
+        let mut grants = state.authority.grants().to_vec();
+        grants.push(provide);
+        let invocation_id = operation(70);
+        let host_session_id = operation(71);
+        let parent_callback = CallbackFence {
+            plugin_id: ancestors
+                .last()
+                .map_or_else(|| "root-plugin".to_owned(), ToString::to_string),
+            package_generation: 1,
+            activation_epoch: 1,
+            host_session_id: operation(72).to_string(),
+            invocation_id: operation(73).to_string(),
+            callback_id: 1,
+        };
+        let request = InvocationRequest::call_service(
+            Some("provider".to_owned()),
+            wit::ServiceCall {
+                plugin_id: plugin.plugin_id.to_string(),
+                service_id: "provider".to_owned(),
+                values: Vec::new(),
+            },
+        );
+        let body = serde_json::to_vec(&request).expect("service request");
+        let authority = PluginTransientInvocationAuthority::new(
+            plugin.clone(),
+            host_session_id,
+            invocation_id,
+            PluginTransientCall::CallService {
+                service_id: PluginId::parse("provider").expect("service id"),
+                parent_callback,
+            },
+            grants,
+            body,
+            ancestors,
+        )
+        .expect("service authority");
+        PluginInvocationCallbackState::new(PluginCallbackAuthority::transient(
+            authority,
+            CallbackFence {
+                plugin_id: plugin.plugin_id.to_string(),
+                package_generation: plugin.package_generation,
+                activation_epoch: plugin.activation_epoch,
+                host_session_id: host_session_id.to_string(),
+                invocation_id: invocation_id.to_string(),
+                callback_id: 1,
+            },
+        ))
+        .expect("service callback state")
     }
 
     fn task_draft(title: &str) -> wit::TaskDraft {
@@ -2251,6 +2692,15 @@ mod tests {
                 })
             ),
             Err(PluginCallbackError::PermissionDenied)
+        );
+
+        let (_, port, _) = fixture_adapter(&state, Vec::new(), false);
+        let mut live = port.live.clone();
+        assert_eq!(state.verify_live(&live), Ok(()));
+        live.plugin.dependencies_satisfied = false;
+        assert_eq!(
+            state.verify_live(&live),
+            Err(PluginCallbackError::StaleAuthority)
         );
     }
 
@@ -2323,7 +2773,6 @@ mod tests {
                 values: Vec::new(),
             }),
         ];
-        let mut state = callback_state_with_grants(grants);
         for mode in [
             InvocationMode::Lifecycle,
             InvocationMode::Effect,
@@ -2332,36 +2781,14 @@ mod tests {
             InvocationMode::Resync,
             InvocationMode::Service,
         ] {
-            state.authority.invocation_mode = mode;
             for request in &requests {
                 assert_eq!(
-                    authorize_request(&state, request).is_ok(),
+                    validate_host_call_authority(request.kind(), mode, &grants).is_ok(),
                     request.kind().allowed_in(mode),
                     "mode {mode:?}, callback {:?}",
                     request.kind()
                 );
             }
-        }
-        for (kind, mode) in [
-            (InvocationKind::Activate, InvocationMode::Lifecycle),
-            (InvocationKind::Deactivate, InvocationMode::Lifecycle),
-            (InvocationKind::RenderSurface, InvocationMode::Render),
-            (
-                InvocationKind::ValidateSettings,
-                InvocationMode::ValidateSettings,
-            ),
-            (InvocationKind::CallService, InvocationMode::Service),
-        ] {
-            state.authority.invocation_kind = kind;
-            state.authority.invocation_mode = mode;
-            if mode == InvocationMode::Service {
-                state.authority.ancestry = vec![PluginId::parse("root-plugin").expect("root id")];
-                state.authority.service_depth = 1;
-            } else {
-                state.authority.ancestry.clear();
-                state.authority.service_depth = 0;
-            }
-            assert_eq!(validate_static_authority(&state.authority), Ok(()));
         }
     }
 
@@ -2736,6 +3163,7 @@ mod tests {
         ]);
         state.http = Some(RetainedHttp {
             process_lost: false,
+            durable_transitioned: true,
         });
         assert!(matches!(
             adapt_plugin_effect(&state, &create_task_outcome("Task"), None),
@@ -2749,18 +3177,13 @@ mod tests {
             )
             .is_ok()
         );
-        state.http = None;
-        state.authority.invocation_mode = InvocationMode::Render;
-        assert!(matches!(
-            adapt_plugin_effect(&state, &create_task_outcome("Task"), None),
-            Err(PluginCallbackError::PermissionDenied | PluginCallbackError::StaleAuthority)
-        ));
     }
 
     struct FixturePort {
         live: PluginLiveAuthority,
         stale_on_second_read: bool,
         authority_reads: AtomicUsize,
+        fail_transitions: AtomicBool,
         transitions: Mutex<Vec<(PluginInvocationState, PluginInvocationState)>>,
     }
 
@@ -2823,7 +3246,14 @@ mod tests {
                 .lock()
                 .expect("transitions")
                 .push((request.request.expected_state, request.request.next_state));
-            Box::pin(async { Ok(()) })
+            let fail = self.fail_transitions.load(Ordering::SeqCst);
+            Box::pin(async move {
+                if fail {
+                    Err(PluginCallbackError::Unavailable)
+                } else {
+                    Ok(())
+                }
+            })
         }
     }
 
@@ -2861,7 +3291,7 @@ mod tests {
         outcomes: Vec<Result<wit::HttpResponse, wit::HttpError>>,
         stale_on_second_read: bool,
     ) -> (PluginCallbackAdapter, Arc<FixturePort>, Arc<FixtureHttp>) {
-        let plugin = state.authority.plugin.clone();
+        let plugin = state.authority.plugin().clone();
         let port = Arc::new(FixturePort {
             live: PluginLiveAuthority {
                 profile: InstalledPluginProfile {
@@ -2873,10 +3303,11 @@ mod tests {
                     },
                 },
                 plugin,
-                grants: state.authority.grants.clone(),
+                grants: state.authority.grants().to_vec(),
             },
             stale_on_second_read,
             authority_reads: AtomicUsize::new(0),
+            fail_transitions: AtomicBool::new(false),
             transitions: Mutex::new(Vec::new()),
         });
         let http = Arc::new(FixtureHttp {
@@ -2985,6 +3416,39 @@ mod tests {
                 PluginInvocationState::DispatchingHttp
             )]
         );
+    }
+
+    #[tokio::test]
+    async fn plugin_callback_http_transition_failure_is_consumed_but_not_durably_dispatched() {
+        let mut state = http_state();
+        let request = http_request();
+        let (frame, body) = callback_message(&state, request.clone());
+        let (adapter, port, http) = fixture_adapter(&state, Vec::new(), false);
+        port.fail_transitions.store(true, Ordering::SeqCst);
+
+        assert!(matches!(
+            adapter.dispatch_message(&mut state, &frame, &body).await,
+            Ok(PluginCallbackDispatch::Reply(EncodedPluginCallbackReply {
+                reply: HostCallReply::HttpRequest(WitResult::Err(_)),
+                ..
+            }))
+        ));
+        assert!(!state.http_consumed());
+        assert!(state.http.is_some());
+        assert_eq!(http.sends.load(Ordering::SeqCst), 0);
+
+        let (second_frame, second_body) = callback_message(&state, request);
+        assert!(matches!(
+            adapter
+                .dispatch_message(&mut state, &second_frame, &second_body)
+                .await,
+            Ok(PluginCallbackDispatch::Reply(EncodedPluginCallbackReply {
+                reply: HostCallReply::HttpRequest(WitResult::Err(_)),
+                ..
+            }))
+        ));
+        assert_eq!(port.transitions.lock().expect("transitions").len(), 1);
+        assert_eq!(http.sends.load(Ordering::SeqCst), 0);
     }
 
     #[tokio::test]
@@ -3155,7 +3619,7 @@ mod tests {
             }),
         };
         let mut state = callback_state_with_grants(vec![grant]);
-        state.authority.plugin.manifest.dependencies = vec![Dependency {
+        authority_plugin_mut(&mut state).manifest.dependencies = vec![Dependency {
             id: "target-plugin".to_owned(),
             requirement: "^1.0.0".to_owned(),
             services: vec!["lookup".to_owned()],
@@ -3175,12 +3639,10 @@ mod tests {
             request: vec![field.clone()],
             response: vec![field],
         }];
+        let caller = state.authority.plugin().clone();
         let profile = InstalledPluginProfile {
-            plugins: vec![state.authority.plugin.clone(), target.clone()],
-            activation_order: vec![
-                target.plugin_id.clone(),
-                state.authority.plugin.plugin_id.clone(),
-            ],
+            plugins: vec![caller.clone(), target.clone()],
+            activation_order: vec![target.plugin_id.clone(), caller.plugin_id.clone()],
             community_policy: CommunityPluginPolicy {
                 community_registry_enabled: false,
                 updated_at: timestamp("2026-01-01T00:00:00Z"),
@@ -3385,7 +3847,7 @@ mod tests {
             }),
         };
         let mut state = callback_state_with_grants(vec![grant]);
-        state.authority.plugin.manifest.dependencies = vec![Dependency {
+        authority_plugin_mut(&mut state).manifest.dependencies = vec![Dependency {
             id: "target-plugin".to_owned(),
             requirement: "^1.0.0".to_owned(),
             services: vec!["lookup".to_owned()],
@@ -3408,12 +3870,10 @@ mod tests {
                 required: true,
             }],
         }];
+        let caller = state.authority.plugin().clone();
         let profile = InstalledPluginProfile {
-            plugins: vec![state.authority.plugin.clone(), target.clone()],
-            activation_order: vec![
-                target.plugin_id.clone(),
-                state.authority.plugin.plugin_id.clone(),
-            ],
+            plugins: vec![caller.clone(), target.clone()],
+            activation_order: vec![target.plugin_id.clone(), caller.plugin_id.clone()],
             community_policy: CommunityPluginPolicy {
                 community_registry_enabled: false,
                 updated_at: timestamp("2026-01-01T00:00:00Z"),
@@ -3450,20 +3910,31 @@ mod tests {
             .is_ok()
         );
 
-        state.authority.ancestry.push(target.plugin_id.clone());
+        let cycle_state = as_service_callback_state(&state, vec![target.plugin_id.clone()]);
+        let mut cycle_profile = profile.clone();
+        cycle_profile.plugins[0] = cycle_state.authority.plugin().clone();
         assert_eq!(
             validate_service_call(
-                &state,
-                state.authority.callback.clone(),
-                &profile,
+                &cycle_state,
+                cycle_state.authority.callback.clone(),
+                &cycle_profile,
                 call.clone()
             ),
             Err(PluginCallbackError::PermissionDenied)
         );
-        state.authority.ancestry.clear();
-        state.authority.service_depth = PLUGIN_SERVICE_DEPTH_MAX;
+        let ancestors = (0..PLUGIN_SERVICE_DEPTH_MAX)
+            .map(|index| PluginId::parse(format!("ancestor-{index}")).expect("ancestor id"))
+            .collect();
+        let depth_state = as_service_callback_state(&state, ancestors);
+        let mut depth_profile = profile;
+        depth_profile.plugins[0] = depth_state.authority.plugin().clone();
         assert_eq!(
-            validate_service_call(&state, state.authority.callback.clone(), &profile, call),
+            validate_service_call(
+                &depth_state,
+                depth_state.authority.callback.clone(),
+                &depth_profile,
+                call
+            ),
             Err(PluginCallbackError::InvalidInput)
         );
     }

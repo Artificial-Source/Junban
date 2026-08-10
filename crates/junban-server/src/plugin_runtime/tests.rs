@@ -13,16 +13,16 @@ use std::{
 };
 
 use junban_app::{
-    AffectedIds, CommittedEvent, CommunityPluginPolicy, EventType, PluginEventCursor,
-    PluginInvocation, PluginInvocationState, PluginInvocationTerminalKind, PluginManifestEntry,
-    ResourceRef, ResourceSnapshot, ResyncScope,
+    AffectedIds, CommittedEvent, CommunityPluginPolicy, EventType, PluginDeliveryMode,
+    PluginEventCursor, PluginInvocation, PluginInvocationState, PluginInvocationTerminalKind,
+    PluginManifestEntry, ResourceRef, ResourceSnapshot, ResyncScope,
 };
 use junban_domain::{Task, TaskId, TaskTitle};
 use junban_plugin_sdk::{
-    Capability, CommandDeclaration, DataKind, Dependency, EventKind, EventScope, Permission,
-    PermissionScope, Publisher, RuntimeManifest, RuntimeProfile, ServiceConsumeScope,
-    ServiceDeclaration, ServiceField, ServiceReference, SurfaceDeclaration, SurfaceKind,
-    SurfaceLocation, UnscopedPermission, WitAuthority, canonical_permission_hash,
+    Capability, CommandDeclaration, DataKind, Dependency, EventKind, EventScope, HttpMethod,
+    HttpOrigin, HttpScope, Permission, PermissionScope, Publisher, RuntimeManifest, RuntimeProfile,
+    ServiceConsumeScope, ServiceDeclaration, ServiceField, ServiceReference, SurfaceDeclaration,
+    SurfaceKind, SurfaceLocation, UnscopedPermission, WitAuthority, canonical_permission_hash,
     permission_set_hash,
     private_body_types::{self as wit, CommandCall, SurfaceAction},
     scope_hash,
@@ -85,6 +85,66 @@ impl PluginCallbackPort for DenyCallbacks {
         _request: AuthorizedTransitionPluginInvocationRequest,
     ) -> crate::plugin_callbacks::PluginCallbackFuture<()> {
         Box::pin(async { Err(PluginCallbackError::Unavailable) })
+    }
+}
+
+struct AmbiguousHttpTransport {
+    calls: AtomicU64,
+    entered: Arc<Semaphore>,
+    release: Arc<Semaphore>,
+    requests: Mutex<Vec<(HttpScope, wit::HttpRequest, String)>>,
+}
+
+impl AmbiguousHttpTransport {
+    fn new(entered: Arc<Semaphore>, release: Arc<Semaphore>) -> Arc<Self> {
+        Arc::new(Self {
+            calls: AtomicU64::new(0),
+            entered,
+            release,
+            requests: Mutex::new(Vec::new()),
+        })
+    }
+}
+
+impl crate::plugin_callbacks::PluginCallbackHttp for AmbiguousHttpTransport {
+    fn send(
+        &self,
+        grant: HttpScope,
+        request: wit::HttpRequest,
+        delivery_id: String,
+    ) -> std::pin::Pin<
+        Box<
+            dyn std::future::Future<Output = Result<wit::HttpResponse, wit::HttpError>>
+                + Send
+                + 'static,
+        >,
+    > {
+        self.calls.fetch_add(1, Ordering::Relaxed);
+        self.requests
+            .lock()
+            .unwrap()
+            .push((grant, request, delivery_id));
+        let entered = Arc::clone(&self.entered);
+        let release = Arc::clone(&self.release);
+        Box::pin(async move {
+            entered.add_permits(1);
+            release
+                .acquire_owned()
+                .await
+                .map_err(|_| wit::HttpError {
+                    code: wit::HttpErrorCode::ConnectFailed,
+                    message: "fixture transport closed".to_owned(),
+                    delivery: wit::DeliveryState::MayHaveBeenSent,
+                    retryable: false,
+                })?
+                .forget();
+            Err(wit::HttpError {
+                code: wit::HttpErrorCode::Timeout,
+                message: "fixture delivery remains unresolved".to_owned(),
+                delivery: wit::DeliveryState::MayHaveBeenSent,
+                retryable: false,
+            })
+        })
     }
 }
 
@@ -1116,6 +1176,8 @@ impl PluginResyncPort for MockService {
     }
 }
 
+type SqliteRuntimeHook = Box<dyn Fn() + Send + Sync>;
+
 struct SqliteRuntimeService {
     service: AppService,
     source_root: PathBuf,
@@ -1128,6 +1190,8 @@ struct SqliteRuntimeService {
     fence_committed: Arc<Semaphore>,
     durable_order: Arc<Mutex<Vec<&'static str>>>,
     fence_requests: Arc<Mutex<Vec<PluginGraphFenceRequest>>>,
+    before_invalidating: Mutex<Option<SqliteRuntimeHook>>,
+    before_resync_finalize: Mutex<Option<SqliteRuntimeHook>>,
 }
 
 impl SqliteRuntimeService {
@@ -1145,7 +1209,17 @@ impl SqliteRuntimeService {
             fence_committed: Arc::new(Semaphore::new(0)),
             durable_order: Arc::new(Mutex::new(Vec::new())),
             fence_requests: Arc::new(Mutex::new(Vec::new())),
+            before_invalidating: Mutex::new(None),
+            before_resync_finalize: Mutex::new(None),
         })
+    }
+
+    fn set_before_invalidating(&self, hook: SqliteRuntimeHook) {
+        *self.before_invalidating.lock().unwrap() = Some(hook);
+    }
+
+    fn set_before_resync_finalize(&self, hook: SqliteRuntimeHook) {
+        *self.before_resync_finalize.lock().unwrap() = Some(hook);
     }
 
     async fn wait(semaphore: &Semaphore, label: &str) {
@@ -1283,6 +1357,9 @@ impl RuntimeServicePort for SqliteRuntimeService {
         request: junban_app::MarkPluginInvalidatingEventRequest,
         now: Timestamp,
     ) -> ServiceFuture<PluginEventCursor> {
+        if let Some(hook) = self.before_invalidating.lock().unwrap().take() {
+            hook();
+        }
         let service = self.service.clone();
         Box::pin(async move { service.mark_plugin_invalidating_event(request, now).await })
     }
@@ -1431,6 +1508,9 @@ impl PluginResyncPort for SqliteRuntimeService {
         &self,
         request: junban_app::FinalizePluginResyncRequest,
     ) -> resync::PluginResyncFuture<junban_app::FinalizePluginResyncOutcome> {
+        if let Some(hook) = self.before_resync_finalize.lock().unwrap().as_ref() {
+            hook();
+        }
         let service = self.service.clone();
         Box::pin(async move {
             service
@@ -1442,6 +1522,14 @@ impl PluginResyncPort for SqliteRuntimeService {
 }
 
 fn seed_sqlite_active_plugins(profile_dir: &Path, count: usize) {
+    seed_sqlite_active_plugins_with_permissions(profile_dir, count, Vec::new());
+}
+
+fn seed_sqlite_active_plugins_with_permissions(
+    profile_dir: &Path,
+    count: usize,
+    extra_permissions: Vec<Permission>,
+) {
     let mut connection = Connection::open(profile_dir.join("junban.sqlite3")).unwrap();
     let transaction = connection.transaction().unwrap();
     let now = "2020-01-01T00:00:00Z";
@@ -1465,11 +1553,13 @@ fn seed_sqlite_active_plugins(profile_dir: &Path, count: usize) {
         let generation = u64::try_from(index + 1).unwrap();
         let component = [u8::try_from(generation).unwrap_or(1)];
         let mut manifest = manifest(&id, Vec::new());
-        let permission = Permission {
+        let command_permission = Permission {
             capability: Capability::Commands,
             scope: PermissionScope::Unscoped(UnscopedPermission {}),
         };
-        manifest.permissions = vec![permission.clone()];
+        manifest.permissions = std::iter::once(command_permission)
+            .chain(extra_permissions.iter().cloned())
+            .collect();
         manifest.component_sha256 = Sha256Digest::of(&component).to_string();
         let permission_hash = Sha256Digest::from_bytes(
             permission_set_hash(&manifest.permissions).expect("permission set hash"),
@@ -1495,23 +1585,25 @@ fn seed_sqlite_active_plugins(profile_dir: &Path, count: usize) {
                 ],
             )
             .unwrap();
-        transaction
-            .execute(
-                "INSERT INTO plugin_grants(
-                    plugin_id, package_generation, capability, scope_json, scope_hash,
-                    permission_hash, granted_at
-                 ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7)",
-                params![
-                    id,
-                    i64::try_from(generation).unwrap(),
-                    permission.capability.as_str(),
-                    serde_json::to_string(&permission.scope).unwrap(),
-                    Sha256Digest::from_bytes(scope_hash(&permission).unwrap()).to_string(),
-                    permission_hash.to_string(),
-                    now,
-                ],
-            )
-            .unwrap();
+        for permission in &manifest.permissions {
+            transaction
+                .execute(
+                    "INSERT INTO plugin_grants(
+                        plugin_id, package_generation, capability, scope_json, scope_hash,
+                        permission_hash, granted_at
+                     ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7)",
+                    params![
+                        id,
+                        i64::try_from(generation).unwrap(),
+                        permission.capability.as_str(),
+                        serde_json::to_string(&permission.scope).unwrap(),
+                        Sha256Digest::from_bytes(scope_hash(permission).unwrap()).to_string(),
+                        permission_hash.to_string(),
+                        now,
+                    ],
+                )
+                .unwrap();
+        }
         transaction
             .execute(
                 "INSERT INTO plugin_event_cursors(
@@ -1544,6 +1636,142 @@ fn seed_sqlite_retention_gap(profile_dir: &Path) {
             "UPDATE plugins SET runtime_state = 'starting' WHERE plugin_id = 'plugin-00'",
             [],
         )
+        .unwrap();
+    connection
+        .execute(
+            "INSERT INTO events(revision, event_type, operation_id, event_json, occurred_at)
+             VALUES (3, ?1, ?2, ?3, ?4)",
+            params![
+                EventType::SETTINGS_UPDATED,
+                event.operation_id.to_string(),
+                serde_json::to_string(&event).unwrap(),
+                event.occurred_at.to_string(),
+            ],
+        )
+        .unwrap();
+    connection
+        .execute(
+            "UPDATE app_state SET global_revision = 3 WHERE singleton = 1",
+            [],
+        )
+        .unwrap();
+    connection.execute_batch("COMMIT").unwrap();
+}
+
+fn seed_sqlite_invalidating_event(profile_dir: &Path) {
+    let connection = Connection::open(profile_dir.join("junban.sqlite3")).unwrap();
+    // A malformed retained event is invalidating independently of subscriptions.
+    let event = CommittedEvent {
+        revision: 1,
+        operation_id: operation(991),
+        event_type: EventType::new(EventType::TASK_CREATED),
+        occurred_at: timestamp("2026-01-01T00:00:00Z"),
+        primary: None,
+        snapshot: None,
+        affected: AffectedIds::default(),
+        resync: ResyncScope::TASKS,
+    };
+    connection.execute_batch("BEGIN IMMEDIATE").unwrap();
+    connection
+        .execute(
+            "INSERT INTO events(revision, event_type, operation_id, event_json, occurred_at)
+             VALUES (1, ?1, ?2, ?3, ?4)",
+            params![
+                EventType::TASK_CREATED,
+                event.operation_id.to_string(),
+                serde_json::to_string(&event).unwrap(),
+                event.occurred_at.to_string(),
+            ],
+        )
+        .unwrap();
+    connection
+        .execute(
+            "UPDATE app_state SET global_revision = 1 WHERE singleton = 1",
+            [],
+        )
+        .unwrap();
+    connection.execute_batch("COMMIT").unwrap();
+}
+
+fn assert_sqlite_one_effect_committing_resync(profile_dir: &Path) {
+    let connection = Connection::open(profile_dir.join("junban.sqlite3")).unwrap();
+    let rows: Vec<(String, String)> = connection
+        .prepare("SELECT hook_kind, state FROM plugin_invocations")
+        .unwrap()
+        .query_map([], |row| Ok((row.get(0)?, row.get(1)?)))
+        .unwrap()
+        .map(Result::unwrap)
+        .collect();
+    assert_eq!(
+        rows,
+        [("resync".to_owned(), "effect_committing".to_owned())]
+    );
+}
+
+fn append_sqlite_invalidating_event(profile_dir: &Path) {
+    let connection = Connection::open(profile_dir.join("junban.sqlite3")).unwrap();
+    connection.execute_batch("BEGIN IMMEDIATE").unwrap();
+    let revision = u64::try_from(
+        connection
+            .query_row::<i64, _, _>(
+                "SELECT global_revision + 1 FROM app_state WHERE singleton = 1",
+                [],
+                |row| row.get(0),
+            )
+            .unwrap(),
+    )
+    .unwrap();
+    let task_id = TaskId::parse("70000000-0000-7000-8000-000000000098").unwrap();
+    let event = CommittedEvent {
+        revision,
+        operation_id: OperationId::new(),
+        event_type: EventType::new(EventType::TASK_CREATED),
+        occurred_at: timestamp("2026-01-01T00:00:00Z"),
+        primary: None,
+        snapshot: None,
+        affected: AffectedIds {
+            task_ids: vec![task_id],
+            ..AffectedIds::default()
+        },
+        resync: ResyncScope::TASKS,
+    };
+    connection
+        .execute(
+            "INSERT INTO events(revision, event_type, operation_id, event_json, occurred_at)
+             VALUES (?1, ?2, ?3, ?4, ?5)",
+            params![
+                i64::try_from(revision).unwrap(),
+                EventType::TASK_MOVED,
+                event.operation_id.to_string(),
+                serde_json::to_string(&event).unwrap(),
+                event.occurred_at.to_string(),
+            ],
+        )
+        .unwrap();
+    connection
+        .execute(
+            "UPDATE app_state SET global_revision = ?1 WHERE singleton = 1",
+            [i64::try_from(revision).unwrap()],
+        )
+        .unwrap();
+    connection.execute_batch("COMMIT").unwrap();
+}
+
+fn prune_sqlite_invalidating_event_into_gap(profile_dir: &Path) {
+    let connection = Connection::open(profile_dir.join("junban.sqlite3")).unwrap();
+    let event = CommittedEvent {
+        revision: 3,
+        operation_id: operation(993),
+        event_type: EventType::new(EventType::SETTINGS_UPDATED),
+        occurred_at: timestamp("2026-01-01T00:00:00Z"),
+        primary: None,
+        snapshot: None,
+        affected: AffectedIds::default(),
+        resync: ResyncScope::SETTINGS,
+    };
+    connection.execute_batch("BEGIN IMMEDIATE").unwrap();
+    connection
+        .execute("DELETE FROM events WHERE revision = 1", [])
         .unwrap();
     connection
         .execute(
@@ -1726,6 +1954,14 @@ def outcome_body(kind, request_body=None, mode="success"):
                     ]
                 },
             }
+        elif mode == "domain_delete":
+            effect = {
+                "tag": "domain-mutation",
+                "val": {
+                    "tag": "delete-task",
+                    "val": CFG["domain_delete_task_id"],
+                },
+            }
         value = {"tag": "ok", "val": {"effect": effect}}
     elif kind == "call_service":
         value = {"tag": "ok", "val": {"values": []}}
@@ -1818,6 +2054,9 @@ def send_callback(invoke, mode):
     elif mode == "settings_callback":
         body = b'{"tag":"get-settings","val":null}'
         kind = "get_settings"
+    elif mode == "http_callback":
+        body = b'{"tag":"http-request","val":{"method":"post","origin":"https://example.com","path-and-query":"/callback","headers":[],"body":""}}'
+        kind = "http_request"
     else:
         body = b'{"tag":"monotonic-ms","val":null}'
         kind = "monotonic_ms"
@@ -1901,7 +2140,7 @@ while True:
             mode = "settings_callback" if CFG.get("deactivate_callback", False) else CFG.get("deactivate", "success")
         if mode == "guest_error":
             send({"type": "failed", "fence": frame["fence"], "code": "guest_error"})
-        elif mode in ("callback", "callback_wrong_id", "service_callback", "settings_callback"):
+        elif mode in ("callback", "callback_wrong_id", "service_callback", "settings_callback", "http_callback"):
             send_callback(frame, mode)
         elif mode != "hold" and not (mode == "hold_call_service" and frame["kind"] == "call_service"):
             send_outcome(frame, mode)
@@ -2860,7 +3099,9 @@ async fn invalidating_starting_catch_up_restarts_with_resync_before_admission() 
     {
         let state = service.lock();
         assert_eq!(state.cursor_revision, 1);
-        assert_eq!(state.counts.reservations, 0);
+        // Only the fresh replacement session reserves the resync invocation. The
+        // invalidating retained event itself is never dispatched to the guest.
+        assert_eq!(state.counts.reservations, 1);
         assert_eq!(state.counts.completions, 0);
         assert_eq!(state.counts.verified_skips, 0);
         assert_eq!(state.counts.invalidating_events, 1);
@@ -2870,9 +3111,35 @@ async fn invalidating_starting_catch_up_restarts_with_resync_before_admission() 
         );
         assert_eq!(state.counts.activations, 1);
         assert!(state.fence_requests.is_empty());
-        assert_eq!(state.profile.plugins[0].activation_epoch, plugin.activation_epoch + 1);
-        assert_eq!(state.profile.plugins[0].runtime_state, PluginRuntimeState::Active);
+        assert_eq!(
+            state.profile.plugins[0].activation_epoch,
+            plugin.activation_epoch + 1
+        );
+        assert_eq!(
+            state.profile.plugins[0].runtime_state,
+            PluginRuntimeState::Active
+        );
     }
+    let invokes: Vec<_> = fixture
+        .captured_frames()
+        .into_iter()
+        .filter(|capture| capture["frame"]["type"] == "invoke")
+        .map(|capture| {
+            (
+                capture["launch"].as_u64().unwrap(),
+                capture["frame"]["kind"].as_str().unwrap().to_owned(),
+            )
+        })
+        .collect();
+    assert!(!invokes.iter().any(|(_, kind)| kind == "handle_event"));
+    assert!(invokes.iter().all(|(launch, _)| *launch == 1));
+    assert_eq!(invokes.last(), Some(&(1, "activate".to_owned())));
+    assert!(
+        invokes[..invokes.len() - 1]
+            .iter()
+            .all(|(_, kind)| kind == "resync")
+    );
+
     supervisor.shutdown().await.unwrap();
     let pids = pids.lock().unwrap();
     assert_eq!(pids.len(), 2);
@@ -3344,6 +3611,746 @@ async fn sqlite_retention_loss_rotates_then_resyncs_without_rerunning_guest_work
 
     supervisor.shutdown().await.unwrap();
     assert_eq!(pids.lock().unwrap().len(), 2);
+    wait_pids_reaped(&fixture.pid_file).await;
+    drop(supervisor);
+    drop(runtime);
+    drop(owner);
+    fs::remove_dir_all(profile_dir).unwrap();
+}
+
+#[cfg(unix)]
+#[tokio::test]
+async fn sqlite_resync_final_tail_invalidation_restarts_at_a_fresh_head_then_activates() {
+    let profile_dir = unique_root("sqlite-resync-final-restart");
+    let owner = ProfileOwner::open(&profile_dir).unwrap();
+    seed_sqlite_active_plugins(&profile_dir, 1);
+    seed_sqlite_retention_gap(&profile_dir);
+    let runtime = SqliteRuntimeService::new(
+        sqlite_app_service(&owner),
+        profile_dir.join("runtime-sources"),
+    );
+    let injected = Arc::new(AtomicBool::new(false));
+    let injected_for_hook = Arc::clone(&injected);
+    let profile_for_hook = profile_dir.clone();
+    runtime.set_before_resync_finalize(Box::new(move || {
+        assert_sqlite_one_effect_committing_resync(&profile_for_hook);
+        if !injected_for_hook.swap(true, Ordering::AcqRel) {
+            append_sqlite_invalidating_event(&profile_for_hook);
+        }
+    }));
+    let fixture = HostFixture::new(
+        "sqlite-resync-final-restart",
+        json!({"loads_by_launch": [1, 1]}),
+    );
+    let pids = Arc::new(Mutex::new(Vec::new()));
+    let supervisor = PluginRuntimeSupervisor::for_test(
+        runtime.clone(),
+        fixture.policy(vec![session(180), session(185)], Arc::clone(&pids)),
+        Arc::new(DenyCallbacks),
+    );
+
+    let result = supervisor.reconcile().await;
+    assert!(
+        result.is_ok(),
+        "resync restart failed: {result:?}; frames: {:?}",
+        fixture.captured_frames()
+    );
+    let snapshot = result.unwrap();
+    assert_eq!(snapshot.lifecycle, PluginRuntimeLifecycle::Running);
+    assert_eq!(snapshot.admitting_plugins.len(), 1);
+    assert!(injected.load(Ordering::Acquire));
+    let current = runtime
+        .service
+        .get_installed_plugin_profile()
+        .await
+        .unwrap();
+    assert_eq!(current.plugins[0].runtime_state, PluginRuntimeState::Active);
+    assert_eq!(current.plugins[0].failure_count, 0);
+    assert!(runtime.fence_requests.lock().unwrap().is_empty());
+    let frames = fixture.captured_frames();
+    let resync_invocations = frames
+        .iter()
+        .filter(|capture| {
+            capture["frame"]["type"] == "invoke" && capture["frame"]["kind"] == "resync"
+        })
+        .count();
+    let mut resync_operations: Vec<_> = frames
+        .iter()
+        .filter(|capture| {
+            capture["frame"]["type"] == "invoke" && capture["frame"]["kind"] == "resync"
+        })
+        .map(|capture| capture["frame"]["fence"]["invocation_id"].as_str().unwrap())
+        .collect();
+    resync_operations.sort_unstable();
+    resync_operations.dedup();
+    assert_eq!(
+        resync_operations.len(),
+        2,
+        "expected two fresh resync operations from {resync_invocations} calls"
+    );
+    assert_eq!(resync_invocations, 10);
+    assert!(
+        frames
+            .iter()
+            .filter(|capture| {
+                capture["frame"]["type"] == "invoke" && capture["frame"]["kind"] == "resync"
+            })
+            .all(|capture| capture["launch"] == 1)
+    );
+    assert_eq!(
+        frames
+            .iter()
+            .filter(|capture| {
+                capture["frame"]["type"] == "invoke" && capture["frame"]["kind"] == "activate"
+            })
+            .count(),
+        1
+    );
+    let connection = Connection::open(profile_dir.join("junban.sqlite3")).unwrap();
+    assert_eq!(
+        connection
+            .query_row::<i64, _, _>("SELECT COUNT(*) FROM plugin_invocations", [], |row| {
+                row.get(0)
+            })
+            .unwrap(),
+        0
+    );
+
+    supervisor.shutdown().await.unwrap();
+    wait_pids_reaped(&fixture.pid_file).await;
+    drop(supervisor);
+    drop(runtime);
+    drop(owner);
+    fs::remove_dir_all(profile_dir).unwrap();
+}
+
+#[cfg(unix)]
+#[tokio::test]
+async fn sqlite_repeated_resync_final_invalidation_stops_at_the_fresh_head_bound() {
+    let profile_dir = unique_root("sqlite-resync-final-bound");
+    let owner = ProfileOwner::open(&profile_dir).unwrap();
+    seed_sqlite_active_plugins(&profile_dir, 1);
+    seed_sqlite_retention_gap(&profile_dir);
+    let runtime = SqliteRuntimeService::new(
+        sqlite_app_service(&owner),
+        profile_dir.join("runtime-sources"),
+    );
+    let injections = Arc::new(AtomicU64::new(0));
+    let injections_for_hook = Arc::clone(&injections);
+    let profile_for_hook = profile_dir.clone();
+    runtime.set_before_resync_finalize(Box::new(move || {
+        assert_sqlite_one_effect_committing_resync(&profile_for_hook);
+        append_sqlite_invalidating_event(&profile_for_hook);
+        injections_for_hook.fetch_add(1, Ordering::AcqRel);
+    }));
+    let fixture = HostFixture::new(
+        "sqlite-resync-final-bound",
+        json!({"loads_by_launch": [1, 1]}),
+    );
+    let pids = Arc::new(Mutex::new(Vec::new()));
+    let supervisor = PluginRuntimeSupervisor::for_test(
+        runtime.clone(),
+        fixture.policy(vec![session(186), session(187)], Arc::clone(&pids)),
+        Arc::new(DenyCallbacks),
+    );
+
+    assert_eq!(
+        supervisor.reconcile().await.unwrap_err(),
+        PluginRuntimeError::SessionLost
+    );
+    let snapshot = supervisor.snapshot().await.unwrap();
+    assert!(snapshot.admitting_plugins.is_empty());
+    assert_eq!(snapshot.graph_size, 1);
+    assert_eq!(injections.load(Ordering::Acquire), 3);
+    let current = runtime
+        .service
+        .get_installed_plugin_profile()
+        .await
+        .unwrap();
+    assert_eq!(
+        current.plugins[0].runtime_state,
+        PluginRuntimeState::Starting
+    );
+    assert_eq!(current.plugins[0].failure_count, 0);
+    assert_eq!(current.plugins[0].last_error_code, None);
+    assert!(runtime.fence_requests.lock().unwrap().is_empty());
+    let frames = fixture.captured_frames();
+    let mut resync_operations: Vec<_> = frames
+        .iter()
+        .filter(|capture| {
+            capture["frame"]["type"] == "invoke" && capture["frame"]["kind"] == "resync"
+        })
+        .map(|capture| capture["frame"]["fence"]["invocation_id"].as_str().unwrap())
+        .collect();
+    assert_eq!(resync_operations.len(), 15);
+    resync_operations.sort_unstable();
+    resync_operations.dedup();
+    assert_eq!(resync_operations.len(), 3);
+    let connection = Connection::open(profile_dir.join("junban.sqlite3")).unwrap();
+    assert_eq!(
+        connection
+            .query_row::<i64, _, _>("SELECT COUNT(*) FROM plugin_invocations", [], |row| {
+                row.get(0)
+            })
+            .unwrap(),
+        0
+    );
+
+    assert_eq!(
+        supervisor.shutdown().await.unwrap_err(),
+        PluginRuntimeError::Closed
+    );
+    wait_pids_reaped(&fixture.pid_file).await;
+    drop(supervisor);
+    drop(runtime);
+    drop(owner);
+    fs::remove_dir_all(profile_dir).unwrap();
+}
+
+#[cfg(unix)]
+#[tokio::test]
+async fn sqlite_invalidating_event_rotates_and_resyncs_back_to_active() {
+    let profile_dir = unique_root("sqlite-invalidating-resync");
+    let owner = ProfileOwner::open(&profile_dir).unwrap();
+    seed_sqlite_active_plugins(&profile_dir, 1);
+    seed_sqlite_invalidating_event(&profile_dir);
+    let runtime = SqliteRuntimeService::new(
+        sqlite_app_service(&owner),
+        profile_dir.join("runtime-sources"),
+    );
+    let initial_epoch = runtime
+        .service
+        .get_installed_plugin_profile()
+        .await
+        .unwrap()
+        .plugins[0]
+        .activation_epoch;
+    let fixture = HostFixture::new(
+        "sqlite-invalidating-resync",
+        json!({"loads_by_launch": [1, 1], "shutdown": "graceful"}),
+    );
+    let pids = Arc::new(Mutex::new(Vec::new()));
+    let supervisor = PluginRuntimeSupervisor::for_test(
+        runtime.clone(),
+        fixture.policy(vec![session(188), session(189)], Arc::clone(&pids)),
+        Arc::new(DenyCallbacks),
+    );
+
+    let snapshot = supervisor.reconcile().await.unwrap();
+    assert_eq!(snapshot.lifecycle, PluginRuntimeLifecycle::Running);
+    assert_eq!(snapshot.admitting_plugins.len(), 1);
+    let current = runtime
+        .service
+        .get_installed_plugin_profile()
+        .await
+        .unwrap();
+    assert_eq!(current.plugins[0].activation_epoch, initial_epoch + 1);
+    assert_eq!(current.plugins[0].runtime_state, PluginRuntimeState::Active);
+    assert_eq!(current.plugins[0].failure_count, 0);
+    let cursor = runtime
+        .service
+        .get_plugin_cursor(current.plugins[0].plugin_id.clone())
+        .await
+        .unwrap();
+    assert!(!cursor.resync_required);
+    assert!(runtime.fence_requests.lock().unwrap().is_empty());
+    let connection = Connection::open(profile_dir.join("junban.sqlite3")).unwrap();
+    let (invalidating_receipts, retention_receipts): (i64, i64) = connection
+        .query_row(
+            "SELECT
+                COALESCE(SUM(request_json LIKE '%\"op\":\"mark_plugin_invalidating_event\"%'), 0),
+                COALESCE(SUM(request_json LIKE '%\"op\":\"mark_plugin_retention_loss\"%'), 0)
+             FROM operation_receipts",
+            [],
+            |row| Ok((row.get(0)?, row.get(1)?)),
+        )
+        .unwrap();
+    assert_eq!(invalidating_receipts, 1);
+    assert_eq!(retention_receipts, 0);
+    assert!(!fixture.captured_frames().iter().any(|capture| {
+        capture["frame"]["type"] == "invoke" && capture["frame"]["kind"] == "handle_event"
+    }));
+
+    supervisor.shutdown().await.unwrap();
+    assert_eq!(pids.lock().unwrap().len(), 2);
+    wait_pids_reaped(&fixture.pid_file).await;
+    drop(supervisor);
+    drop(runtime);
+    drop(owner);
+    fs::remove_dir_all(profile_dir).unwrap();
+}
+
+#[cfg(unix)]
+#[tokio::test]
+async fn sqlite_invalidating_event_pruned_before_transition_uses_retention_loss_recovery() {
+    let profile_dir = unique_root("sqlite-invalidating-prune-race");
+    let owner = ProfileOwner::open(&profile_dir).unwrap();
+    seed_sqlite_active_plugins(&profile_dir, 1);
+    seed_sqlite_invalidating_event(&profile_dir);
+    let runtime = SqliteRuntimeService::new(
+        sqlite_app_service(&owner),
+        profile_dir.join("runtime-sources"),
+    );
+    let profile_for_hook = profile_dir.clone();
+    runtime.set_before_invalidating(Box::new(move || {
+        prune_sqlite_invalidating_event_into_gap(&profile_for_hook);
+    }));
+    let initial = runtime
+        .service
+        .get_installed_plugin_profile()
+        .await
+        .unwrap();
+    let initial_epoch = initial.plugins[0].activation_epoch;
+    let fixture = HostFixture::new(
+        "sqlite-invalidating-prune-race",
+        json!({"loads_by_launch": [1, 1], "shutdown": "graceful"}),
+    );
+    let pids = Arc::new(Mutex::new(Vec::new()));
+    let supervisor = PluginRuntimeSupervisor::for_test(
+        runtime.clone(),
+        fixture.policy(vec![session(181), session(182)], Arc::clone(&pids)),
+        Arc::new(DenyCallbacks),
+    );
+
+    let result = supervisor.reconcile().await;
+    assert!(
+        result.is_ok(),
+        "invalidating prune recovery failed: {result:?}; frames: {:?}",
+        fixture.captured_frames()
+    );
+    let snapshot = result.unwrap();
+    assert_eq!(snapshot.lifecycle, PluginRuntimeLifecycle::Running);
+    assert_eq!(snapshot.admitting_plugins.len(), 1);
+    let current = runtime
+        .service
+        .get_installed_plugin_profile()
+        .await
+        .unwrap();
+    assert_eq!(current.plugins[0].activation_epoch, initial_epoch + 1);
+    assert_eq!(current.plugins[0].runtime_state, PluginRuntimeState::Active);
+    assert_eq!(current.plugins[0].failure_count, 0);
+    assert!(runtime.fence_requests.lock().unwrap().is_empty());
+    let connection = Connection::open(profile_dir.join("junban.sqlite3")).unwrap();
+    let (retention_receipts, invalidating_receipts): (i64, i64) = connection
+        .query_row(
+            "SELECT
+                COALESCE(SUM(request_json LIKE '%\"op\":\"mark_plugin_retention_loss\"%'), 0),
+                COALESCE(SUM(request_json LIKE '%\"op\":\"mark_plugin_invalidating_event\"%'), 0)
+             FROM operation_receipts",
+            [],
+            |row| Ok((row.get(0)?, row.get(1)?)),
+        )
+        .unwrap();
+    assert_eq!(retention_receipts, 1);
+    assert_eq!(invalidating_receipts, 0);
+    assert!(!fixture.captured_frames().iter().any(|capture| {
+        capture["frame"]["type"] == "invoke" && capture["frame"]["kind"] == "handle_event"
+    }));
+
+    supervisor.shutdown().await.unwrap();
+    assert_eq!(pids.lock().unwrap().len(), 2);
+    wait_pids_reaped(&fixture.pid_file).await;
+    drop(supervisor);
+    drop(runtime);
+    drop(owner);
+    fs::remove_dir_all(profile_dir).unwrap();
+}
+
+#[cfg(unix)]
+#[tokio::test]
+async fn sqlite_guest_effect_rejection_is_atomic_local_and_exactly_replayable() {
+    let profile_dir = unique_root("sqlite-guest-effect-rejection");
+    let owner = ProfileOwner::open(&profile_dir).unwrap();
+    seed_sqlite_active_plugins_with_permissions(
+        &profile_dir,
+        2,
+        vec![Permission {
+            capability: Capability::TasksWrite,
+            scope: PermissionScope::Unscoped(UnscopedPermission {}),
+        }],
+    );
+    let runtime = SqliteRuntimeService::new(
+        sqlite_app_service(&owner),
+        profile_dir.join("runtime-sources"),
+    );
+    let profile = runtime
+        .service
+        .get_installed_plugin_profile()
+        .await
+        .unwrap();
+    let failing = profile
+        .plugins
+        .iter()
+        .find(|plugin| plugin.plugin_id.as_str() == "plugin-00")
+        .unwrap()
+        .clone();
+    let sibling = profile
+        .plugins
+        .iter()
+        .find(|plugin| plugin.plugin_id.as_str() == "plugin-01")
+        .unwrap()
+        .clone();
+    let missing_task = TaskId::parse("70000000-0000-7000-8000-000000000077").unwrap();
+    let fixture = HostFixture::new(
+        "sqlite-guest-effect-rejection",
+        json!({
+            "loads": 2,
+            "invoke_modes": {"plugin-00": "domain_delete", "plugin-01": "success"},
+            "domain_delete_task_id": missing_task.to_string()
+        }),
+    );
+    let pids = Arc::new(Mutex::new(Vec::new()));
+    let supervisor = PluginRuntimeSupervisor::for_test(
+        runtime.clone(),
+        fixture.policy(vec![session(183)], Arc::clone(&pids)),
+        Arc::new(runtime.service.clone()),
+    );
+    supervisor.reconcile().await.unwrap();
+    let failing_dispatch = dispatch(&failing, 440);
+    let connection = Connection::open(profile_dir.join("junban.sqlite3")).unwrap();
+    let revision_before: i64 = connection
+        .query_row(
+            "SELECT global_revision FROM app_state WHERE singleton = 1",
+            [],
+            |row| row.get(0),
+        )
+        .unwrap();
+    let task_count_before: i64 = connection
+        .query_row("SELECT COUNT(*) FROM tasks", [], |row| row.get(0))
+        .unwrap();
+    drop(connection);
+
+    let outcome = supervisor
+        .invoke(failing_dispatch.clone())
+        .await
+        .unwrap()
+        .outcome()
+        .await
+        .unwrap();
+    assert!(matches!(
+        outcome,
+        InvocationOutcome::Failed(InvocationFailure::InvalidOutput)
+    ));
+    SqliteRuntimeService::wait(&runtime.failure_committed, "guest rejection health").await;
+    let connection = Connection::open(profile_dir.join("junban.sqlite3")).unwrap();
+    let revision_after: i64 = connection
+        .query_row(
+            "SELECT global_revision FROM app_state WHERE singleton = 1",
+            [],
+            |row| row.get(0),
+        )
+        .unwrap();
+    assert_eq!(revision_after, revision_before + 1);
+    assert_eq!(
+        connection
+            .query_row::<i64, _, _>("SELECT COUNT(*) FROM tasks", [], |row| row.get(0))
+            .unwrap(),
+        task_count_before
+    );
+    assert_eq!(
+        connection
+            .query_row::<i64, _, _>(
+                "SELECT COUNT(*) FROM plugin_invocations WHERE operation_id = ?1",
+                [operation(440).to_string()],
+                |row| row.get(0),
+            )
+            .unwrap(),
+        0
+    );
+    let response_json: String = connection
+        .query_row(
+            "SELECT response_json FROM operation_receipts WHERE operation_id = ?1",
+            [operation(440).to_string()],
+            |row| row.get(0),
+        )
+        .unwrap();
+    assert!(response_json.contains("\"rejection\":\"not_found\""));
+    assert!(!response_json.contains(&missing_task.to_string()));
+    assert!(!response_json.contains(&session(183).to_string()));
+    assert_eq!(
+        connection
+            .query_row::<String, _, _>(
+                "SELECT event_type FROM events WHERE revision = ?1",
+                [revision_after],
+                |row| row.get(0),
+            )
+            .unwrap(),
+        EventType::PLUGIN_HEALTH_CHANGED
+    );
+    drop(connection);
+
+    let current = runtime
+        .service
+        .get_installed_plugin_profile()
+        .await
+        .unwrap();
+    assert_eq!(
+        current
+            .plugins
+            .iter()
+            .find(|plugin| plugin.plugin_id == failing.plugin_id)
+            .unwrap()
+            .runtime_state,
+        PluginRuntimeState::Degraded
+    );
+    assert_eq!(
+        current
+            .plugins
+            .iter()
+            .find(|plugin| plugin.plugin_id == sibling.plugin_id)
+            .unwrap()
+            .runtime_state,
+        PluginRuntimeState::Active
+    );
+    assert_eq!(
+        supervisor.snapshot().await.unwrap().admitting_plugins,
+        vec![sibling.plugin_id.clone()]
+    );
+
+    let delivery = junban_app::PluginInvocationDelivery::new(
+        junban_app::PluginDeliveryAuthority {
+            plugin_id: failing.plugin_id.clone(),
+            package_generation: failing.package_generation,
+            activation_epoch: failing.activation_epoch,
+            host_session_id: OperationId::parse(&session(183).to_string()).unwrap(),
+            invocation_id: operation(440),
+            payload_sha256: failing_dispatch.payload_sha256.clone(),
+            mode: PluginDeliveryMode::Active,
+        },
+        PluginHookKind::InvokeCommand,
+        PluginId::parse("command").unwrap(),
+    )
+    .unwrap();
+    let replay = runtime
+        .service
+        .reserve_authorized_plugin_invocation(
+            AuthorizedReservePluginInvocationRequest {
+                request: ReservePluginInvocationRequest {
+                    operation_id: operation(440),
+                    plugin_id: failing.plugin_id.clone(),
+                    package_generation: failing.package_generation,
+                    activation_epoch: failing.activation_epoch,
+                    hook_kind: PluginHookKind::InvokeCommand,
+                    entry: PluginManifestEntry::Command {
+                        command_id: PluginId::parse("command").unwrap(),
+                    },
+                    request_sha256: delivery.request_sha256.clone(),
+                    delivery_operation_id: operation(10_440),
+                    resync_session: None,
+                },
+                delivery,
+            },
+            Timestamp::now(),
+        )
+        .await
+        .unwrap();
+    assert!(matches!(
+        replay,
+        ReservedPluginInvocation::TerminalReplay(committed)
+            if committed.rejection
+                == Some(junban_app::PluginGuestEffectRejection::NotFound)
+    ));
+    let failure_count = runtime
+        .service
+        .get_installed_plugin_profile()
+        .await
+        .unwrap()
+        .plugins
+        .into_iter()
+        .find(|plugin| plugin.plugin_id == failing.plugin_id)
+        .unwrap()
+        .failure_count;
+    assert_eq!(failure_count, 1);
+    let offender_invokes = fixture
+        .captured_frames()
+        .iter()
+        .filter(|capture| {
+            capture["frame"]["type"] == "invoke"
+                && capture["frame"]["fence"]["plugin_id"] == failing.plugin_id.as_str()
+        })
+        .count();
+    assert_eq!(offender_invokes, 1);
+
+    runtime.completion_gate.add_permits(1);
+    let sibling_outcome = supervisor
+        .invoke(dispatch(&sibling, 441))
+        .await
+        .unwrap()
+        .outcome()
+        .await
+        .unwrap();
+    assert!(matches!(sibling_outcome, InvocationOutcome::Completed(_)));
+    assert!(runtime.fence_requests.lock().unwrap().is_empty());
+
+    supervisor.shutdown().await.unwrap();
+    wait_pids_reaped(&fixture.pid_file).await;
+    drop(supervisor);
+    drop(runtime);
+    drop(owner);
+    fs::remove_dir_all(profile_dir).unwrap();
+}
+
+#[cfg(unix)]
+#[tokio::test]
+async fn sqlite_unresolved_http_stays_ambiguous_and_is_plugin_local() {
+    let profile_dir = unique_root("sqlite-unresolved-http");
+    let owner = ProfileOwner::open(&profile_dir).unwrap();
+    seed_sqlite_active_plugins_with_permissions(
+        &profile_dir,
+        2,
+        vec![Permission {
+            capability: Capability::Http,
+            scope: PermissionScope::Http(HttpScope {
+                origins: vec![HttpOrigin("https://example.com".to_owned())],
+                methods: vec![HttpMethod::Post],
+            }),
+        }],
+    );
+    let runtime = SqliteRuntimeService::new(
+        sqlite_app_service(&owner),
+        profile_dir.join("runtime-sources"),
+    );
+    let profile = runtime
+        .service
+        .get_installed_plugin_profile()
+        .await
+        .unwrap();
+    let offender = profile
+        .plugins
+        .iter()
+        .find(|plugin| plugin.plugin_id.as_str() == "plugin-00")
+        .unwrap()
+        .clone();
+    let sibling = profile
+        .plugins
+        .iter()
+        .find(|plugin| plugin.plugin_id.as_str() == "plugin-01")
+        .unwrap()
+        .clone();
+    let fixture = HostFixture::new(
+        "sqlite-unresolved-http",
+        json!({
+            "loads": 2,
+            "invoke_modes": {"plugin-00": "http_callback", "plugin-01": "success"}
+        }),
+    );
+    let entered = Arc::new(Semaphore::new(0));
+    let release = Arc::new(Semaphore::new(0));
+    let transport = AmbiguousHttpTransport::new(Arc::clone(&entered), Arc::clone(&release));
+    let pids = Arc::new(Mutex::new(Vec::new()));
+    let supervisor = PluginRuntimeSupervisor::for_test_with_http(
+        runtime.clone(),
+        fixture.policy(vec![session(184)], Arc::clone(&pids)),
+        Arc::new(runtime.service.clone()),
+        transport.clone(),
+    );
+    supervisor.reconcile().await.unwrap();
+    let offender_dispatch = dispatch(&offender, 450);
+    let handle = supervisor.invoke(offender_dispatch.clone()).await.unwrap();
+    SqliteRuntimeService::wait(&entered, "first HTTP attempt").await;
+    release.add_permits(1);
+    SqliteRuntimeService::wait(&entered, "same-memory HTTP resend").await;
+    release.add_permits(1);
+    assert!(matches!(
+        handle.outcome().await.unwrap(),
+        InvocationOutcome::Failed(InvocationFailure::InvalidOutput)
+    ));
+    SqliteRuntimeService::wait(&runtime.failure_committed, "HTTP ambiguity health").await;
+
+    assert_eq!(transport.calls.load(Ordering::Relaxed), 2);
+    {
+        let requests = transport.requests.lock().unwrap();
+        assert_eq!(requests.len(), 2);
+        assert_eq!(requests[0], requests[1]);
+    }
+    let connection = Connection::open(profile_dir.join("junban.sqlite3")).unwrap();
+    let (state, delivery_id, terminal_receipt): (String, String, i64) = connection
+        .query_row(
+            "SELECT state, delivery_id,
+                    (SELECT COUNT(*) FROM operation_receipts WHERE operation_id = ?1)
+             FROM plugin_invocations WHERE operation_id = ?1",
+            [operation(450).to_string()],
+            |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?)),
+        )
+        .unwrap();
+    assert_eq!(state, "ambiguous_http");
+    assert_eq!(delivery_id, operation(10_450).to_string());
+    assert_eq!(terminal_receipt, 0);
+    drop(connection);
+
+    let current = runtime
+        .service
+        .get_installed_plugin_profile()
+        .await
+        .unwrap();
+    assert_eq!(
+        current
+            .plugins
+            .iter()
+            .find(|plugin| plugin.plugin_id == offender.plugin_id)
+            .unwrap()
+            .failure_count,
+        1
+    );
+    assert_eq!(
+        current
+            .plugins
+            .iter()
+            .find(|plugin| plugin.plugin_id == sibling.plugin_id)
+            .unwrap()
+            .runtime_state,
+        PluginRuntimeState::Active
+    );
+    assert_eq!(
+        supervisor.snapshot().await.unwrap().admitting_plugins,
+        vec![sibling.plugin_id.clone()]
+    );
+    let frames_before_retry = fixture.captured_frames().len();
+    assert!(matches!(
+        supervisor.invoke(offender_dispatch).await,
+        Err(PluginRuntimeError::NotAdmitting)
+    ));
+    assert_eq!(transport.calls.load(Ordering::Relaxed), 2);
+    assert_eq!(fixture.captured_frames().len(), frames_before_retry);
+    assert_eq!(
+        runtime
+            .service
+            .get_installed_plugin_profile()
+            .await
+            .unwrap()
+            .plugins
+            .into_iter()
+            .find(|plugin| plugin.plugin_id == offender.plugin_id)
+            .unwrap()
+            .failure_count,
+        1
+    );
+
+    runtime.completion_gate.add_permits(1);
+    assert!(matches!(
+        supervisor
+            .invoke(dispatch(&sibling, 451))
+            .await
+            .unwrap()
+            .outcome()
+            .await
+            .unwrap(),
+        InvocationOutcome::Completed(_)
+    ));
+    assert!(runtime.fence_requests.lock().unwrap().is_empty());
+    assert_eq!(
+        fixture
+            .captured_frames()
+            .iter()
+            .filter(|capture| {
+                capture["frame"]["type"] == "invoke"
+                    && capture["frame"]["fence"]["plugin_id"] == offender.plugin_id.as_str()
+            })
+            .count(),
+        1
+    );
+
+    supervisor.shutdown().await.unwrap();
     wait_pids_reaped(&fixture.pid_file).await;
     drop(supervisor);
     drop(runtime);

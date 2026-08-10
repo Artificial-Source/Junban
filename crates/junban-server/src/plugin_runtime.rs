@@ -895,12 +895,27 @@ impl PluginRuntimeSupervisor {
     where
         S: RuntimeServicePort + PluginResyncPort,
     {
-        let runtime_service: Arc<dyn RuntimeServicePort> = service.clone();
-        let resync_port: Arc<dyn PluginResyncPort> = service;
-        let callback_adapter = Arc::new(PluginCallbackAdapter::new(
+        Self::for_test_with_http(
+            service,
+            launch_policy,
             callback_port,
             Arc::new(PluginHttpTransport::new()),
-        ));
+        )
+    }
+
+    #[cfg(test)]
+    fn for_test_with_http<S>(
+        service: Arc<S>,
+        launch_policy: PluginHostLaunchPolicy,
+        callback_port: Arc<dyn PluginCallbackPort>,
+        http: Arc<dyn crate::plugin_callbacks::PluginCallbackHttp>,
+    ) -> Self
+    where
+        S: RuntimeServicePort + PluginResyncPort,
+    {
+        let runtime_service: Arc<dyn RuntimeServicePort> = service.clone();
+        let resync_port: Arc<dyn PluginResyncPort> = service;
+        let callback_adapter = Arc::new(PluginCallbackAdapter::new(callback_port, http));
         Self::from_parts(
             runtime_service,
             resync_port,
@@ -2242,25 +2257,47 @@ impl RuntimeActor {
                         if let Some(driver) = driver.as_deref_mut() {
                             let _ = driver.invalidate_retained_tail();
                         }
-                        self.service
-                            .mark_invalidating_event(
-                                junban_app::MarkPluginInvalidatingEventRequest {
-                                    operation_id: OperationId::new(),
-                                    authority: junban_app::PluginInvalidatingEventAuthority {
-                                        plugin_id: plugin_id.clone(),
-                                        package_generation: plugin.package_generation,
-                                        activation_epoch: plugin.activation_epoch,
-                                        host_session_id,
-                                        mode,
-                                    },
-                                    expected_cursor: expected,
-                                    source_revision: event.revision,
-                                    event_content_sha256: event_hash,
-                                },
-                                Timestamp::now(),
-                            )
+                        let invalidating = junban_app::MarkPluginInvalidatingEventRequest {
+                            operation_id: OperationId::new(),
+                            authority: junban_app::PluginInvalidatingEventAuthority {
+                                plugin_id: plugin_id.clone(),
+                                package_generation: plugin.package_generation,
+                                activation_epoch: plugin.activation_epoch,
+                                host_session_id,
+                                mode,
+                            },
+                            expected_cursor: expected.clone(),
+                            source_revision: event.revision,
+                            event_content_sha256: event_hash,
+                        };
+                        match self
+                            .service
+                            .mark_invalidating_event(invalidating, Timestamp::now())
                             .await
-                            .map_err(|_| PluginRuntimeError::AuthorityRejected)?;
+                        {
+                            Ok(_) => {}
+                            Err(AppError::NotFound) => {
+                                self.service
+                                    .mark_retention_loss(
+                                        junban_app::MarkPluginRetentionLossRequest {
+                                            operation_id: OperationId::new(),
+                                            authority:
+                                                junban_app::PluginCursorRetentionLossAuthority {
+                                                    plugin_id: plugin_id.clone(),
+                                                    package_generation: plugin.package_generation,
+                                                    activation_epoch: plugin.activation_epoch,
+                                                    host_session_id,
+                                                    mode,
+                                                },
+                                            expected_cursor: expected,
+                                        },
+                                        Timestamp::now(),
+                                    )
+                                    .await
+                                    .map_err(|_| PluginRuntimeError::AuthorityRejected)?;
+                            }
+                            Err(_) => return Err(PluginRuntimeError::AuthorityRejected),
+                        }
                         let plan = self.refresh_loaded_profile().await?;
                         return Ok(CatchUpOutcome::ReplaceAuthority(plan));
                     }

@@ -20,8 +20,7 @@ const RETENTION_LOSS_HOST_SESSION_DOMAIN: &[u8] = b"junban.plugin.retention-loss
 const RETENTION_LOSS_REQUEST_DOMAIN: &[u8] = b"junban.plugin.retention-loss-request.v1\0";
 const INVALIDATING_EVENT_HOST_SESSION_DOMAIN: &[u8] =
     b"junban.plugin.invalidating-event-host-session.v1\0";
-const INVALIDATING_EVENT_REQUEST_DOMAIN: &[u8] =
-    b"junban.plugin.invalidating-event-request.v1\0";
+const INVALIDATING_EVENT_REQUEST_DOMAIN: &[u8] = b"junban.plugin.invalidating-event-request.v1\0";
 const INVALIDATING_EVENT_REQUEST_TAG: u8 = 0x00;
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -560,6 +559,8 @@ impl MarkPluginInvalidatingEventRequest {
 }
 
 /// Rebuild the complete invalidating-event digest from receipt-safe fields.
+// Keeping every framed authority field explicit makes receipt validation auditable.
+#[allow(clippy::too_many_arguments)]
 pub fn plugin_invalidating_event_request_digest(
     operation_id: OperationId,
     plugin_id: &PluginId,
@@ -835,6 +836,26 @@ mod tests {
         }
     }
 
+    fn invalidating_event_request() -> MarkPluginInvalidatingEventRequest {
+        MarkPluginInvalidatingEventRequest {
+            operation_id: operation("70000000-0000-7000-8000-000000000020"),
+            authority: PluginInvalidatingEventAuthority {
+                plugin_id: PluginId::parse("invalidating-test").unwrap(),
+                package_generation: 7,
+                activation_epoch: 11,
+                host_session_id: operation("70000000-0000-7000-8000-000000000021"),
+                mode: PluginDeliveryMode::StartingCatchUp,
+            },
+            expected_cursor: PluginCursorPosition {
+                event_epoch: "70000000-0000-7000-8000-000000000022".to_owned(),
+                revision: 19,
+                resync_required: false,
+            },
+            source_revision: 20,
+            event_content_sha256: Sha256Digest::of(b"invalidating retained event"),
+        }
+    }
+
     #[test]
     fn retention_loss_authority_validates_and_redacts_the_runtime_session() {
         let request = retention_loss_request();
@@ -901,6 +922,72 @@ mod tests {
             let mut changed = request.clone();
             mutate(&mut changed);
             assert_ne!(changed.digest().unwrap(), digest);
+        }
+    }
+
+    #[test]
+    fn invalidating_event_digest_has_frozen_redacted_framing_and_binds_every_field() {
+        let request = invalidating_event_request();
+        request.validate().unwrap();
+        assert!(!format!("{request:?}").contains(&request.authority.host_session_id.to_string()));
+        assert_eq!(
+            request.authority.host_session_sha256().as_str(),
+            "13023e2e0720729de8919cd28d99b34b385bd6dff3a289759767b84ee1058c38"
+        );
+        let digest = request.digest().unwrap();
+        assert_eq!(
+            digest.as_str(),
+            "bd051cda10a65d40d42ca6e80c56c4413e90d98c50046e167e7a0dd27e9df531"
+        );
+        assert_eq!(
+            plugin_invalidating_event_request_digest(
+                request.operation_id,
+                &request.authority.plugin_id,
+                request.authority.package_generation,
+                request.authority.activation_epoch,
+                &request.authority.host_session_sha256(),
+                request.authority.mode,
+                &request.expected_cursor,
+                request.source_revision,
+                &request.event_content_sha256,
+            )
+            .unwrap(),
+            digest
+        );
+
+        let mutations: [fn(&mut MarkPluginInvalidatingEventRequest); 10] = [
+            |value| value.operation_id = OperationId::new(),
+            |value| value.authority.plugin_id = PluginId::parse("changed").unwrap(),
+            |value| value.authority.package_generation += 1,
+            |value| value.authority.activation_epoch += 1,
+            |value| value.authority.host_session_id = OperationId::new(),
+            |value| value.authority.mode = PluginDeliveryMode::Active,
+            |value| value.expected_cursor.event_epoch.push_str("-changed"),
+            |value| {
+                value.expected_cursor.revision -= 1;
+                value.source_revision -= 1;
+            },
+            |value| {
+                value.source_revision += 1;
+                value.expected_cursor.revision += 1;
+            },
+            |value| value.event_content_sha256 = Sha256Digest::of(b"changed"),
+        ];
+        for mutate in mutations {
+            let mut changed = request.clone();
+            mutate(&mut changed);
+            assert_ne!(changed.digest().unwrap(), digest);
+        }
+
+        let invalid_mutations: [fn(&mut MarkPluginInvalidatingEventRequest); 3] = [
+            |value| value.authority.mode = PluginDeliveryMode::StartingResync,
+            |value| value.expected_cursor.resync_required = true,
+            |value| value.source_revision = value.expected_cursor.revision + 2,
+        ];
+        for mutate in invalid_mutations {
+            let mut invalid = request.clone();
+            mutate(&mut invalid);
+            assert_eq!(invalid.validate(), Err(RepositoryError::Conflict));
         }
     }
 

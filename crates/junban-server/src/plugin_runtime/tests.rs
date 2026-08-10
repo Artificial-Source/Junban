@@ -2229,6 +2229,34 @@ async fn wait_for_captured_frame(fixture: &HostFixture, frame_type: &str) {
     .expect("fixture frame acknowledgement deadline");
 }
 
+#[cfg(unix)]
+async fn wait_for_captured_invocations(fixture: &HostFixture, invocation_ids: &[u64]) {
+    let expected = invocation_ids
+        .iter()
+        .map(|index| operation(*index).to_string())
+        .collect::<BTreeSet<_>>();
+    tokio::time::timeout(Duration::from_secs(3), async {
+        loop {
+            let captured = fixture
+                .captured_frames()
+                .into_iter()
+                .filter(|capture| capture["frame"]["type"] == "invoke")
+                .filter_map(|capture| {
+                    capture["frame"]["fence"]["invocation_id"]
+                        .as_str()
+                        .map(str::to_owned)
+                })
+                .collect::<BTreeSet<_>>();
+            if expected.is_subset(&captured) {
+                return;
+            }
+            tokio::task::yield_now().await;
+        }
+    })
+    .await
+    .expect("fixture invocation acknowledgement deadline");
+}
+
 fn process_is_absent(pid: u32) -> bool {
     #[cfg(unix)]
     {
@@ -2832,7 +2860,14 @@ async fn parent_four_total_and_per_plugin_limits_hold_without_child_trust() {
         Err(PluginRuntimeError::InvocationLimit)
     ));
     assert_eq!(supervisor.snapshot().await.unwrap().active_invocations, 4);
-    drop((first, second, third, fourth));
+    wait_for_captured_invocations(&fixture, &[100, 102, 103, 104]).await;
+    for invocation in [first, second, third, fourth] {
+        invocation.cancel();
+        assert!(matches!(
+            invocation.outcome().await.unwrap(),
+            InvocationOutcome::Cancelled
+        ));
+    }
     supervisor.shutdown().await.unwrap();
     assert!(service.lock().fence_requests.is_empty());
     assert!(process_is_absent(pids.lock().unwrap()[0]));

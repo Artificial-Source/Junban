@@ -22,6 +22,10 @@ CONSUMER_PROVENANCE = SDK / "consumers/artifact-provenance.json"
 HARNESS = ROOT / "crates/junban-server/src/plugin_runtime/slice2e_tests.rs"
 CALIBRATOR = ROOT / "scripts/calibrate-phase7-slice2e-cgroup.py"
 CALIBRATION_WORKFLOW = ROOT / ".github/workflows/phase7-slice2e-memory-calibration.yml"
+GIT_ATTRIBUTES = ROOT / ".gitattributes"
+HOST = ROOT / "crates/junban-plugin-host/src/lib.rs"
+HOST_RUNTIME = ROOT / "crates/junban-plugin-host/src/runtime.rs"
+SUPERVISOR_TESTS = ROOT / "crates/junban-server/src/plugin_runtime/tests.rs"
 WORKSPACE_MANIFEST = ROOT / "Cargo.toml"
 SERVER_MANIFEST = ROOT / "crates/junban-server/Cargo.toml"
 COMPONENT_CAP = 32 * 1024 * 1024
@@ -135,10 +139,33 @@ def audit_static() -> None:
         FIXTURE / "wit/deps/junban-plugin/plugin.wit",
         CALIBRATOR,
         CALIBRATION_WORKFLOW,
+        GIT_ATTRIBUTES,
+        HOST,
+        HOST_RUNTIME,
+        SUPERVISOR_TESTS,
     ]
     for path in required:
         if not path.is_file() or path.is_symlink():
             fail(f"missing or non-regular Slice 2E authority: {path.relative_to(ROOT)}")
+
+    attributes = GIT_ATTRIBUTES.read_bytes()
+    expected_attributes = b"""* text=auto eol=lf
+
+*.wasm binary
+*.png binary
+*.jpg binary
+*.jpeg binary
+*.gif binary
+*.webp binary
+*.ico binary
+*.wav binary
+*.webm binary
+*.woff2 binary
+*.ttf binary
+*.junban-backup binary
+"""
+    if attributes != expected_attributes:
+        fail("repository LF and binary attribute authority drifted")
 
     authority = AUTHORITY.read_bytes()
     if (FIXTURE / "wit/deps/junban-plugin/plugin.wit").read_bytes() != authority:
@@ -217,6 +244,64 @@ def audit_static() -> None:
         fail("Slice 2E cgroup-v2 calibration authority drifted")
     if re.search(r"(?:time\.)?sleep\s*\(", calibrator):
         fail("Slice 2E cgroup calibration uses a sleep as an oracle")
+
+    host = HOST.read_text(encoding="utf-8")
+    runtime = HOST_RUNTIME.read_text(encoding="utf-8")
+    if (
+        "CancelResult::Won | CancelResult::Lost => Ok(())" not in host
+        or "CancelResult::Stale => send_failed(" not in host
+        or "CancelResult::WorkerStopped => Err(HostError::Runtime)" not in host
+        or "CancelResult::Lost | CancelResult::Stale" in host
+    ):
+        fail("child cancel terminal authority drifted")
+    cancel_regression = [
+        "timeout_completion_winning_before_cancel_emits_one_terminal",
+        "cancel_and_wait_after_linearization",
+        "timeout completion must own terminal authority",
+        "ChildFrame::Failed",
+        "HostFailureCode::Timeout",
+        "Err(mpsc::TryRecvError::Empty)",
+    ]
+    if any(needle not in runtime for needle in cancel_regression):
+        fail("child timeout/cancel deterministic regression drifted")
+
+    supervisor_tests = SUPERVISOR_TESTS.read_text(encoding="utf-8")
+    admission_regression = [
+        "wait_for_captured_invocations(&fixture, &[100, 102, 103, 104]).await",
+        "for invocation in [first, second, third, fourth]",
+        "invocation.cancel()",
+        "InvocationOutcome::Cancelled",
+        "assert!(service.lock().fence_requests.is_empty())",
+        "assert!(process_is_absent(pids.lock().unwrap()[0]))",
+    ]
+    if any(needle not in supervisor_tests for needle in admission_regression) or (
+        "drop((first, second, third, fourth))" in supervisor_tests
+    ):
+        fail("parent admission teardown regression drifted")
+
+    workflow = CALIBRATION_WORKFLOW.read_text(encoding="utf-8")
+    workflow_authority = [
+        'candidate="${current}"',
+        'grep -qw memory "${candidate}/cgroup.subtree_control"',
+        'candidate="$(dirname "${candidate}")"',
+        "no cgroup-v2 ancestor delegates the memory controller",
+        'grep -qw memory "${parent}/cgroup.controllers"',
+        'echo +memory | sudo tee "${parent}/cgroup.subtree_control"',
+        'sudo chown "$(id -u):$(id -g)"',
+        'find "${JUNBAN_SLICE2E_CGROUP_PARENT}" -mindepth 1 -maxdepth 1',
+        'sudo rmdir "${JUNBAN_SLICE2E_CGROUP_PARENT}"',
+    ]
+    if any(needle not in workflow for needle in workflow_authority):
+        fail("Slice 2E cgroup ancestor delegation authority drifted")
+    created = workflow.index('sudo mkdir "${parent}"')
+    exported = workflow.index('echo "JUNBAN_SLICE2E_CGROUP_PARENT=${parent}"')
+    verified = workflow.index('grep -qw memory "${parent}/cgroup.controllers"')
+    if not created < exported < verified:
+        fail("Slice 2E delegated parent cleanup authority is not published immediately")
+    if 'parent="${current}/junban-slice2e-' in workflow or re.search(
+        r'sudo rmdir "\$\{JUNBAN_SLICE2E_CGROUP_PARENT\}"\s*\|\|\s*true', workflow
+    ):
+        fail("Slice 2E workflow retained leaf delegation or ignored cleanup")
 
     workspace = WORKSPACE_MANIFEST.read_text(encoding="utf-8")
     if f'wasmtime = {{ version = "={WASMTIME_VERSION}"' not in workspace:

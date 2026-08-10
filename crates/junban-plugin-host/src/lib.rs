@@ -558,13 +558,8 @@ fn handle_message(
                     .entries
                     .get(&fence.plugin_id)
                     .expect("loaded runtime entry disappeared");
-                match entry.status.cancel_and_wait(&fence) {
-                    CancelResult::Won => {}
-                    CancelResult::Lost | CancelResult::Stale => {
-                        send_failed(outbound, fence, HostFailureCode::StaleAuthority)?;
-                    }
-                    CancelResult::WorkerStopped => return Err(HostError::Runtime),
-                }
+                let result = entry.status.cancel_and_wait(&fence);
+                handle_cancel_result(outbound, fence, result)?;
             }
         }
         ParentFrame::Unload { fence } => {
@@ -596,6 +591,18 @@ fn send_frame(
     outbound
         .send(OutboundMessage::frame(frame))
         .map_err(|_| HostError::Output)
+}
+
+fn handle_cancel_result(
+    outbound: &mpsc::SyncSender<OutboundMessage>,
+    fence: AuthorityFence,
+    result: CancelResult,
+) -> Result<(), HostError> {
+    match result {
+        CancelResult::Won | CancelResult::Lost => Ok(()),
+        CancelResult::Stale => send_failed(outbound, fence, HostFailureCode::StaleAuthority),
+        CancelResult::WorkerStopped => Err(HostError::Runtime),
+    }
 }
 
 fn send_failed(

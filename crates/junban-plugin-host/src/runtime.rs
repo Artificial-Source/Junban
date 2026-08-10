@@ -213,6 +213,14 @@ impl SharedRuntimeStatus {
     /// cancel waits until the runtime owner has dropped the active Store; a
     /// timeout that won first remains authoritative.
     pub fn cancel_and_wait(&self, fence: &AuthorityFence) -> CancelResult {
+        self.cancel_and_wait_after_linearization(fence, |_| {})
+    }
+
+    fn cancel_and_wait_after_linearization(
+        &self,
+        fence: &AuthorityFence,
+        after_linearization: impl FnOnce(bool),
+    ) -> CancelResult {
         let mut status = self.lock();
         let Some(active) = status.active.as_mut() else {
             return CancelResult::Stale;
@@ -227,6 +235,7 @@ impl SharedRuntimeStatus {
         } else {
             false
         };
+        after_linearization(won);
         while status
             .active
             .as_ref()
@@ -1538,14 +1547,14 @@ mod tests {
     };
 
     use junban_plugin_sdk::{
-        AuthorityFence, CallbackFence, ChildFrame, HOST_CALL_KINDS, HostCallKind,
+        AuthorityFence, CallbackFence, ChildFrame, HOST_CALL_KINDS, HostCallKind, HostFailureCode,
         InvocationOutcome, private_body_types as neutral,
     };
     use wasmtime::{Config, Engine, component::Linker};
 
     use super::{
-        OutboundMessage, PendingCallback, SharedInvocationAdmission, SharedRuntimeStatus,
-        StoreState, add_actual_imports,
+        CancelResult, OutboundMessage, PendingCallback, SharedInvocationAdmission,
+        SharedRuntimeStatus, StoreState, add_actual_imports,
     };
 
     fn fence() -> AuthorityFence {
@@ -1582,6 +1591,73 @@ mod tests {
             .map(|interface| (*interface).to_owned())
             .collect::<Vec<_>>();
         add_actual_imports(&mut linker, &imports).unwrap();
+    }
+
+    #[test]
+    fn timeout_completion_winning_before_cancel_emits_one_terminal() {
+        let admission = Arc::new(SharedInvocationAdmission::default());
+        let status = Arc::new(SharedRuntimeStatus::new(
+            "test-plugin".into(),
+            admission.clone(),
+        ));
+        status.mark_loaded();
+        let fence = fence();
+        status.start(fence.clone(), Duration::ZERO).unwrap();
+        let (outbound, receiver) = mpsc::sync_channel(2);
+        let (completion_entered, completion_entered_rx) = mpsc::channel();
+        let (release_completion, release_completion_rx) = mpsc::channel();
+        let (cancel_linearized, cancel_linearized_rx) = mpsc::channel();
+        let (release_cancel, release_cancel_rx) = mpsc::channel();
+
+        let cancel_result = std::thread::scope(|scope| {
+            let completion_status = &status;
+            let completion_fence = &fence;
+            let completion_outbound = &outbound;
+            let completion = scope.spawn(move || {
+                completion_status.complete(
+                    completion_fence,
+                    Err(HostFailureCode::GuestError),
+                    completion_outbound,
+                    || {
+                        completion_entered.send(()).unwrap();
+                        release_completion_rx.recv().unwrap();
+                    },
+                );
+            });
+            completion_entered_rx.recv().unwrap();
+
+            let cancel_status = &status;
+            let cancel_fence = &fence;
+            let cancel = scope.spawn(move || {
+                cancel_status.cancel_and_wait_after_linearization(cancel_fence, |won| {
+                    assert!(!won, "timeout completion must own terminal authority");
+                    cancel_linearized.send(()).unwrap();
+                    release_cancel_rx.recv().unwrap();
+                })
+            });
+            cancel_linearized_rx.recv().unwrap();
+            release_completion.send(()).unwrap();
+            release_cancel.send(()).unwrap();
+
+            completion.join().unwrap();
+            cancel.join().unwrap()
+        });
+        assert_eq!(cancel_result, CancelResult::Lost);
+        crate::handle_cancel_result(&outbound, fence.clone(), cancel_result).unwrap();
+
+        let terminal = receiver.recv().unwrap();
+        assert!(matches!(
+            terminal.frame,
+            ChildFrame::Failed {
+                fence: terminal_fence,
+                code: HostFailureCode::Timeout,
+            } if terminal_fence == fence
+        ));
+        assert!(matches!(
+            receiver.try_recv(),
+            Err(mpsc::TryRecvError::Empty)
+        ));
+        assert_eq!(admission.active_count(), 0);
     }
 
     #[test]

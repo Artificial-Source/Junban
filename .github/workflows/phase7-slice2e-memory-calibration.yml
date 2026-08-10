@@ -33,15 +33,29 @@ jobs:
         run: |
           set -euo pipefail
           membership="$(awk -F: '$1 == "0" { print $3 }' /proc/self/cgroup)"
-          current="/sys/fs/cgroup${membership}"
-          parent="${current}/junban-slice2e-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}"
-          grep -qw memory "${current}/cgroup.controllers"
+          current="/sys/fs/cgroup${membership%/}"
+          delegate=""
+          candidate="${current}"
+          while [[ "${candidate}" == /sys/fs/cgroup* ]]; do
+            if [[ -f "${candidate}/cgroup.subtree_control" ]] && \
+              grep -qw memory "${candidate}/cgroup.subtree_control"; then
+              delegate="${candidate}"
+              break
+            fi
+            [[ "${candidate}" == /sys/fs/cgroup ]] && break
+            candidate="$(dirname "${candidate}")"
+          done
+          if [[ -z "${delegate}" ]]; then
+            echo "no cgroup-v2 ancestor delegates the memory controller" >&2
+            exit 1
+          fi
+          parent="${delegate}/junban-slice2e-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}"
           sudo mkdir "${parent}"
+          echo "JUNBAN_SLICE2E_CGROUP_PARENT=${parent}" >> "${GITHUB_ENV}"
           grep -qw memory "${parent}/cgroup.controllers"
           echo +memory | sudo tee "${parent}/cgroup.subtree_control" >/dev/null
           sudo chown "$(id -u):$(id -g)" \
             "${parent}" "${parent}/cgroup.procs" "${parent}/cgroup.subtree_control"
-          echo "JUNBAN_SLICE2E_CGROUP_PARENT=${parent}" >> "${GITHUB_ENV}"
 
       - name: Run five samples for baseline and each language/scale
         env:
@@ -54,8 +68,14 @@ jobs:
         if: always()
         shell: bash
         run: |
-          if [[ -n "${JUNBAN_SLICE2E_CGROUP_PARENT:-}" ]]; then
-            sudo rmdir "${JUNBAN_SLICE2E_CGROUP_PARENT}" || true
+          if [[ -n "${JUNBAN_SLICE2E_CGROUP_PARENT:-}" ]] && \
+            [[ -d "${JUNBAN_SLICE2E_CGROUP_PARENT}" ]]; then
+            if find "${JUNBAN_SLICE2E_CGROUP_PARENT}" -mindepth 1 -maxdepth 1 \
+              -type d -print -quit | grep -q .; then
+              echo "delegated cgroup retains child cgroups" >&2
+              exit 1
+            fi
+            sudo rmdir "${JUNBAN_SLICE2E_CGROUP_PARENT}"
           fi
 
       - name: Upload raw calibration JSON

@@ -324,6 +324,11 @@ trait RuntimeServicePort: Send + Sync {
         request: junban_app::MarkPluginRetentionLossRequest,
         now: Timestamp,
     ) -> ServiceFuture<junban_app::PluginEventCursor>;
+    fn mark_invalidating_event(
+        &self,
+        request: junban_app::MarkPluginInvalidatingEventRequest,
+        now: Timestamp,
+    ) -> ServiceFuture<junban_app::PluginEventCursor>;
     fn reserve_invocation(
         &self,
         request: AuthorizedReservePluginInvocationRequest,
@@ -431,6 +436,15 @@ impl RuntimeServicePort for AppService {
     ) -> ServiceFuture<junban_app::PluginEventCursor> {
         let service = self.clone();
         Box::pin(async move { service.mark_plugin_retention_loss(request, now).await })
+    }
+
+    fn mark_invalidating_event(
+        &self,
+        request: junban_app::MarkPluginInvalidatingEventRequest,
+        now: Timestamp,
+    ) -> ServiceFuture<junban_app::PluginEventCursor> {
+        let service = self.clone();
+        Box::pin(async move { service.mark_plugin_invalidating_event(request, now).await })
     }
 
     fn reserve_invocation(
@@ -2228,11 +2242,27 @@ impl RuntimeActor {
                         if let Some(driver) = driver.as_deref_mut() {
                             let _ = driver.invalidate_retained_tail();
                         }
-                        self.begin_graph_fatal(Some((
-                            plugin_id.clone(),
-                            PluginGraphFenceCause::SessionLost,
-                        )));
-                        return Err(PluginRuntimeError::SessionLost);
+                        self.service
+                            .mark_invalidating_event(
+                                junban_app::MarkPluginInvalidatingEventRequest {
+                                    operation_id: OperationId::new(),
+                                    authority: junban_app::PluginInvalidatingEventAuthority {
+                                        plugin_id: plugin_id.clone(),
+                                        package_generation: plugin.package_generation,
+                                        activation_epoch: plugin.activation_epoch,
+                                        host_session_id,
+                                        mode,
+                                    },
+                                    expected_cursor: expected,
+                                    source_revision: event.revision,
+                                    event_content_sha256: event_hash,
+                                },
+                                Timestamp::now(),
+                            )
+                            .await
+                            .map_err(|_| PluginRuntimeError::AuthorityRejected)?;
+                        let plan = self.refresh_loaded_profile().await?;
+                        return Ok(CatchUpOutcome::ReplaceAuthority(plan));
                     }
                 }
             }
@@ -3055,7 +3085,14 @@ impl RuntimeActor {
         match result {
             Ok(ReservedPluginInvocation::TerminalReplay(committed)) => {
                 if let Some(mut record) = self.invocations.remove(&invocation_id) {
-                    self.publish_terminal(&mut record, InvocationOutcome::Replayed(committed));
+                    if committed.rejection.is_some() {
+                        self.publish_terminal(
+                            &mut record,
+                            InvocationOutcome::Failed(InvocationFailure::InvalidOutput),
+                        );
+                    } else {
+                        self.publish_terminal(&mut record, InvocationOutcome::Replayed(committed));
+                    }
                 }
             }
             Ok(ReservedPluginInvocation::Reserved(_))
@@ -3074,23 +3111,54 @@ impl RuntimeActor {
         let Some(mut record) = self.invocations.remove(&invocation_id) else {
             return;
         };
-        if result.is_err() {
-            if matches!(record.phase, InvocationPhase::Completing(_)) {
-                self.publish_terminal(
-                    &mut record,
-                    InvocationOutcome::Failed(InvocationFailure::AuthorityRejected),
-                );
+        let committed = match result {
+            Ok(committed) => committed,
+            Err(_) => {
+                if matches!(record.phase, InvocationPhase::Completing(_)) {
+                    self.publish_terminal(
+                        &mut record,
+                        InvocationOutcome::Failed(InvocationFailure::AuthorityRejected),
+                    );
+                }
+                // A failed durable completion keeps its invocation row and exact
+                // operation identity for startup recovery. Do not publish the
+                // plugin-local terminal that failed to become durable.
+                self.enter_fenced();
+                self.begin_drain(DrainPurpose::Fenced).await;
+                return;
             }
-            // A failed durable completion keeps its invocation row and exact
-            // operation identity for startup recovery. Do not publish the
-            // plugin-local terminal that failed to become durable.
+        };
+        if !self.record_authority_is_current(&record) {
             self.enter_fenced();
             self.begin_drain(DrainPurpose::Fenced).await;
             return;
         }
-        if !self.record_authority_is_current(&record) {
-            self.enter_fenced();
-            self.begin_drain(DrainPurpose::Fenced).await;
+        if committed.rejection.is_some() {
+            if !matches!(record.phase, InvocationPhase::Completing(_)) {
+                self.publish_terminal(
+                    &mut record,
+                    InvocationOutcome::Failed(InvocationFailure::AuthorityRejected),
+                );
+                self.enter_fenced();
+                self.begin_drain(DrainPurpose::Fenced).await;
+                return;
+            }
+            self.publish_terminal(
+                &mut record,
+                InvocationOutcome::Failed(InvocationFailure::InvalidOutput),
+            );
+            let plugin_id = record.plugin_id.clone();
+            let package_generation = record.package_generation;
+            let activation_epoch = record.activation_epoch;
+            record.phase = InvocationPhase::RecordingFailure(None);
+            self.invocations.insert(invocation_id, record);
+            self.spawn_failure_record(
+                invocation_id,
+                plugin_id,
+                package_generation,
+                activation_epoch,
+                PluginAttemptFailureCause::InvalidOutput,
+            );
             return;
         }
         match std::mem::replace(&mut record.phase, InvocationPhase::Running) {
@@ -4166,6 +4234,14 @@ impl RuntimeActor {
             self.reject_stale_outcome(invocation_id);
             return;
         }
+        if record
+            .callback_state
+            .as_ref()
+            .is_some_and(PluginInvocationCallbackState::http_may_be_ambiguous)
+        {
+            self.record_unresolved_http_failure(invocation_id);
+            return;
+        }
         if validate_child_body(&frame, &body).is_err() {
             self.record_invocation_failure(
                 invocation_id,
@@ -4499,6 +4575,51 @@ impl RuntimeActor {
             invocation_id,
             InvocationFailure::Timeout,
             PluginAttemptFailureCause::Timeout,
+        );
+    }
+
+    fn record_unresolved_http_failure(&mut self, invocation_id: OperationId) {
+        let Some(mut record) = self.invocations.remove(&invocation_id) else {
+            return;
+        };
+        let valid = matches!(record.phase, InvocationPhase::Running)
+            && record.durable
+            && matches!(
+                record.kind,
+                InvocationKind::InvokeCommand | InvocationKind::HandleSurfaceAction
+            )
+            && record
+                .callback_state
+                .as_ref()
+                .is_some_and(PluginInvocationCallbackState::http_may_be_ambiguous);
+        if !valid {
+            self.invocations.insert(invocation_id, record);
+            self.begin_graph_fatal(None);
+            return;
+        }
+        if let Some(expected) = record.expected_callback.as_mut()
+            && let Some(task) = expected.task.take()
+        {
+            task.abort();
+        }
+        if let Some(node) = self.nodes.get_mut(&record.plugin_id) {
+            node.admitting = false;
+        }
+        self.publish_terminal(
+            &mut record,
+            InvocationOutcome::Failed(InvocationFailure::InvalidOutput),
+        );
+        let plugin_id = record.plugin_id.clone();
+        let package_generation = record.package_generation;
+        let activation_epoch = record.activation_epoch;
+        record.phase = InvocationPhase::RecordingFailure(None);
+        self.invocations.insert(invocation_id, record);
+        self.spawn_failure_record(
+            invocation_id,
+            plugin_id,
+            package_generation,
+            activation_epoch,
+            PluginAttemptFailureCause::InvalidOutput,
         );
     }
 

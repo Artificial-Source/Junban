@@ -447,6 +447,7 @@ pub struct PluginLogRecord {
 struct RetainedHttp {
     process_lost: bool,
     durable_transitioned: bool,
+    may_be_ambiguous: bool,
 }
 
 pub struct PluginInvocationCallbackState {
@@ -513,6 +514,13 @@ impl PluginInvocationCallbackState {
     }
 
     #[must_use]
+    pub(crate) fn http_may_be_ambiguous(&self) -> bool {
+        self.http
+            .as_ref()
+            .is_some_and(|retained| retained.may_be_ambiguous)
+    }
+
+    #[must_use]
     pub fn logs(&self) -> &[PluginLogRecord] {
         &self.logs
     }
@@ -520,6 +528,7 @@ impl PluginInvocationCallbackState {
     pub fn mark_process_lost(&mut self) {
         if let Some(retained) = &mut self.http {
             retained.process_lost = true;
+            retained.may_be_ambiguous |= retained.durable_transitioned;
         }
     }
 
@@ -778,6 +787,7 @@ impl PluginCallbackAdapter {
         state.http = Some(RetainedHttp {
             process_lost: false,
             durable_transitioned: false,
+            may_be_ambiguous: false,
         });
         let delivery_id = derive_delivery_id(&delivery);
         if self
@@ -821,6 +831,11 @@ impl PluginCallbackAdapter {
         if first_error.delivery != wit::DeliveryState::MayHaveBeenSent {
             return wit::WitResult::Err(first_error);
         }
+        state
+            .http
+            .as_mut()
+            .expect("HTTP callback retains consume-once state")
+            .may_be_ambiguous = true;
         if self
             .port
             .transition_invocation(http_transition(
@@ -856,6 +871,11 @@ impl PluginCallbackAdapter {
         {
             return wit::WitResult::Err(first_error);
         }
+        state
+            .http
+            .as_mut()
+            .expect("HTTP callback retains consume-once state")
+            .may_be_ambiguous = false;
         match self.http.send(scope, request, delivery_id).await {
             Ok(response) => wit::WitResult::Ok(response),
             Err(error) => {
@@ -866,6 +886,11 @@ impl PluginCallbackAdapter {
                     error
                 };
                 if retained_error.delivery == wit::DeliveryState::MayHaveBeenSent {
+                    state
+                        .http
+                        .as_mut()
+                        .expect("HTTP callback retains consume-once state")
+                        .may_be_ambiguous = true;
                     let _ = self
                         .port
                         .transition_invocation(http_transition(
@@ -3164,6 +3189,7 @@ mod tests {
         state.http = Some(RetainedHttp {
             process_lost: false,
             durable_transitioned: true,
+            may_be_ambiguous: false,
         });
         assert!(matches!(
             adapt_plugin_effect(&state, &create_task_outcome("Task"), None),

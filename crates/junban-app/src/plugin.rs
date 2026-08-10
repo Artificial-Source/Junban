@@ -22,7 +22,8 @@ use junban_plugin_sdk::{
 use serde::{Deserialize, Serialize};
 
 use crate::{
-    BulkAction, CommittedMutation, MarkPluginRetentionLossRequest, PluginOperatorRequestIdentity,
+    BulkAction, CommittedMutation, MarkPluginInvalidatingEventRequest,
+    MarkPluginRetentionLossRequest, PluginOperatorRequestIdentity,
     ProjectDraft, ProjectPatch, RepositoryError, RepositoryFuture, TagDraft, TagPatch, TaskPatch,
     TemporalContext, VerifiedPluginCursorSkipRequest,
 };
@@ -1343,10 +1344,7 @@ pub fn plan_authorized_plugin_invocation_commit(
 
 /// Select the exact first-party use case in the application layer. The selected
 /// closure later executes inside storage's caller-owned transaction.
-///
-/// P7-2D-DB-002 REMOVAL BLOCKER: the unwrapped planner remains only until the
-/// pre-integration supervisor uses `plan_authorized_plugin_invocation_commit`.
-pub fn plan_plugin_invocation_commit(
+fn plan_plugin_invocation_commit(
     request: CommitPluginInvocationRequest,
 ) -> Result<PlannedPluginInvocationCommit, RepositoryError> {
     let CommitPluginInvocationRequest {
@@ -1448,12 +1446,40 @@ pub enum PluginInvocationTerminalKind {
     DomainEffect,
 }
 
+/// Closed storage-boundary classification for an authorized guest effect that
+/// was rejected without committing any first-party mutation material.
+#[derive(Clone, Copy, Debug, Deserialize, Eq, PartialEq, Serialize)]
+#[serde(rename_all = "snake_case")]
+pub enum PluginGuestEffectRejection {
+    NotFound,
+    Conflict,
+    IdempotencyMismatch,
+    OperationTooLarge,
+    Validation,
+}
+
+impl PluginGuestEffectRejection {
+    #[must_use]
+    pub const fn from_repository_error(error: &RepositoryError) -> Option<Self> {
+        match error {
+            RepositoryError::NotFound => Some(Self::NotFound),
+            RepositoryError::Conflict => Some(Self::Conflict),
+            RepositoryError::IdempotencyMismatch => Some(Self::IdempotencyMismatch),
+            RepositoryError::OperationTooLarge => Some(Self::OperationTooLarge),
+            RepositoryError::Validation(_) => Some(Self::Validation),
+            RepositoryError::Storage(_) | RepositoryError::CatastrophicRestore { .. } => None,
+        }
+    }
+}
+
 #[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
 #[serde(deny_unknown_fields)]
 pub struct CommittedPluginInvocation {
     pub terminal_kind: PluginInvocationTerminalKind,
     pub mutation: Option<CommittedMutation>,
     pub cursor: Option<PluginEventCursor>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub rejection: Option<PluginGuestEffectRejection>,
     /// Set only when reservation explicitly replays a terminal receipt.
     #[serde(skip, default)]
     pub replayed: bool,
@@ -1773,6 +1799,16 @@ pub trait PluginRepository: Send + Sync + 'static {
     fn mark_plugin_retention_loss(
         &self,
         _request: MarkPluginRetentionLossRequest,
+        _now: Timestamp,
+    ) -> RepositoryFuture<'_, PluginEventCursor> {
+        plugin_unavailable()
+    }
+
+    /// Persist an exact live-manifest invalidating-event transition after
+    /// trusted composition matched the raw host session to its current actor.
+    fn mark_plugin_invalidating_event(
+        &self,
+        _request: MarkPluginInvalidatingEventRequest,
         _now: Timestamp,
     ) -> RepositoryFuture<'_, PluginEventCursor> {
         plugin_unavailable()

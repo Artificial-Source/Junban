@@ -1445,6 +1445,16 @@ impl PluginRepository for SqliteRepository {
         })
     }
 
+    fn mark_plugin_invalidating_event(
+        &self,
+        request: junban_app::MarkPluginInvalidatingEventRequest,
+        now: Timestamp,
+    ) -> RepositoryFuture<'_, junban_app::PluginEventCursor> {
+        self.plugin_request(move |connection, _| {
+            plugin_ops::mark_plugin_invalidating_event(connection, request, now)
+        })
+    }
+
     fn verified_skip_plugin_cursor(
         &self,
         request: junban_app::VerifiedPluginCursorSkipRequest,

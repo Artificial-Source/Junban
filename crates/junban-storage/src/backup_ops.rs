@@ -9,8 +9,8 @@ use std::{
 
 use jiff::{Timestamp, ToSpan};
 use junban_app::{
-    CommittedEvent, CommittedMutation, CommittedPluginInvocation, EventType,
-    PluginInvocationTerminalKind, RepositoryError, ResourceSnapshot, ResourceType, StagedFile,
+    CommittedEvent, CommittedMutation, CommittedPluginInvocation, EventType, RepositoryError,
+    ResourceSnapshot, ResourceType, StagedFile,
 };
 use junban_domain::{
     AI_APPROVAL_LIFETIME_SECS, AI_MEMORIES_PER_PROFILE_MAX, AI_MEMORY_BYTES_MAX,
@@ -1566,8 +1566,7 @@ fn validate_plugin_invocation_receipt(
     if serde_json::to_string(&response).map_err(storage_error)? != response_json
         || in_flight
         || response.cursor.is_some()
-        || (response.terminal_kind == PluginInvocationTerminalKind::DomainEffect)
-            != response.mutation.is_some()
+        || !crate::plugin_ops::plugin_invocation_terminal_shape_is_valid(&response)
     {
         return Err(RepositoryError::Storage(
             "plugin invocation terminal receipt is inconsistent".to_owned(),
@@ -1631,6 +1630,14 @@ fn validate_receipt_rows(tx: &Transaction<'_>, head: u64) -> Result<(), Reposito
                 == Some("mark_plugin_retention_loss")
             {
                 crate::plugin_ops::validate_plugin_retention_loss_receipt(
+                    operation_id,
+                    request_json,
+                    response_json,
+                )?;
+            } else if request.get("op").and_then(serde_json::Value::as_str)
+                == Some("mark_plugin_invalidating_event")
+            {
+                crate::plugin_ops::validate_plugin_invalidating_event_receipt(
                     operation_id,
                     request_json,
                     response_json,

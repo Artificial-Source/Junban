@@ -2489,6 +2489,18 @@ where
             .map_err(AppError::from)
     }
 
+    pub async fn mark_plugin_invalidating_event(
+        &self,
+        request: crate::MarkPluginInvalidatingEventRequest,
+        now: Timestamp,
+    ) -> Result<crate::PluginEventCursor, AppError> {
+        request.validate().map_err(AppError::from)?;
+        self.repository
+            .mark_plugin_invalidating_event(request, now)
+            .await
+            .map_err(AppError::from)
+    }
+
     pub async fn verified_skip_plugin_cursor(
         &self,
         request: crate::VerifiedPluginCursorSkipRequest,
@@ -2876,6 +2888,7 @@ mod tests {
                     terminal_kind: crate::PluginInvocationTerminalKind::DomainEffect,
                     mutation: Some(mutation),
                     cursor: None,
+                    rejection: None,
                     replayed: false,
                 }
             });

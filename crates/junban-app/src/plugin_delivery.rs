@@ -18,6 +18,11 @@ const INVOCATION_REQUEST_DOMAIN: &[u8] = b"junban.plugin.invocation-request.v2\0
 const RETAINED_EVENT_PAYLOAD_DOMAIN: &[u8] = b"junban.plugin.retained-event-payload.v1\0";
 const RETENTION_LOSS_HOST_SESSION_DOMAIN: &[u8] = b"junban.plugin.retention-loss-host-session.v1\0";
 const RETENTION_LOSS_REQUEST_DOMAIN: &[u8] = b"junban.plugin.retention-loss-request.v1\0";
+const INVALIDATING_EVENT_HOST_SESSION_DOMAIN: &[u8] =
+    b"junban.plugin.invalidating-event-host-session.v1\0";
+const INVALIDATING_EVENT_REQUEST_DOMAIN: &[u8] =
+    b"junban.plugin.invalidating-event-request.v1\0";
+const INVALIDATING_EVENT_REQUEST_TAG: u8 = 0x00;
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub enum PluginDeliveryMode {
@@ -478,6 +483,153 @@ fn validate_retention_loss_digest_fields(
         )
         || expected_cursor.revision > i64::MAX as u64
         || expected_cursor.resync_required
+    {
+        return Err(RepositoryError::Conflict);
+    }
+    Ok(())
+}
+
+/// Fresh runtime fence for one exact retained event that requires a new resync.
+#[derive(Clone, Eq, PartialEq)]
+pub struct PluginInvalidatingEventAuthority {
+    pub plugin_id: PluginId,
+    pub package_generation: u64,
+    pub activation_epoch: u64,
+    pub host_session_id: OperationId,
+    pub mode: PluginDeliveryMode,
+}
+
+impl std::fmt::Debug for PluginInvalidatingEventAuthority {
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        formatter
+            .debug_struct("PluginInvalidatingEventAuthority")
+            .field("plugin_id", &self.plugin_id)
+            .field("package_generation", &self.package_generation)
+            .field("activation_epoch", &self.activation_epoch)
+            .field("host_session_id", &"<redacted>")
+            .field("mode", &self.mode)
+            .finish()
+    }
+}
+
+impl PluginInvalidatingEventAuthority {
+    #[must_use]
+    pub fn host_session_sha256(&self) -> Sha256Digest {
+        let mut material = Vec::with_capacity(INVALIDATING_EVENT_HOST_SESSION_DOMAIN.len() + 16);
+        material.extend_from_slice(INVALIDATING_EVENT_HOST_SESSION_DOMAIN);
+        material.extend_from_slice(self.host_session_id.as_uuid().as_bytes());
+        Sha256Digest::of(&material)
+    }
+}
+
+/// One nonserialized request to restart at a fresh resync for the exact next
+/// retained event. Storage reloads and reclassifies that event before mutation.
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct MarkPluginInvalidatingEventRequest {
+    pub operation_id: OperationId,
+    pub authority: PluginInvalidatingEventAuthority,
+    pub expected_cursor: PluginCursorPosition,
+    pub source_revision: u64,
+    pub event_content_sha256: Sha256Digest,
+}
+
+impl MarkPluginInvalidatingEventRequest {
+    pub fn validate(&self) -> Result<(), RepositoryError> {
+        validate_invalidating_event_digest_fields(
+            self.authority.package_generation,
+            self.authority.activation_epoch,
+            self.authority.mode,
+            &self.expected_cursor,
+            self.source_revision,
+        )
+    }
+
+    pub fn digest(&self) -> Result<Sha256Digest, RepositoryError> {
+        plugin_invalidating_event_request_digest(
+            self.operation_id,
+            &self.authority.plugin_id,
+            self.authority.package_generation,
+            self.authority.activation_epoch,
+            &self.authority.host_session_sha256(),
+            self.authority.mode,
+            &self.expected_cursor,
+            self.source_revision,
+            &self.event_content_sha256,
+        )
+    }
+}
+
+/// Rebuild the complete invalidating-event digest from receipt-safe fields.
+pub fn plugin_invalidating_event_request_digest(
+    operation_id: OperationId,
+    plugin_id: &PluginId,
+    package_generation: u64,
+    activation_epoch: u64,
+    host_session_sha256: &Sha256Digest,
+    mode: PluginDeliveryMode,
+    expected_cursor: &PluginCursorPosition,
+    source_revision: u64,
+    event_content_sha256: &Sha256Digest,
+) -> Result<Sha256Digest, RepositoryError> {
+    validate_invalidating_event_digest_fields(
+        package_generation,
+        activation_epoch,
+        mode,
+        expected_cursor,
+        source_revision,
+    )?;
+    let mut material = Vec::with_capacity(
+        INVALIDATING_EVENT_REQUEST_DOMAIN.len()
+            + 1
+            + 16
+            + 8
+            + plugin_id.as_str().len()
+            + 8
+            + 8
+            + 32
+            + 1
+            + 8
+            + expected_cursor.event_epoch.len()
+            + 8
+            + 1
+            + 8
+            + 32,
+    );
+    material.extend_from_slice(INVALIDATING_EVENT_REQUEST_DOMAIN);
+    material.push(INVALIDATING_EVENT_REQUEST_TAG);
+    material.extend_from_slice(operation_id.as_uuid().as_bytes());
+    put_u64_text(&mut material, plugin_id.as_str())?;
+    material.extend_from_slice(&package_generation.to_be_bytes());
+    material.extend_from_slice(&activation_epoch.to_be_bytes());
+    material.extend_from_slice(&digest_bytes(host_session_sha256));
+    material.push(mode.tag());
+    put_u64_text(&mut material, &expected_cursor.event_epoch)?;
+    material.extend_from_slice(&expected_cursor.revision.to_be_bytes());
+    material.push(u8::from(expected_cursor.resync_required));
+    material.extend_from_slice(&source_revision.to_be_bytes());
+    material.extend_from_slice(&digest_bytes(event_content_sha256));
+    Ok(Sha256Digest::of(&material))
+}
+
+fn validate_invalidating_event_digest_fields(
+    package_generation: u64,
+    activation_epoch: u64,
+    mode: PluginDeliveryMode,
+    expected_cursor: &PluginCursorPosition,
+    source_revision: u64,
+) -> Result<(), RepositoryError> {
+    validate_retention_loss_digest_fields(
+        package_generation,
+        activation_epoch,
+        mode,
+        expected_cursor,
+    )?;
+    if source_revision == 0
+        || source_revision > i64::MAX as u64
+        || expected_cursor
+            .revision
+            .checked_add(1)
+            .is_none_or(|next| next != source_revision)
     {
         return Err(RepositoryError::Conflict);
     }

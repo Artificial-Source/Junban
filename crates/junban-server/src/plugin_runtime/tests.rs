@@ -355,6 +355,7 @@ struct ServiceCounts {
     completions: usize,
     failures: usize,
     retention_losses: usize,
+    invalidating_events: usize,
     verified_skips: usize,
 }
 
@@ -372,6 +373,7 @@ struct MockState {
     catch_up_events: Vec<CommittedEvent>,
     retention_lost: bool,
     retention_modes: Vec<junban_app::PluginDeliveryMode>,
+    invalidating_modes: Vec<junban_app::PluginDeliveryMode>,
     fail_activation: bool,
     fail_completion: bool,
     fail_fence: bool,
@@ -410,6 +412,7 @@ impl MockService {
                 catch_up_events: Vec::new(),
                 retention_lost: false,
                 retention_modes: Vec::new(),
+                invalidating_modes: Vec::new(),
                 fail_activation: false,
                 fail_completion: false,
                 fail_fence: false,
@@ -741,6 +744,38 @@ impl RuntimeServicePort for MockService {
         })
     }
 
+    fn mark_invalidating_event(
+        &self,
+        request: junban_app::MarkPluginInvalidatingEventRequest,
+        now: Timestamp,
+    ) -> ServiceFuture<PluginEventCursor> {
+        let plugin_id = request.authority.plugin_id.clone();
+        {
+            let mut state = self.lock();
+            state.counts.invalidating_events += 1;
+            state.invalidating_modes.push(request.authority.mode);
+            state.resync_required.insert(plugin_id.clone());
+            if let Some(plugin) = state
+                .profile
+                .plugins
+                .iter_mut()
+                .find(|plugin| plugin.plugin_id == plugin_id)
+            {
+                plugin.activation_epoch += 1;
+                plugin.runtime_state = PluginRuntimeState::Starting;
+            }
+        }
+        Box::pin(async move {
+            Ok(PluginEventCursor {
+                plugin_id,
+                event_epoch: request.expected_cursor.event_epoch,
+                revision: request.expected_cursor.revision,
+                resync_required: true,
+                updated_at: now,
+            })
+        })
+    }
+
     fn reserve_invocation(
         &self,
         request: AuthorizedReservePluginInvocationRequest,
@@ -797,6 +832,7 @@ impl RuntimeServicePort for MockService {
                     terminal_kind: PluginInvocationTerminalKind::ReadOnly,
                     mutation: None,
                     cursor: None,
+                    rejection: None,
                     replayed: false,
                 })
             };
@@ -834,6 +870,7 @@ impl RuntimeServicePort for MockService {
                     terminal_kind: PluginInvocationTerminalKind::ReadOnly,
                     mutation: None,
                     cursor,
+                    rejection: None,
                     replayed: false,
                 })
             };
@@ -1239,6 +1276,15 @@ impl RuntimeServicePort for SqliteRuntimeService {
     ) -> ServiceFuture<PluginEventCursor> {
         let service = self.service.clone();
         Box::pin(async move { service.mark_plugin_retention_loss(request, now).await })
+    }
+
+    fn mark_invalidating_event(
+        &self,
+        request: junban_app::MarkPluginInvalidatingEventRequest,
+        now: Timestamp,
+    ) -> ServiceFuture<PluginEventCursor> {
+        let service = self.service.clone();
+        Box::pin(async move { service.mark_plugin_invalidating_event(request, now).await })
     }
 
     fn reserve_invocation(
@@ -2780,8 +2826,11 @@ async fn active_event_worker_delivers_subscribed_work_and_skips_cursor_only_work
 
 #[cfg(unix)]
 #[tokio::test]
-async fn invalidating_starting_catch_up_never_advances_or_opens_admission() {
-    let fixture = HostFixture::new("catch-up-invalidating", json!({"loads": 1}));
+async fn invalidating_starting_catch_up_restarts_with_resync_before_admission() {
+    let fixture = HostFixture::new(
+        "catch-up-invalidating",
+        json!({"loads_by_launch": [1, 1], "shutdown": "graceful"}),
+    );
     let plugin = installed_plugin(
         "catch-up-invalidating",
         1,
@@ -2801,29 +2850,33 @@ async fn invalidating_starting_catch_up_never_advances_or_opens_admission() {
     let pids = Arc::new(Mutex::new(Vec::new()));
     let supervisor = PluginRuntimeSupervisor::for_test(
         service.clone(),
-        fixture.policy(vec![session(58)], Arc::clone(&pids)),
+        fixture.policy(vec![session(58), session(158)], Arc::clone(&pids)),
         Arc::new(DenyCallbacks),
     );
 
-    let result = supervisor.reconcile().await;
-    assert!(
-        matches!(
-            result,
-            Err(PluginRuntimeError::SessionLost | PluginRuntimeError::Fenced)
-        ),
-        "unexpected invalidating catch-up result: {result:?}"
-    );
-    service.wait_fence().await;
+    let snapshot = supervisor.reconcile().await.unwrap();
+    assert_eq!(snapshot.lifecycle, PluginRuntimeLifecycle::Running);
+    assert_eq!(snapshot.admitting_plugins, vec![plugin.plugin_id.clone()]);
     {
         let state = service.lock();
-        assert_eq!(state.cursor_revision, 0);
+        assert_eq!(state.cursor_revision, 1);
         assert_eq!(state.counts.reservations, 0);
         assert_eq!(state.counts.completions, 0);
         assert_eq!(state.counts.verified_skips, 0);
-        assert_eq!(state.counts.activations, 0);
-        assert_eq!(state.fence_requests.len(), 1);
+        assert_eq!(state.counts.invalidating_events, 1);
+        assert_eq!(
+            state.invalidating_modes,
+            [junban_app::PluginDeliveryMode::StartingCatchUp]
+        );
+        assert_eq!(state.counts.activations, 1);
+        assert!(state.fence_requests.is_empty());
+        assert_eq!(state.profile.plugins[0].activation_epoch, plugin.activation_epoch + 1);
+        assert_eq!(state.profile.plugins[0].runtime_state, PluginRuntimeState::Active);
     }
-    assert!(process_is_absent(pids.lock().unwrap()[0]));
+    supervisor.shutdown().await.unwrap();
+    let pids = pids.lock().unwrap();
+    assert_eq!(pids.len(), 2);
+    assert!(pids.iter().copied().all(process_is_absent));
 }
 
 #[cfg(unix)]

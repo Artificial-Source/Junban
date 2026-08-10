@@ -215,6 +215,10 @@ The private key remains in strict `ai-secrets.json`, is lazily created through t
 
 Focused recheck **APPROVED** `P7-PLAN-2D-005` and its UUID subsidiary at exact `dbf63a58f38df245b0b62337b29c644b8054984c`, authorizing ordinary app/storage query coding. This approval does not accept the callback composition, resync, the supervisor, Slice 2C, Slice 2D, or Wave 2.
 
+#### Retention-loss transition correction (`P7-RLC-001`–`003`)
+
+Composition mapping proved that terminal and verified-skip authority cannot represent a missing retained event. The focused correction in [`phase-7-wave-2-retention-loss-correction.md`](phase-7-wave-2-retention-loss-correction.md) adds only one receipt-backed, nonserializable `mark_plugin_retention_loss` transition. SQLite proves the real gap, closes admission, advances one activation epoch, carries every current-generation HTTP ambiguity, abandons only non-HTTP in-flight work, and starts fresh resync without a public contract or schema change. Exact operation/digest replay, actor-owned current-session matching, canonical receipt validation, and a refreshed whole-graph fatal-fence snapshot close `P7-RLC-001`–`003`. Focused planning recheck returned **APPROVED** for implementation planning only; callback composition and `P7-2D-DB-002` remain open.
+
 #### Required focused tests and recheck
 
 The exact-`073f00d` planning approval authorized implementation against this focused test plan, and the implementation must retain:

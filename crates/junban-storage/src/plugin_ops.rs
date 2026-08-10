@@ -2410,7 +2410,8 @@ fn apply_kv_replacement(
     list_plugin_kv(connection, plugin.plugin_id.clone())
 }
 
-pub(crate) fn patch_plugin_kv(
+#[cfg(test)]
+fn patch_plugin_kv_for_test(
     connection: &mut Connection,
     plugin_id: PluginId,
     package_generation: u64,
@@ -8971,7 +8972,7 @@ mod tests {
             .unwrap_err(),
             RepositoryError::Conflict
         );
-        let entries = patch_plugin_kv(
+        let entries = patch_plugin_kv_for_test(
             &mut connection,
             plugin.plugin_id.clone(),
             active.package_generation,
@@ -9182,7 +9183,7 @@ mod tests {
             delete: Vec::new(),
         };
         assert_eq!(
-            patch_plugin_kv(
+            patch_plugin_kv_for_test(
                 &mut connection,
                 current.plugin_id.clone(),
                 current.package_generation,

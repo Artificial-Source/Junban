@@ -1755,17 +1755,6 @@ pub trait PluginRepository: Send + Sync + 'static {
         plugin_unavailable()
     }
 
-    fn patch_plugin_kv(
-        &self,
-        _plugin_id: PluginId,
-        _package_generation: u64,
-        _activation_epoch: u64,
-        _patch: PluginKvPatch,
-        _now: Timestamp,
-    ) -> RepositoryFuture<'_, Vec<PluginKvEntry>> {
-        plugin_unavailable()
-    }
-
     fn get_plugin_cursor(&self, _plugin_id: PluginId) -> RepositoryFuture<'_, PluginEventCursor> {
         plugin_unavailable()
     }

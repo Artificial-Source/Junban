@@ -2407,20 +2407,6 @@ where
             .map_err(AppError::from)
     }
 
-    pub async fn patch_plugin_kv(
-        &self,
-        plugin_id: junban_plugin_sdk::PluginId,
-        package_generation: u64,
-        activation_epoch: u64,
-        patch: crate::PluginKvPatch,
-        now: Timestamp,
-    ) -> Result<Vec<crate::PluginKvEntry>, AppError> {
-        self.repository
-            .patch_plugin_kv(plugin_id, package_generation, activation_epoch, patch, now)
-            .await
-            .map_err(AppError::from)
-    }
-
     pub async fn get_plugin_cursor(
         &self,
         plugin_id: junban_plugin_sdk::PluginId,

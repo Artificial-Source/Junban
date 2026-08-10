@@ -1376,26 +1376,6 @@ impl PluginRepository for SqliteRepository {
         self.plugin_request(move |connection, _| plugin_ops::list_plugin_kv(connection, plugin_id))
     }
 
-    fn patch_plugin_kv(
-        &self,
-        plugin_id: junban_plugin_sdk::PluginId,
-        package_generation: u64,
-        activation_epoch: u64,
-        patch: junban_app::PluginKvPatch,
-        now: Timestamp,
-    ) -> RepositoryFuture<'_, Vec<junban_app::PluginKvEntry>> {
-        self.plugin_request(move |connection, _| {
-            plugin_ops::patch_plugin_kv(
-                connection,
-                plugin_id,
-                package_generation,
-                activation_epoch,
-                patch,
-                now,
-            )
-        })
-    }
-
     fn get_plugin_cursor(
         &self,
         plugin_id: junban_plugin_sdk::PluginId,

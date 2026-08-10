@@ -194,7 +194,10 @@ def measure_case(
     sequence: int,
 ) -> dict[str, Any]:
     group = parent / f"junban-slice2e-{os.getpid()}-{profile}-{scale}-{sequence}"
-    group.mkdir()
+    try:
+        group.mkdir()
+    except OSError as error:
+        fail(f"failed to create sample cgroup {group}: {error}")
     graph_size, support_plugins = graph_metadata(profile, scale)
     environment = os.environ.copy()
     environment.update(
@@ -224,7 +227,10 @@ def measure_case(
     )
     sample: dict[str, Any] | None = None
     try:
-        (group / "cgroup.procs").write_text(f"{process.pid}\n", encoding="ascii")
+        try:
+            (group / "cgroup.procs").write_text(f"{process.pid}\n", encoding="ascii")
+        except OSError as error:
+            fail(f"failed to move calibration process into {group}: {error}")
         started = time.monotonic_ns()
         os.kill(process.pid, signal.SIGCONT)
         assert process.stdout is not None

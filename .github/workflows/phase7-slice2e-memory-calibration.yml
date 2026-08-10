@@ -55,15 +55,26 @@ jobs:
           grep -qw memory "${parent}/cgroup.controllers"
           echo +memory | sudo tee "${parent}/cgroup.subtree_control" >/dev/null
           sudo chown "$(id -u):$(id -g)" \
-            "${parent}" "${parent}/cgroup.procs" "${parent}/cgroup.subtree_control"
+            "${parent}" "${parent}/cgroup.procs" "${parent}/cgroup.threads" \
+            "${parent}/cgroup.subtree_control"
 
       - name: Run five samples for baseline and each language/scale
         env:
           JUNBAN_SLICE2E_CGROUP_PARENT: ${{ env.JUNBAN_SLICE2E_CGROUP_PARENT }}
-        run: >-
-          python3 scripts/calibrate-phase7-slice2e-cgroup.py
-          --idle-host-confirmed
-          --output "${{ runner.temp }}/phase7-slice2e-cgroup-memory.json"
+        shell: bash
+        run: |
+          set -euo pipefail
+          export JUNBAN_SLICE2E_UID="$(id -u)"
+          export JUNBAN_SLICE2E_GID="$(id -g)"
+          sudo --preserve-env=PATH,HOME,GITHUB_SHA,GITHUB_RUN_ID,GITHUB_RUN_ATTEMPT,JUNBAN_SLICE2E_CGROUP_PARENT,JUNBAN_SLICE2E_UID,JUNBAN_SLICE2E_GID \
+            bash -c '
+              echo "$$" > "${JUNBAN_SLICE2E_CGROUP_PARENT}/cgroup.procs"
+              exec setpriv --reuid "${JUNBAN_SLICE2E_UID}" \
+                --regid "${JUNBAN_SLICE2E_GID}" --init-groups \
+                python3 scripts/calibrate-phase7-slice2e-cgroup.py \
+                --idle-host-confirmed \
+                --output "${{ runner.temp }}/phase7-slice2e-cgroup-memory.json"
+            '
 
       - name: Remove delegated cgroup parent
         if: always()

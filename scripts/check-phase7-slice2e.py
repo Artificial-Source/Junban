@@ -428,6 +428,10 @@ def audit_static() -> None:
         'grep -qw memory "${parent}/cgroup.controllers"',
         'echo +memory | sudo tee "${parent}/cgroup.subtree_control"',
         'sudo chown "$(id -u):$(id -g)"',
+        '"${parent}/cgroup.procs" "${parent}/cgroup.threads"',
+        'echo "$$" > "${JUNBAN_SLICE2E_CGROUP_PARENT}/cgroup.procs"',
+        'exec setpriv --reuid "${JUNBAN_SLICE2E_UID}"',
+        '--regid "${JUNBAN_SLICE2E_GID}" --init-groups',
         'find "${JUNBAN_SLICE2E_CGROUP_PARENT}" -mindepth 1 -maxdepth 1',
         'sudo rmdir "${JUNBAN_SLICE2E_CGROUP_PARENT}"',
         "--idle-host-confirmed",
@@ -447,9 +451,15 @@ def audit_static() -> None:
         r'sudo rmdir "\$\{JUNBAN_SLICE2E_CGROUP_PARENT\}"\s*\|\|\s*true', workflow
     ):
         fail("Slice 2E workflow retained leaf delegation or ignored cleanup")
+    entered_delegate = workflow.index(
+        'echo "$$" > "${JUNBAN_SLICE2E_CGROUP_PARENT}/cgroup.procs"'
+    )
+    dropped_privileges = workflow.index('exec setpriv --reuid "${JUNBAN_SLICE2E_UID}"')
     campaign_step = workflow.index("python3 scripts/calibrate-phase7-slice2e-cgroup.py")
     cleanup_step = workflow.index("- name: Remove delegated cgroup parent")
     upload_step = workflow.index("- name: Upload raw calibration JSON")
+    if not verified < entered_delegate < dropped_privileges < campaign_step:
+        fail("Slice 2E campaign is not entered as root and run as the unprivileged owner")
     if not campaign_step < cleanup_step < upload_step or "if: always()" not in workflow[upload_step:]:
         fail("Slice 2E workflow no longer preserves failed raw evidence after cleanup")
 

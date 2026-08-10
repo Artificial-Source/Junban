@@ -16,18 +16,18 @@ use junban_app::{
     CompletePluginActivationRequest, CompletePluginInvocationRequest, DeletePluginSettingRequest,
     DuePluginRetryRequest, EVENT_RETAIN_MAX_COUNT, EventType, FinalizePluginResyncOutcome,
     FinalizePluginResyncRequest, InstallPluginRequest, InstalledPlugin, InstalledPluginProfile,
-    OpenedPluginComponentSource, PLUGIN_DEPENDENTS_MAX, PLUGIN_FAILURE_BACKOFF_MAX_SECONDS,
-    PLUGIN_FAILURE_BACKOFF_START_SECONDS, PLUGIN_GRAPH_FENCE_ENTRIES_MAX,
-    PLUGIN_INVOCATION_MATERIAL_BYTES_MAX, PLUGIN_INVOCATION_MATERIAL_PER_PLUGIN_BYTES_MAX,
-    PLUGIN_INVOCATION_RETENTION_DAYS, PLUGIN_INVOCATIONS_MAX, PLUGIN_INVOCATIONS_PER_PLUGIN_MAX,
-    PLUGIN_KV_BYTES_MAX, PLUGIN_KV_KEYS_MAX, PLUGIN_KV_VALUE_BYTES_MAX,
-    PLUGIN_RESYNC_PAGE_BYTES_MAX, PLUGIN_RESYNC_PAGE_ITEMS_MAX, PLUGIN_SETTINGS_BYTES_MAX,
-    PLUGIN_SETTINGS_KEYS_MAX, PLUGINS_ENABLED_MAX, PLUGINS_INSTALLED_MAX,
-    PlannedPluginInvocationCommit, PluginComponentSelection, PluginCursorPosition,
-    PluginDeliveryMode, PluginEventCursor, PluginGrant, PluginGraphFenceCause,
-    PluginGraphFenceDisposition, PluginGraphFenceOutcome, PluginGraphFenceRequest,
-    PluginGraphFenceResult, PluginGraphRejection, PluginHookKind, PluginInstallSource,
-    PluginInvocation, PluginInvocationDelivery, PluginInvocationDeliveryCheck,
+    MarkPluginRetentionLossRequest, OpenedPluginComponentSource, PLUGIN_DEPENDENTS_MAX,
+    PLUGIN_FAILURE_BACKOFF_MAX_SECONDS, PLUGIN_FAILURE_BACKOFF_START_SECONDS,
+    PLUGIN_GRAPH_FENCE_ENTRIES_MAX, PLUGIN_INVOCATION_MATERIAL_BYTES_MAX,
+    PLUGIN_INVOCATION_MATERIAL_PER_PLUGIN_BYTES_MAX, PLUGIN_INVOCATION_RETENTION_DAYS,
+    PLUGIN_INVOCATIONS_MAX, PLUGIN_INVOCATIONS_PER_PLUGIN_MAX, PLUGIN_KV_BYTES_MAX,
+    PLUGIN_KV_KEYS_MAX, PLUGIN_KV_VALUE_BYTES_MAX, PLUGIN_RESYNC_PAGE_BYTES_MAX,
+    PLUGIN_RESYNC_PAGE_ITEMS_MAX, PLUGIN_SETTINGS_BYTES_MAX, PLUGIN_SETTINGS_KEYS_MAX,
+    PLUGINS_ENABLED_MAX, PLUGINS_INSTALLED_MAX, PlannedPluginInvocationCommit,
+    PluginComponentSelection, PluginCursorPosition, PluginDeliveryMode, PluginEventCursor,
+    PluginGrant, PluginGraphFenceCause, PluginGraphFenceDisposition, PluginGraphFenceOutcome,
+    PluginGraphFenceRequest, PluginGraphFenceResult, PluginGraphRejection, PluginHookKind,
+    PluginInstallSource, PluginInvocation, PluginInvocationDelivery, PluginInvocationDeliveryCheck,
     PluginInvocationState, PluginInvocationTerminalKind, PluginKvEntry, PluginKvPatch,
     PluginManifestEntry, PluginManifestEntrySelector, PluginMutationOutcome,
     PluginOperatorRequestIdentity, PluginPackageAdmission, PluginPackageReconciliation,
@@ -40,7 +40,7 @@ use junban_app::{
     TransitionPluginInvocationRequest, TrustPublisherRequest, VerifiedPluginCursorSkipRequest,
     classify_plugin_resync_event, plugin_committed_event_content_hash,
     plugin_invocation_request_hash, plugin_manifest_entry_authority, plugin_resync_request_hash,
-    plugin_retained_event_payload_hash,
+    plugin_retained_event_payload_hash, plugin_retention_loss_request_digest,
 };
 use junban_domain::{OperationId, ProjectId, TagId, TaskId};
 use junban_plugin_sdk::{
@@ -3136,6 +3136,429 @@ pub(crate) fn advance_plugin_cursor(
     Ok(cursor)
 }
 
+const RETENTION_LOSS_RECEIPT_OP: &str = "mark_plugin_retention_loss";
+
+#[derive(Clone, Copy, Debug, Deserialize, Eq, PartialEq, Serialize)]
+#[serde(rename_all = "snake_case")]
+enum PluginRetentionLossReceiptMode {
+    StartingCatchUp,
+    Active,
+}
+
+impl PluginRetentionLossReceiptMode {
+    const fn from_delivery(mode: PluginDeliveryMode) -> Option<Self> {
+        match mode {
+            PluginDeliveryMode::StartingCatchUp => Some(Self::StartingCatchUp),
+            PluginDeliveryMode::Active => Some(Self::Active),
+            PluginDeliveryMode::StartingResync => None,
+        }
+    }
+
+    const fn delivery(self) -> PluginDeliveryMode {
+        match self {
+            Self::StartingCatchUp => PluginDeliveryMode::StartingCatchUp,
+            Self::Active => PluginDeliveryMode::Active,
+        }
+    }
+
+    const fn runtime_state(self) -> PluginRuntimeState {
+        match self {
+            Self::StartingCatchUp => PluginRuntimeState::Starting,
+            Self::Active => PluginRuntimeState::Active,
+        }
+    }
+}
+
+#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
+#[serde(deny_unknown_fields)]
+struct PluginRetentionLossReceiptRequest {
+    op: String,
+    operation_id: OperationId,
+    plugin_id: PluginId,
+    package_generation: u64,
+    activation_epoch: u64,
+    host_session_sha256: Sha256Digest,
+    mode: PluginRetentionLossReceiptMode,
+    expected_cursor: PluginCursorPosition,
+    request_sha256: Sha256Digest,
+}
+
+#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
+#[serde(deny_unknown_fields)]
+struct PluginRetentionLossPostTransition {
+    plugin_id: PluginId,
+    package_generation: u64,
+    activation_epoch: u64,
+    desired_enabled: bool,
+    runtime_state: PluginRuntimeState,
+    failure_count: u32,
+    last_error_code: Option<String>,
+    next_retry_at: Option<Timestamp>,
+    updated_at: Timestamp,
+}
+
+impl PluginRetentionLossPostTransition {
+    fn from_plugin(plugin: &InstalledPlugin) -> Self {
+        Self {
+            plugin_id: plugin.plugin_id.clone(),
+            package_generation: plugin.package_generation,
+            activation_epoch: plugin.activation_epoch,
+            desired_enabled: plugin.desired_enabled,
+            runtime_state: plugin.runtime_state,
+            failure_count: plugin.failure_count,
+            last_error_code: plugin.last_error_code.clone(),
+            next_retry_at: plugin.next_retry_at,
+            updated_at: plugin.updated_at,
+        }
+    }
+
+    fn matches(&self, plugin: &InstalledPlugin) -> bool {
+        self == &Self::from_plugin(plugin)
+    }
+}
+
+#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
+#[serde(deny_unknown_fields)]
+pub(crate) struct PluginRetentionLossReceiptResponse {
+    op: String,
+    cursor: PluginEventCursor,
+    post_transition: PluginRetentionLossPostTransition,
+}
+
+fn retention_loss_receipt_error() -> RepositoryError {
+    RepositoryError::Storage("plugin retention-loss receipt authority mismatch".to_owned())
+}
+
+fn retention_loss_receipt_request(
+    request: &MarkPluginRetentionLossRequest,
+) -> Result<PluginRetentionLossReceiptRequest, RepositoryError> {
+    request.validate()?;
+    let mode = PluginRetentionLossReceiptMode::from_delivery(request.authority.mode)
+        .ok_or(RepositoryError::Conflict)?;
+    Ok(PluginRetentionLossReceiptRequest {
+        op: RETENTION_LOSS_RECEIPT_OP.to_owned(),
+        operation_id: request.operation_id,
+        plugin_id: request.authority.plugin_id.clone(),
+        package_generation: request.authority.package_generation,
+        activation_epoch: request.authority.activation_epoch,
+        host_session_sha256: request.authority.host_session_sha256(),
+        mode,
+        expected_cursor: request.expected_cursor.clone(),
+        request_sha256: request.digest()?,
+    })
+}
+
+fn parse_plugin_retention_loss_receipt_request(
+    operation_id: OperationId,
+    request_json: &str,
+) -> Result<PluginRetentionLossReceiptRequest, RepositoryError> {
+    let request: PluginRetentionLossReceiptRequest =
+        serde_json::from_str(request_json).map_err(|_| retention_loss_receipt_error())?;
+    let canonical_epoch = OperationId::parse(&request.expected_cursor.event_epoch)
+        .map_err(|_| retention_loss_receipt_error())?;
+    let digest = plugin_retention_loss_request_digest(
+        request.operation_id,
+        &request.plugin_id,
+        request.package_generation,
+        request.activation_epoch,
+        &request.host_session_sha256,
+        request.mode.delivery(),
+        &request.expected_cursor,
+    )
+    .map_err(|_| retention_loss_receipt_error())?;
+    if canonical_json(&request)? != request_json
+        || request.op != RETENTION_LOSS_RECEIPT_OP
+        || request.operation_id != operation_id
+        || canonical_epoch.to_string() != request.expected_cursor.event_epoch
+        || request.request_sha256 != digest
+    {
+        return Err(retention_loss_receipt_error());
+    }
+    Ok(request)
+}
+
+pub(crate) fn validate_plugin_retention_loss_receipt(
+    operation_id: OperationId,
+    request_json: &str,
+    response_json: &str,
+) -> Result<PluginRetentionLossReceiptResponse, RepositoryError> {
+    let request = parse_plugin_retention_loss_receipt_request(operation_id, request_json)?;
+    let response: PluginRetentionLossReceiptResponse =
+        serde_json::from_str(response_json).map_err(|_| retention_loss_receipt_error())?;
+    let expected_epoch = request
+        .activation_epoch
+        .checked_add(1)
+        .filter(|epoch| *epoch <= i64::MAX as u64)
+        .ok_or_else(retention_loss_receipt_error)?;
+    let post = &response.post_transition;
+    if canonical_json(&response)? != response_json
+        || response.op != RETENTION_LOSS_RECEIPT_OP
+        || response.cursor.plugin_id != request.plugin_id
+        || response.cursor.event_epoch != request.expected_cursor.event_epoch
+        || response.cursor.revision != request.expected_cursor.revision
+        || !response.cursor.resync_required
+        || post.plugin_id != request.plugin_id
+        || post.package_generation != request.package_generation
+        || post.activation_epoch != expected_epoch
+        || !post.desired_enabled
+        || post.runtime_state != PluginRuntimeState::Starting
+        || post.failure_count != 0
+        || post.last_error_code.is_some()
+        || post.next_retry_at.is_some()
+        || post.updated_at != response.cursor.updated_at
+    {
+        return Err(retention_loss_receipt_error());
+    }
+    Ok(response)
+}
+
+pub(crate) fn validate_plugin_retention_loss_receipts(
+    connection: &Connection,
+) -> Result<(), RepositoryError> {
+    let mut statement = connection
+        .prepare(
+            "SELECT operation_id, request_json, response_json
+             FROM operation_receipts ORDER BY operation_id",
+        )
+        .map_err(storage_error)?;
+    let rows = statement
+        .query_map([], |row| {
+            Ok((
+                row.get::<_, String>(0)?,
+                row.get::<_, String>(1)?,
+                row.get::<_, String>(2)?,
+            ))
+        })
+        .map_err(storage_error)?;
+    for row in rows {
+        let (operation_id, request_json, response_json) = row.map_err(storage_error)?;
+        let request_claims_shape = serde_json::from_str::<serde_json::Value>(&request_json)
+            .ok()
+            .and_then(|value| {
+                value
+                    .get("op")
+                    .and_then(serde_json::Value::as_str)
+                    .map(str::to_owned)
+            })
+            .as_deref()
+            == Some(RETENTION_LOSS_RECEIPT_OP)
+            || serde_json::from_str::<PluginRetentionLossReceiptRequest>(&request_json).is_ok();
+        let response_has_shape =
+            serde_json::from_str::<PluginRetentionLossReceiptResponse>(&response_json).is_ok();
+        if request_claims_shape || response_has_shape {
+            validate_plugin_retention_loss_receipt(
+                OperationId::parse(&operation_id).map_err(storage_error)?,
+                &request_json,
+                &response_json,
+            )?;
+        }
+    }
+    Ok(())
+}
+
+fn read_retention_loss_replay(
+    connection: &Connection,
+    request: &MarkPluginRetentionLossRequest,
+    request_json: &str,
+) -> Result<Option<PluginEventCursor>, RepositoryError> {
+    let receipt = connection
+        .query_row(
+            "SELECT request_json, response_json FROM operation_receipts WHERE operation_id = ?1",
+            [request.operation_id.to_string()],
+            |row| Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?)),
+        )
+        .optional()
+        .map_err(storage_error)?;
+    let Some((stored_request, stored_response)) = receipt else {
+        return Ok(None);
+    };
+    if stored_request != request_json {
+        return Err(RepositoryError::IdempotencyMismatch);
+    }
+    let response = validate_plugin_retention_loss_receipt(
+        request.operation_id,
+        &stored_request,
+        &stored_response,
+    )?;
+    let plugin = load_installed_plugin(connection, &request.authority.plugin_id).map_err(
+        |error| match error {
+            RepositoryError::NotFound => RepositoryError::Conflict,
+            error => error,
+        },
+    )?;
+    let cursor =
+        load_plugin_cursor(connection, &request.authority.plugin_id).map_err(
+            |error| match error {
+                RepositoryError::NotFound => RepositoryError::Conflict,
+                error => error,
+            },
+        )?;
+    if !response.post_transition.matches(&plugin) || cursor != response.cursor {
+        return Err(RepositoryError::Conflict);
+    }
+    Ok(Some(response.cursor))
+}
+
+pub(crate) fn mark_plugin_retention_loss(
+    connection: &mut Connection,
+    request: MarkPluginRetentionLossRequest,
+    now: Timestamp,
+) -> Result<PluginEventCursor, RepositoryError> {
+    request.validate()?;
+    let receipt_request = retention_loss_receipt_request(&request)?;
+    let request_json = canonical_json(&receipt_request)?;
+    let transaction = connection
+        .transaction_with_behavior(TransactionBehavior::Immediate)
+        .map_err(storage_error)?;
+    transaction
+        .execute_batch("PRAGMA defer_foreign_keys = ON")
+        .map_err(storage_error)?;
+    if let Some(cursor) = read_retention_loss_replay(&transaction, &request, &request_json)? {
+        transaction.commit().map_err(storage_error)?;
+        return Ok(cursor);
+    }
+
+    let plugin = load_installed_plugin(&transaction, &request.authority.plugin_id)?;
+    let cursor = load_plugin_cursor(&transaction, &request.authority.plugin_id)?;
+    let mode = PluginRetentionLossReceiptMode::from_delivery(request.authority.mode)
+        .ok_or(RepositoryError::Conflict)?;
+    if plugin.package_generation != request.authority.package_generation
+        || plugin.activation_epoch != request.authority.activation_epoch
+        || !plugin.desired_enabled
+        || plugin.runtime_state != mode.runtime_state()
+        || now < plugin.updated_at
+        || now < cursor.updated_at
+        || !cursor_matches(&cursor, &request.expected_cursor)
+        || cursor.resync_required
+    {
+        return Err(RepositoryError::Conflict);
+    }
+
+    let (event_epoch, head, earliest_retained): (String, i64, Option<i64>) = transaction
+        .query_row(
+            "SELECT event_epoch, global_revision, (SELECT MIN(revision) FROM events)
+             FROM app_state WHERE singleton = 1",
+            [],
+            |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?)),
+        )
+        .map_err(storage_error)?;
+    let head = parse_u64(head, "global revision")?;
+    let required_revision = cursor
+        .revision
+        .checked_add(1)
+        .filter(|revision| *revision <= i64::MAX as u64)
+        .ok_or(RepositoryError::Conflict)?;
+    let required_is_retained: bool = transaction
+        .query_row(
+            "SELECT EXISTS(SELECT 1 FROM events WHERE revision = ?1)",
+            [as_i64(required_revision, "required retained revision")?],
+            |row| row.get(0),
+        )
+        .map_err(storage_error)?;
+    let earliest_retained = earliest_retained
+        .map(|revision| parse_u64(revision, "earliest retained revision"))
+        .transpose()?;
+    if event_epoch != request.expected_cursor.event_epoch
+        || cursor.revision >= head
+        || required_is_retained
+        || earliest_retained.is_some_and(|earliest| earliest <= required_revision)
+    {
+        return Err(RepositoryError::Conflict);
+    }
+    let new_activation_epoch = plugin
+        .activation_epoch
+        .checked_add(1)
+        .filter(|epoch| *epoch <= i64::MAX as u64)
+        .ok_or(RepositoryError::Conflict)?;
+    let generation = as_i64(plugin.package_generation, "package generation")?;
+    let old_epoch = as_i64(plugin.activation_epoch, "activation epoch")?;
+    let new_epoch = as_i64(new_activation_epoch, "activation epoch")?;
+
+    let changed = transaction
+        .execute(
+            "UPDATE plugin_event_cursors
+             SET resync_required = 1, updated_at = ?5
+             WHERE plugin_id = ?1 AND event_epoch = ?2 AND revision = ?3
+               AND resync_required = ?4",
+            params![
+                plugin.plugin_id.as_str(),
+                request.expected_cursor.event_epoch,
+                as_i64(request.expected_cursor.revision, "cursor revision")?,
+                i64::from(request.expected_cursor.resync_required),
+                now.to_string(),
+            ],
+        )
+        .map_err(storage_error)?;
+    if changed != 1 {
+        return Err(RepositoryError::Conflict);
+    }
+    transaction
+        .execute(
+            "UPDATE plugin_invocations
+             SET state = 'ambiguous_http', error_code = 'http_ambiguous'
+             WHERE plugin_id = ?1 AND package_generation = ?2
+               AND activation_epoch = ?3 AND state = 'dispatching_http'",
+            params![plugin.plugin_id.as_str(), generation, old_epoch],
+        )
+        .map_err(storage_error)?;
+    transaction
+        .execute(
+            "UPDATE plugin_invocations SET activation_epoch = ?4
+             WHERE plugin_id = ?1 AND package_generation = ?2
+               AND activation_epoch = ?3 AND state = 'ambiguous_http'",
+            params![plugin.plugin_id.as_str(), generation, old_epoch, new_epoch],
+        )
+        .map_err(storage_error)?;
+    transaction
+        .execute(
+            "DELETE FROM plugin_invocations
+             WHERE plugin_id = ?1 AND package_generation = ?2
+               AND activation_epoch = ?3 AND state IN ('reserved', 'effect_committing')",
+            params![plugin.plugin_id.as_str(), generation, old_epoch],
+        )
+        .map_err(storage_error)?;
+    let changed = transaction
+        .execute(
+            "UPDATE plugins
+             SET activation_epoch = ?4, runtime_state = 'starting', failure_count = 0,
+                 last_error_code = NULL, next_retry_at = NULL, updated_at = ?5
+             WHERE plugin_id = ?1 AND package_generation = ?2
+               AND activation_epoch = ?3 AND desired_enabled = 1
+               AND runtime_state = ?6",
+            params![
+                plugin.plugin_id.as_str(),
+                generation,
+                old_epoch,
+                new_epoch,
+                now.to_string(),
+                runtime_state_name(mode.runtime_state()),
+            ],
+        )
+        .map_err(storage_error)?;
+    if changed != 1 {
+        return Err(RepositoryError::Conflict);
+    }
+
+    let committed_cursor = load_plugin_cursor(&transaction, &plugin.plugin_id)?;
+    let committed_plugin = load_installed_plugin(&transaction, &plugin.plugin_id)?;
+    let response = PluginRetentionLossReceiptResponse {
+        op: RETENTION_LOSS_RECEIPT_OP.to_owned(),
+        cursor: committed_cursor.clone(),
+        post_transition: PluginRetentionLossPostTransition::from_plugin(&committed_plugin),
+    };
+    let response_json = canonical_json(&response)?;
+    validate_plugin_retention_loss_receipt(request.operation_id, &request_json, &response_json)?;
+    write_receipt_response_in_transaction(
+        &transaction,
+        request.operation_id,
+        &request_json,
+        &response_json,
+        now,
+    )?;
+    transaction.commit().map_err(storage_error)?;
+    Ok(committed_cursor)
+}
+
 fn retained_event_is_invalidating(event: &CommittedEvent) -> bool {
     if !event.affected.task_ids.is_empty()
         || !event.affected.project_ids.is_empty()
@@ -6142,10 +6565,10 @@ mod tests {
     use ed25519_dalek::SigningKey;
     use junban_app::{
         CommitPluginInvocationRequest, FinalizePluginResyncRequest, PlannedPluginInvocationCommit,
-        PluginAttemptFailureCause, PluginComponentSelection, PluginDomainEffect,
-        PluginGraphFenceEntry, PluginPackageAuthority, PluginRepository, PluginResyncTranscript,
-        ProjectDraft, ProjectPatch, Repository, SetPluginSettingRequest, StagedFile,
-        plan_plugin_invocation_commit,
+        PluginAttemptFailureCause, PluginComponentSelection, PluginCursorRetentionLossAuthority,
+        PluginDomainEffect, PluginGraphFenceEntry, PluginPackageAuthority, PluginRepository,
+        PluginResyncTranscript, ProjectDraft, ProjectPatch, Repository, SetPluginSettingRequest,
+        StagedFile, plan_plugin_invocation_commit,
     };
     use junban_domain::{
         EntityName, HexColor, ProjectId, SortOrder, TagId, TagName, TaskDraft, TaskId, TaskTitle,
@@ -6166,6 +6589,7 @@ mod tests {
     use uuid::Uuid;
 
     use super::*;
+    use crate::tx::global_revision;
 
     const KEY_BYTES: [u8; 32] = [23; 32];
     static PACKAGE_MEMORY_TEST_ACTIVE: std::sync::atomic::AtomicBool =
@@ -6980,6 +7404,65 @@ mod tests {
             },
             classification,
         }
+    }
+
+    fn retention_test_invocation_request(
+        plugin: &InstalledPlugin,
+        operation_id: OperationId,
+        delivery_operation_id: OperationId,
+    ) -> ReservePluginInvocationRequest {
+        ReservePluginInvocationRequest {
+            operation_id,
+            plugin_id: plugin.plugin_id.clone(),
+            package_generation: plugin.package_generation,
+            activation_epoch: plugin.activation_epoch,
+            hook_kind: PluginHookKind::HandleEvent,
+            entry: PluginManifestEntry::Event {
+                event_id: PluginId::parse("task-created").unwrap(),
+            },
+            request_sha256: Sha256Digest::of(operation_id.as_uuid().as_bytes()),
+            delivery_operation_id,
+            resync_session: None,
+        }
+    }
+
+    fn retention_loss_request(
+        plugin: &InstalledPlugin,
+        cursor: &PluginEventCursor,
+        operation_id: OperationId,
+        host_session_id: OperationId,
+        mode: PluginDeliveryMode,
+    ) -> MarkPluginRetentionLossRequest {
+        MarkPluginRetentionLossRequest {
+            operation_id,
+            authority: PluginCursorRetentionLossAuthority {
+                plugin_id: plugin.plugin_id.clone(),
+                package_generation: plugin.package_generation,
+                activation_epoch: plugin.activation_epoch,
+                host_session_id,
+                mode,
+            },
+            expected_cursor: PluginCursorPosition::from(cursor),
+        }
+    }
+
+    fn create_retention_gap(
+        connection: &mut Connection,
+        cursor: &PluginEventCursor,
+        now: Timestamp,
+    ) -> u64 {
+        set_community_plugin_policy(connection, OperationId::new(), false, now).unwrap();
+        set_community_plugin_policy(connection, OperationId::new(), true, now).unwrap();
+        let head = global_revision(connection).unwrap();
+        assert!(head > cursor.revision + 1);
+        connection
+            .execute(
+                "DELETE FROM events WHERE revision < ?1",
+                [as_i64(head, "global revision").unwrap()],
+            )
+            .unwrap();
+        assert!(load_exact_retained_event(connection, cursor.revision + 1).is_err());
+        head
     }
 
     fn append_irrelevant_settings_event(connection: &mut Connection, now: Timestamp, accent: &str) {
@@ -10172,6 +10655,687 @@ mod tests {
             )
             .unwrap_err(),
             RepositoryError::Conflict
+        );
+    }
+
+    #[test]
+    fn retention_loss_authority_transitions_active_and_starting_catch_up_with_exact_replay() {
+        for mode in [
+            PluginDeliveryMode::Active,
+            PluginDeliveryMode::StartingCatchUp,
+        ] {
+            let profile = TestProfile::new();
+            let mut connection = profile.connection();
+            let store = PluginPackageStore::open(&profile.path).unwrap();
+            let now = Timestamp::constant(1_750_000_180, 0);
+            let transition_now = Timestamp::constant(1_750_000_181, 0);
+            let installed = install_fixture(&mut connection, &store, now);
+            let granted = grant_capabilities(
+                &mut connection,
+                &installed,
+                &[Capability::EventsSubscribe],
+                now,
+            );
+            let mut plugin = activate_plugin(&mut connection, &store, &granted, now);
+            if mode == PluginDeliveryMode::StartingCatchUp {
+                connection
+                    .execute(
+                        "UPDATE plugins
+                         SET runtime_state = 'starting', failure_count = 2,
+                             last_error_code = 'timeout'
+                         WHERE plugin_id = ?1",
+                        [plugin.plugin_id.as_str()],
+                    )
+                    .unwrap();
+                plugin = get_installed_plugin(&connection, plugin.plugin_id).unwrap();
+            }
+            let cursor = get_plugin_cursor(&connection, plugin.plugin_id.clone()).unwrap();
+            create_retention_gap(&mut connection, &cursor, now);
+            let head_before = global_revision(&connection).unwrap();
+            let receipt_count_before: i64 = connection
+                .query_row("SELECT COUNT(*) FROM operation_receipts", [], |row| {
+                    row.get(0)
+                })
+                .unwrap();
+            let operation_id = OperationId::new();
+            let host_session_id = OperationId::new();
+            let request =
+                retention_loss_request(&plugin, &cursor, operation_id, host_session_id, mode);
+
+            let collision_id = connection
+                .query_row::<String, _, _>(
+                    "SELECT operation_id FROM operation_receipts
+                     WHERE operation_id <> ?1 ORDER BY operation_id LIMIT 1",
+                    [operation_id.to_string()],
+                    |row| row.get(0),
+                )
+                .unwrap();
+            let mut collision = request.clone();
+            collision.operation_id = OperationId::parse(&collision_id).unwrap();
+            assert_eq!(
+                mark_plugin_retention_loss(&mut connection, collision, transition_now).unwrap_err(),
+                RepositoryError::IdempotencyMismatch
+            );
+
+            let committed =
+                mark_plugin_retention_loss(&mut connection, request.clone(), transition_now)
+                    .unwrap();
+            assert_eq!(committed.plugin_id, plugin.plugin_id);
+            assert_eq!(committed.event_epoch, cursor.event_epoch);
+            assert_eq!(committed.revision, cursor.revision);
+            assert!(committed.resync_required);
+            assert_eq!(global_revision(&connection).unwrap(), head_before);
+            assert_eq!(
+                connection
+                    .query_row::<i64, _, _>("SELECT COUNT(*) FROM operation_receipts", [], |row| {
+                        row.get(0)
+                    },)
+                    .unwrap(),
+                receipt_count_before + 1
+            );
+            let transitioned =
+                get_installed_plugin(&connection, committed.plugin_id.clone()).unwrap();
+            assert!(transitioned.desired_enabled);
+            assert_eq!(transitioned.runtime_state, PluginRuntimeState::Starting);
+            assert_eq!(transitioned.package_generation, plugin.package_generation);
+            assert_eq!(transitioned.activation_epoch, plugin.activation_epoch + 1);
+            assert_eq!(transitioned.failure_count, 0);
+            assert_eq!(transitioned.last_error_code, None);
+            assert_eq!(transitioned.next_retry_at, None);
+            assert_eq!(
+                mark_plugin_retention_loss(&mut connection, request.clone(), transition_now,)
+                    .unwrap(),
+                committed
+            );
+
+            let (receipt_request, receipt_response): (String, String) = connection
+                .query_row(
+                    "SELECT request_json, response_json FROM operation_receipts
+                     WHERE operation_id = ?1",
+                    [operation_id.to_string()],
+                    |row| Ok((row.get(0)?, row.get(1)?)),
+                )
+                .unwrap();
+            assert!(!receipt_request.contains(&host_session_id.to_string()));
+            assert!(!receipt_response.contains(&host_session_id.to_string()));
+            validate_plugin_retention_loss_receipt(
+                operation_id,
+                &receipt_request,
+                &receipt_response,
+            )
+            .unwrap();
+
+            let mut changed_session = request.clone();
+            changed_session.authority.host_session_id = OperationId::new();
+            let mut changed_mode = request.clone();
+            changed_mode.authority.mode = match mode {
+                PluginDeliveryMode::Active => PluginDeliveryMode::StartingCatchUp,
+                PluginDeliveryMode::StartingCatchUp => PluginDeliveryMode::Active,
+                PluginDeliveryMode::StartingResync => unreachable!(),
+            };
+            let mut changed_cursor = request.clone();
+            changed_cursor.expected_cursor.revision -= 1;
+            let mut changed_authority = request.clone();
+            changed_authority.authority.package_generation += 1;
+            for changed in [
+                changed_session,
+                changed_mode,
+                changed_cursor,
+                changed_authority,
+            ] {
+                assert_eq!(
+                    mark_plugin_retention_loss(&mut connection, changed, transition_now)
+                        .unwrap_err(),
+                    RepositoryError::IdempotencyMismatch
+                );
+            }
+            crate::plugin_validation::validate_plugin_authority(&connection).unwrap();
+
+            drop(connection);
+            drop(store);
+            let owner = crate::ProfileOwner::open(&profile.path).unwrap();
+            drop(owner);
+        }
+    }
+
+    #[test]
+    fn retention_loss_authority_rejects_no_gap_and_every_stale_sqlite_identity() {
+        let profile = TestProfile::new();
+        let mut connection = profile.connection();
+        let store = PluginPackageStore::open(&profile.path).unwrap();
+        let now = Timestamp::constant(1_800_000_182, 0);
+        let transition_now = Timestamp::constant(1_800_000_183, 0);
+        let installed = install_fixture(&mut connection, &store, now);
+        let granted = grant_capabilities(
+            &mut connection,
+            &installed,
+            &[Capability::EventsSubscribe],
+            now,
+        );
+        let plugin = activate_plugin(&mut connection, &store, &granted, now);
+        let cursor = get_plugin_cursor(&connection, plugin.plugin_id.clone()).unwrap();
+        let request = retention_loss_request(
+            &plugin,
+            &cursor,
+            OperationId::new(),
+            OperationId::new(),
+            PluginDeliveryMode::Active,
+        );
+        assert_eq!(
+            mark_plugin_retention_loss(&mut connection, request, transition_now).unwrap_err(),
+            RepositoryError::Conflict
+        );
+
+        create_retention_gap(&mut connection, &cursor, now);
+        let base = retention_loss_request(
+            &plugin,
+            &cursor,
+            OperationId::new(),
+            OperationId::new(),
+            PluginDeliveryMode::Active,
+        );
+        let mut wrong_generation = base.clone();
+        wrong_generation.operation_id = OperationId::new();
+        wrong_generation.authority.package_generation += 1;
+        let mut wrong_epoch = base.clone();
+        wrong_epoch.operation_id = OperationId::new();
+        wrong_epoch.authority.activation_epoch += 1;
+        let mut wrong_revision = base.clone();
+        wrong_revision.operation_id = OperationId::new();
+        wrong_revision.expected_cursor.revision -= 1;
+        let mut wrong_event_epoch = base.clone();
+        wrong_event_epoch.operation_id = OperationId::new();
+        wrong_event_epoch.expected_cursor.event_epoch = OperationId::new().to_string();
+        let mut wrong_mode = base.clone();
+        wrong_mode.operation_id = OperationId::new();
+        wrong_mode.authority.mode = PluginDeliveryMode::StartingCatchUp;
+        let mut already_resyncing = base.clone();
+        already_resyncing.operation_id = OperationId::new();
+        already_resyncing.expected_cursor.resync_required = true;
+        for stale in [
+            wrong_generation,
+            wrong_epoch,
+            wrong_revision,
+            wrong_event_epoch,
+            wrong_mode,
+            already_resyncing,
+        ] {
+            assert_eq!(
+                mark_plugin_retention_loss(&mut connection, stale, transition_now).unwrap_err(),
+                RepositoryError::Conflict
+            );
+        }
+
+        connection
+            .execute(
+                "UPDATE plugins SET activation_epoch = ?2 WHERE plugin_id = ?1",
+                params![plugin.plugin_id.as_str(), i64::MAX],
+            )
+            .unwrap();
+        let overflow_plugin = get_installed_plugin(&connection, plugin.plugin_id.clone()).unwrap();
+        let overflow = retention_loss_request(
+            &overflow_plugin,
+            &cursor,
+            OperationId::new(),
+            OperationId::new(),
+            PluginDeliveryMode::Active,
+        );
+        assert_eq!(
+            mark_plugin_retention_loss(&mut connection, overflow, transition_now).unwrap_err(),
+            RepositoryError::Conflict
+        );
+        connection
+            .execute(
+                "UPDATE plugins SET activation_epoch = ?2 WHERE plugin_id = ?1",
+                params![
+                    plugin.plugin_id.as_str(),
+                    as_i64(plugin.activation_epoch, "activation epoch").unwrap()
+                ],
+            )
+            .unwrap();
+
+        let committed =
+            mark_plugin_retention_loss(&mut connection, base.clone(), transition_now).unwrap();
+        let mut stale_after_transition = base.clone();
+        stale_after_transition.operation_id = OperationId::new();
+        assert_eq!(
+            mark_plugin_retention_loss(&mut connection, stale_after_transition, transition_now,)
+                .unwrap_err(),
+            RepositoryError::Conflict
+        );
+        let transitioned = get_installed_plugin(&connection, committed.plugin_id.clone()).unwrap();
+        set_plugin_desired_enabled(
+            &mut connection,
+            &store,
+            OperationId::new(),
+            transitioned.plugin_id,
+            false,
+            Timestamp::constant(1_800_000_184, 0),
+        )
+        .unwrap();
+        assert_eq!(
+            mark_plugin_retention_loss(&mut connection, base, transition_now).unwrap_err(),
+            RepositoryError::Conflict
+        );
+        validate_plugin_retention_loss_receipts(&connection).unwrap();
+    }
+
+    #[test]
+    fn retention_loss_carries_only_matching_http_ambiguity_identity_into_the_new_epoch() {
+        let profile = TestProfile::new();
+        let mut connection = profile.connection();
+        let store = PluginPackageStore::open(&profile.path).unwrap();
+        let now = Timestamp::constant(1_800_000_185, 0);
+        let transition_now = Timestamp::constant(1_800_000_186, 0);
+        let target =
+            install_named_fixture(&mut connection, &store, "retention-target", vec![], now);
+        let sibling =
+            install_named_fixture(&mut connection, &store, "retention-sibling", vec![], now);
+        let target = grant_capabilities(
+            &mut connection,
+            &target,
+            &[Capability::EventsSubscribe, Capability::Http],
+            now,
+        );
+        let sibling = grant_capabilities(
+            &mut connection,
+            &sibling,
+            &[Capability::EventsSubscribe, Capability::Http],
+            now,
+        );
+        let target = activate_plugin(&mut connection, &store, &target, now);
+        let sibling = activate_plugin(&mut connection, &store, &sibling, now);
+
+        let already_ambiguous_operation = OperationId::new();
+        let already_ambiguous_delivery = OperationId::new();
+        reserve_ambiguous(
+            &mut connection,
+            retention_test_invocation_request(
+                &target,
+                already_ambiguous_operation,
+                already_ambiguous_delivery,
+            ),
+            now,
+        );
+        let dispatching_operation = OperationId::new();
+        let dispatching_delivery = OperationId::new();
+        reserve_plugin_invocation(
+            &mut connection,
+            retention_test_invocation_request(&target, dispatching_operation, dispatching_delivery),
+            now,
+        )
+        .unwrap();
+        transition_plugin_invocation(
+            &mut connection,
+            TransitionPluginInvocationRequest {
+                operation_id: dispatching_operation,
+                plugin_id: target.plugin_id.clone(),
+                package_generation: target.package_generation,
+                activation_epoch: target.activation_epoch,
+                expected_state: PluginInvocationState::Reserved,
+                next_state: PluginInvocationState::DispatchingHttp,
+            },
+            now,
+        )
+        .unwrap();
+        let sibling_operation = OperationId::new();
+        let sibling_delivery = OperationId::new();
+        reserve_ambiguous(
+            &mut connection,
+            retention_test_invocation_request(&sibling, sibling_operation, sibling_delivery),
+            now,
+        );
+
+        let other_generation_operation = OperationId::new();
+        let other_generation_delivery = OperationId::new();
+        connection
+            .execute_batch("PRAGMA foreign_keys = OFF")
+            .unwrap();
+        connection
+            .execute(
+                "INSERT INTO plugin_invocations(
+                    operation_id, plugin_id, package_generation, activation_epoch,
+                    hook_kind, entry_id, request_hash, delivery_id, state, error_code,
+                    created_at, updated_at, retain_until
+                 )
+                 SELECT ?1, plugin_id, package_generation + 1, activation_epoch,
+                        hook_kind, entry_id, request_hash, ?2, state, error_code,
+                        created_at, updated_at, retain_until
+                 FROM plugin_invocations WHERE operation_id = ?3",
+                params![
+                    other_generation_operation.to_string(),
+                    other_generation_delivery.to_string(),
+                    already_ambiguous_operation.to_string(),
+                ],
+            )
+            .unwrap();
+        connection
+            .execute_batch("PRAGMA foreign_keys = ON")
+            .unwrap();
+
+        let cursor = get_plugin_cursor(&connection, target.plugin_id.clone()).unwrap();
+        create_retention_gap(&mut connection, &cursor, now);
+        let request = retention_loss_request(
+            &target,
+            &cursor,
+            OperationId::new(),
+            OperationId::new(),
+            PluginDeliveryMode::Active,
+        );
+        mark_plugin_retention_loss(&mut connection, request, transition_now).unwrap();
+        let transitioned = get_installed_plugin(&connection, target.plugin_id.clone()).unwrap();
+        for (operation_id, delivery_id) in [
+            (already_ambiguous_operation, already_ambiguous_delivery),
+            (dispatching_operation, dispatching_delivery),
+        ] {
+            let invocation = load_invocation(&connection, operation_id).unwrap();
+            assert_eq!(invocation.state, PluginInvocationState::AmbiguousHttp);
+            assert_eq!(invocation.error_code.as_deref(), Some("http_ambiguous"));
+            assert_eq!(invocation.activation_epoch, transitioned.activation_epoch);
+            assert_eq!(invocation.delivery_operation_id, delivery_id);
+        }
+        let untouched_sibling = load_invocation(&connection, sibling_operation).unwrap();
+        assert_eq!(untouched_sibling.plugin_id, sibling.plugin_id);
+        assert_eq!(untouched_sibling.activation_epoch, sibling.activation_epoch);
+        assert_eq!(untouched_sibling.delivery_operation_id, sibling_delivery);
+        let untouched_generation =
+            load_invocation(&connection, other_generation_operation).unwrap();
+        assert_eq!(
+            untouched_generation.package_generation,
+            target.package_generation + 1
+        );
+        assert_eq!(
+            untouched_generation.activation_epoch,
+            target.activation_epoch
+        );
+        assert_eq!(
+            untouched_generation.delivery_operation_id,
+            other_generation_delivery
+        );
+
+        connection
+            .execute(
+                "DELETE FROM plugin_invocations WHERE operation_id = ?1",
+                [other_generation_operation.to_string()],
+            )
+            .unwrap();
+        connection
+            .execute_batch("PRAGMA foreign_keys = ON")
+            .unwrap();
+        crate::plugin_validation::validate_plugin_authority(&connection).unwrap();
+    }
+
+    #[test]
+    fn retention_loss_deletes_only_matching_reserved_or_effect_committing_rows() {
+        for target_state in [
+            PluginInvocationState::Reserved,
+            PluginInvocationState::EffectCommitting,
+        ] {
+            let profile = TestProfile::new();
+            let mut connection = profile.connection();
+            let store = PluginPackageStore::open(&profile.path).unwrap();
+            let now = Timestamp::constant(1_800_000_187, 0);
+            let transition_now = Timestamp::constant(1_800_000_188, 0);
+            let target =
+                install_named_fixture(&mut connection, &store, "deletion-target", vec![], now);
+            let sibling =
+                install_named_fixture(&mut connection, &store, "deletion-sibling", vec![], now);
+            let target = grant_capabilities(
+                &mut connection,
+                &target,
+                &[Capability::EventsSubscribe],
+                now,
+            );
+            let sibling = grant_capabilities(
+                &mut connection,
+                &sibling,
+                &[Capability::EventsSubscribe],
+                now,
+            );
+            let target = activate_plugin(&mut connection, &store, &target, now);
+            let sibling = activate_plugin(&mut connection, &store, &sibling, now);
+            let target_operation = OperationId::new();
+            let target_delivery = OperationId::new();
+            reserve_plugin_invocation(
+                &mut connection,
+                retention_test_invocation_request(&target, target_operation, target_delivery),
+                now,
+            )
+            .unwrap();
+            if target_state == PluginInvocationState::EffectCommitting {
+                transition_plugin_invocation(
+                    &mut connection,
+                    TransitionPluginInvocationRequest {
+                        operation_id: target_operation,
+                        plugin_id: target.plugin_id.clone(),
+                        package_generation: target.package_generation,
+                        activation_epoch: target.activation_epoch,
+                        expected_state: PluginInvocationState::Reserved,
+                        next_state: PluginInvocationState::EffectCommitting,
+                    },
+                    now,
+                )
+                .unwrap();
+            }
+            let sibling_operation = OperationId::new();
+            let sibling_delivery = OperationId::new();
+            reserve_plugin_invocation(
+                &mut connection,
+                retention_test_invocation_request(&sibling, sibling_operation, sibling_delivery),
+                now,
+            )
+            .unwrap();
+            if target_state == PluginInvocationState::Reserved {
+                transition_plugin_invocation(
+                    &mut connection,
+                    TransitionPluginInvocationRequest {
+                        operation_id: sibling_operation,
+                        plugin_id: sibling.plugin_id.clone(),
+                        package_generation: sibling.package_generation,
+                        activation_epoch: sibling.activation_epoch,
+                        expected_state: PluginInvocationState::Reserved,
+                        next_state: PluginInvocationState::EffectCommitting,
+                    },
+                    now,
+                )
+                .unwrap();
+            }
+
+            let cursor = get_plugin_cursor(&connection, target.plugin_id.clone()).unwrap();
+            create_retention_gap(&mut connection, &cursor, now);
+            let request = retention_loss_request(
+                &target,
+                &cursor,
+                OperationId::new(),
+                OperationId::new(),
+                PluginDeliveryMode::Active,
+            );
+            let committed =
+                mark_plugin_retention_loss(&mut connection, request.clone(), transition_now)
+                    .unwrap();
+            assert_eq!(
+                load_invocation(&connection, target_operation).unwrap_err(),
+                RepositoryError::NotFound
+            );
+            let untouched = load_invocation(&connection, sibling_operation).unwrap();
+            assert_eq!(untouched.plugin_id, sibling.plugin_id);
+            assert_eq!(untouched.activation_epoch, sibling.activation_epoch);
+            assert_eq!(untouched.delivery_operation_id, sibling_delivery);
+            assert_eq!(
+                mark_plugin_retention_loss(&mut connection, request, transition_now).unwrap(),
+                committed
+            );
+            crate::plugin_validation::validate_plugin_authority(&connection).unwrap();
+        }
+    }
+
+    #[test]
+    fn retention_loss_receipts_reject_corruption_and_survive_reopen_backup_and_restore() {
+        let profile = TestProfile::new();
+        let mut connection = profile.connection();
+        let store = PluginPackageStore::open(&profile.path).unwrap();
+        let now = Timestamp::constant(1_750_000_189, 0);
+        let transition_now = Timestamp::constant(1_750_000_190, 0);
+        let installed = install_fixture(&mut connection, &store, now);
+        let granted = grant_capabilities(
+            &mut connection,
+            &installed,
+            &[Capability::EventsSubscribe],
+            now,
+        );
+        let plugin = activate_plugin(&mut connection, &store, &granted, now);
+        let cursor = get_plugin_cursor(&connection, plugin.plugin_id.clone()).unwrap();
+        create_retention_gap(&mut connection, &cursor, now);
+        let operation_id = OperationId::new();
+        let request = retention_loss_request(
+            &plugin,
+            &cursor,
+            operation_id,
+            OperationId::new(),
+            PluginDeliveryMode::Active,
+        );
+        mark_plugin_retention_loss(&mut connection, request, transition_now).unwrap();
+        let (canonical_request, canonical_response): (String, String) = connection
+            .query_row(
+                "SELECT request_json, response_json FROM operation_receipts
+                 WHERE operation_id = ?1",
+                [operation_id.to_string()],
+                |row| Ok((row.get(0)?, row.get(1)?)),
+            )
+            .unwrap();
+        let replace_receipt = |connection: &Connection, request_json: &str, response_json: &str| {
+            connection
+                .execute(
+                    "UPDATE operation_receipts
+                         SET request_json = ?2, response_json = ?3
+                         WHERE operation_id = ?1",
+                    params![operation_id.to_string(), request_json, response_json],
+                )
+                .unwrap();
+        };
+
+        for (request_json, response_json) in [
+            ("{".to_owned(), canonical_response.clone()),
+            (format!(" {canonical_request}"), canonical_response.clone()),
+            (canonical_request.clone(), "{".to_owned()),
+            (canonical_request.clone(), format!(" {canonical_response}")),
+        ] {
+            replace_receipt(&connection, &request_json, &response_json);
+            assert!(validate_plugin_retention_loss_receipts(&connection).is_err());
+            replace_receipt(&connection, &canonical_request, &canonical_response);
+        }
+
+        let mut digest_corruption: PluginRetentionLossReceiptRequest =
+            serde_json::from_str(&canonical_request).unwrap();
+        digest_corruption.request_sha256 = Sha256Digest::of(b"corrupted request digest");
+        let digest_corruption = canonical_json(&digest_corruption).unwrap();
+        replace_receipt(&connection, &digest_corruption, &canonical_response);
+        assert!(validate_plugin_retention_loss_receipts(&connection).is_err());
+        assert!(crate::backup_ops::create_backup(&connection, &profile.path).is_err());
+        drop(connection);
+        drop(store);
+        assert!(crate::ProfileOwner::open(&profile.path).is_err());
+        let repair = Connection::open(profile.path.join(crate::DATABASE_FILE)).unwrap();
+        replace_receipt(&repair, &canonical_request, &canonical_response);
+        drop(repair);
+        let mut connection = profile.connection();
+        let store = PluginPackageStore::open(&profile.path).unwrap();
+
+        let mut response_corruption: PluginRetentionLossReceiptResponse =
+            serde_json::from_str(&canonical_response).unwrap();
+        response_corruption.post_transition.activation_epoch += 1;
+        let response_corruption = canonical_json(&response_corruption).unwrap();
+        replace_receipt(&connection, &canonical_request, &response_corruption);
+        assert!(validate_plugin_retention_loss_receipts(&connection).is_err());
+        replace_receipt(&connection, &canonical_request, &canonical_response);
+        crate::plugin_validation::validate_plugin_authority(&connection).unwrap();
+
+        let backup = crate::backup_ops::create_backup(&connection, &profile.path).unwrap();
+        let corrupt_candidate = crate::backup_ops::prepare_restore(&profile.path, backup).unwrap();
+        {
+            let candidate_connection = Connection::open(corrupt_candidate.path()).unwrap();
+            candidate_connection
+                .execute(
+                    "UPDATE operation_receipts SET request_json = ?2
+                     WHERE operation_id = ?1",
+                    params![operation_id.to_string(), digest_corruption],
+                )
+                .unwrap();
+        }
+        assert!(
+            crate::backup_ops::restore_backup(&mut connection, &profile.path, corrupt_candidate,)
+                .is_err()
+        );
+        crate::plugin_validation::validate_plugin_authority(&connection).unwrap();
+
+        let backup = crate::backup_ops::create_backup(&connection, &profile.path).unwrap();
+        let candidate = crate::backup_ops::prepare_restore(&profile.path, backup).unwrap();
+        crate::backup_ops::restore_backup(&mut connection, &profile.path, candidate).unwrap();
+        crate::plugin_validation::validate_plugin_authority(&connection).unwrap();
+        crate::backup_ops::create_backup(&connection, &profile.path).unwrap();
+
+        drop(connection);
+        drop(store);
+        let owner = crate::ProfileOwner::open(&profile.path).unwrap();
+        drop(owner);
+    }
+
+    #[test]
+    fn retention_loss_same_operation_race_commits_one_epoch_and_replays_one_response() {
+        let profile = TestProfile::new();
+        let mut setup = profile.connection();
+        let store = PluginPackageStore::open(&profile.path).unwrap();
+        let now = Timestamp::constant(1_800_000_191, 0);
+        let transition_now = Timestamp::constant(1_800_000_192, 0);
+        let installed = install_fixture(&mut setup, &store, now);
+        let granted =
+            grant_capabilities(&mut setup, &installed, &[Capability::EventsSubscribe], now);
+        let plugin = activate_plugin(&mut setup, &store, &granted, now);
+        let cursor = get_plugin_cursor(&setup, plugin.plugin_id.clone()).unwrap();
+        create_retention_gap(&mut setup, &cursor, now);
+        let head = global_revision(&setup).unwrap();
+        let operation_id = OperationId::new();
+        let request = retention_loss_request(
+            &plugin,
+            &cursor,
+            operation_id,
+            OperationId::new(),
+            PluginDeliveryMode::Active,
+        );
+        drop(setup);
+        drop(store);
+
+        let first_connection = profile.connection();
+        let second_connection = profile.connection();
+        let barrier = std::sync::Arc::new(std::sync::Barrier::new(3));
+        let run = |mut connection: Connection,
+                   request: MarkPluginRetentionLossRequest,
+                   barrier: std::sync::Arc<std::sync::Barrier>| {
+            std::thread::spawn(move || {
+                barrier.wait();
+                mark_plugin_retention_loss(&mut connection, request, transition_now)
+            })
+        };
+        let first = run(first_connection, request.clone(), barrier.clone());
+        let second = run(second_connection, request, barrier.clone());
+        barrier.wait();
+        let first = first.join().unwrap().unwrap();
+        let second = second.join().unwrap().unwrap();
+        assert_eq!(first, second);
+
+        let connection = profile.connection();
+        let transitioned = get_installed_plugin(&connection, plugin.plugin_id).unwrap();
+        assert_eq!(transitioned.activation_epoch, plugin.activation_epoch + 1);
+        assert_eq!(global_revision(&connection).unwrap(), head);
+        assert_eq!(
+            connection
+                .query_row::<i64, _, _>(
+                    "SELECT COUNT(*) FROM operation_receipts WHERE operation_id = ?1",
+                    [operation_id.to_string()],
+                    |row| row.get(0),
+                )
+                .unwrap(),
+            1
         );
     }
 

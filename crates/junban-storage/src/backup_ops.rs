@@ -1627,6 +1627,14 @@ fn validate_receipt_rows(tx: &Transaction<'_>, head: u64) -> Result<(), Reposito
                     response_json,
                 )?;
                 validate_receipt_mutation(tx, &outcome.mutation, head, Some(operation_id))?;
+            } else if request.get("op").and_then(serde_json::Value::as_str)
+                == Some("mark_plugin_retention_loss")
+            {
+                crate::plugin_ops::validate_plugin_retention_loss_receipt(
+                    operation_id,
+                    request_json,
+                    response_json,
+                )?;
             } else {
                 match serde_json::from_str::<CommittedMutation>(response_json) {
                     Ok(response) => {

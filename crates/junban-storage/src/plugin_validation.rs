@@ -101,6 +101,7 @@ pub(crate) fn validate_plugin_authority(connection: &Connection) -> Result<(), R
     validate_cursors(connection, &plugins)?;
     validate_invocations(connection, &plugins)?;
     crate::plugin_ops::validate_plugin_invocation_receipts(connection)?;
+    crate::plugin_ops::validate_plugin_retention_loss_receipts(connection)?;
     Ok(())
 }
 

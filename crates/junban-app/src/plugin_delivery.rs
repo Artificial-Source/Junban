@@ -16,6 +16,8 @@ use crate::{
 const DELIVERY_AUTHORITY_DOMAIN: &[u8] = b"junban.plugin.delivery-authority.v1\0";
 const INVOCATION_REQUEST_DOMAIN: &[u8] = b"junban.plugin.invocation-request.v2\0";
 const RETAINED_EVENT_PAYLOAD_DOMAIN: &[u8] = b"junban.plugin.retained-event-payload.v1\0";
+const RETENTION_LOSS_HOST_SESSION_DOMAIN: &[u8] = b"junban.plugin.retention-loss-host-session.v1\0";
+const RETENTION_LOSS_REQUEST_DOMAIN: &[u8] = b"junban.plugin.retention-loss-request.v1\0";
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub enum PluginDeliveryMode {
@@ -345,6 +347,143 @@ impl PluginOperatorRequestIdentity {
     }
 }
 
+/// Fresh runtime fence for one SQLite-proven retained-event gap.
+///
+/// The raw host-session UUID is intentionally nonserializable and is redacted
+/// from debug output. Trusted server composition must still exact-match it to
+/// the actor's current session before calling the application service; SQLite
+/// cannot authenticate which process currently owns that runtime identity.
+#[derive(Clone, Eq, PartialEq)]
+pub struct PluginCursorRetentionLossAuthority {
+    pub plugin_id: PluginId,
+    pub package_generation: u64,
+    pub activation_epoch: u64,
+    pub host_session_id: OperationId,
+    pub mode: PluginDeliveryMode,
+}
+
+impl std::fmt::Debug for PluginCursorRetentionLossAuthority {
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        formatter
+            .debug_struct("PluginCursorRetentionLossAuthority")
+            .field("plugin_id", &self.plugin_id)
+            .field("package_generation", &self.package_generation)
+            .field("activation_epoch", &self.activation_epoch)
+            .field("host_session_id", &"<redacted>")
+            .field("mode", &self.mode)
+            .finish()
+    }
+}
+
+impl PluginCursorRetentionLossAuthority {
+    #[must_use]
+    pub fn host_session_sha256(&self) -> Sha256Digest {
+        let mut material = Vec::with_capacity(RETENTION_LOSS_HOST_SESSION_DOMAIN.len() + 16);
+        material.extend_from_slice(RETENTION_LOSS_HOST_SESSION_DOMAIN);
+        material.extend_from_slice(self.host_session_id.as_uuid().as_bytes());
+        Sha256Digest::of(&material)
+    }
+}
+
+/// One nonserialized request to enter a fresh resync after actual retention loss.
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct MarkPluginRetentionLossRequest {
+    pub operation_id: OperationId,
+    pub authority: PluginCursorRetentionLossAuthority,
+    pub expected_cursor: PluginCursorPosition,
+}
+
+impl MarkPluginRetentionLossRequest {
+    pub fn validate(&self) -> Result<(), RepositoryError> {
+        validate_retention_loss_digest_fields(
+            self.authority.package_generation,
+            self.authority.activation_epoch,
+            self.authority.mode,
+            &self.expected_cursor,
+        )
+    }
+
+    pub fn digest(&self) -> Result<Sha256Digest, RepositoryError> {
+        plugin_retention_loss_request_digest(
+            self.operation_id,
+            &self.authority.plugin_id,
+            self.authority.package_generation,
+            self.authority.activation_epoch,
+            &self.authority.host_session_sha256(),
+            self.authority.mode,
+            &self.expected_cursor,
+        )
+    }
+}
+
+/// Rebuild the complete retention-loss request digest from receipt-safe fields.
+///
+/// Storage uses this to validate historical receipts without recovering or
+/// persisting the raw process-local host-session UUID.
+pub fn plugin_retention_loss_request_digest(
+    operation_id: OperationId,
+    plugin_id: &PluginId,
+    package_generation: u64,
+    activation_epoch: u64,
+    host_session_sha256: &Sha256Digest,
+    mode: PluginDeliveryMode,
+    expected_cursor: &PluginCursorPosition,
+) -> Result<Sha256Digest, RepositoryError> {
+    validate_retention_loss_digest_fields(
+        package_generation,
+        activation_epoch,
+        mode,
+        expected_cursor,
+    )?;
+    let mut material = Vec::with_capacity(
+        RETENTION_LOSS_REQUEST_DOMAIN.len()
+            + 16
+            + 8
+            + plugin_id.as_str().len()
+            + 8
+            + 8
+            + 32
+            + 1
+            + 8
+            + expected_cursor.event_epoch.len()
+            + 8
+            + 1,
+    );
+    material.extend_from_slice(RETENTION_LOSS_REQUEST_DOMAIN);
+    material.extend_from_slice(operation_id.as_uuid().as_bytes());
+    put_u64_text(&mut material, plugin_id.as_str())?;
+    material.extend_from_slice(&package_generation.to_be_bytes());
+    material.extend_from_slice(&activation_epoch.to_be_bytes());
+    material.extend_from_slice(&digest_bytes(host_session_sha256));
+    material.push(mode.tag());
+    put_u64_text(&mut material, &expected_cursor.event_epoch)?;
+    material.extend_from_slice(&expected_cursor.revision.to_be_bytes());
+    material.push(u8::from(expected_cursor.resync_required));
+    Ok(Sha256Digest::of(&material))
+}
+
+fn validate_retention_loss_digest_fields(
+    package_generation: u64,
+    activation_epoch: u64,
+    mode: PluginDeliveryMode,
+    expected_cursor: &PluginCursorPosition,
+) -> Result<(), RepositoryError> {
+    if package_generation == 0
+        || package_generation > i64::MAX as u64
+        || activation_epoch == 0
+        || activation_epoch > i64::MAX as u64
+        || !matches!(
+            mode,
+            PluginDeliveryMode::StartingCatchUp | PluginDeliveryMode::Active
+        )
+        || expected_cursor.revision > i64::MAX as u64
+        || expected_cursor.resync_required
+    {
+        return Err(RepositoryError::Conflict);
+    }
+    Ok(())
+}
+
 /// Runtime classification presented to the verified cursor-only skip path.
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub enum PluginRetainedEventClassification {
@@ -523,6 +662,93 @@ mod tests {
             invocation_id: operation("70000000-0000-7000-8000-000000000002"),
             payload_sha256: Sha256Digest::of(b"payload"),
             mode,
+        }
+    }
+
+    fn retention_loss_request() -> MarkPluginRetentionLossRequest {
+        MarkPluginRetentionLossRequest {
+            operation_id: operation("70000000-0000-7000-8000-000000000010"),
+            authority: PluginCursorRetentionLossAuthority {
+                plugin_id: PluginId::parse("retention-test").unwrap(),
+                package_generation: 7,
+                activation_epoch: 11,
+                host_session_id: operation("70000000-0000-7000-8000-000000000011"),
+                mode: PluginDeliveryMode::Active,
+            },
+            expected_cursor: PluginCursorPosition {
+                event_epoch: "70000000-0000-7000-8000-000000000012".to_owned(),
+                revision: 19,
+                resync_required: false,
+            },
+        }
+    }
+
+    #[test]
+    fn retention_loss_authority_validates_and_redacts_the_runtime_session() {
+        let request = retention_loss_request();
+        request.validate().unwrap();
+        assert!(!format!("{request:?}").contains(&request.authority.host_session_id.to_string()));
+
+        let mut invalid = request.clone();
+        invalid.authority.mode = PluginDeliveryMode::StartingResync;
+        assert_eq!(invalid.validate().unwrap_err(), RepositoryError::Conflict);
+        let mut invalid = request.clone();
+        invalid.authority.package_generation = 0;
+        assert_eq!(invalid.validate().unwrap_err(), RepositoryError::Conflict);
+        let mut invalid = request.clone();
+        invalid.authority.activation_epoch = 0;
+        assert_eq!(invalid.validate().unwrap_err(), RepositoryError::Conflict);
+        let mut invalid = request.clone();
+        invalid.authority.activation_epoch = i64::MAX as u64 + 1;
+        assert_eq!(invalid.validate().unwrap_err(), RepositoryError::Conflict);
+        let mut invalid = request.clone();
+        invalid.expected_cursor.revision = i64::MAX as u64 + 1;
+        assert_eq!(invalid.validate().unwrap_err(), RepositoryError::Conflict);
+        let mut invalid = request.clone();
+        invalid.expected_cursor.resync_required = true;
+        assert_eq!(invalid.validate().unwrap_err(), RepositoryError::Conflict);
+    }
+
+    #[test]
+    fn retention_loss_request_digest_binds_every_field_with_frozen_framing() {
+        let request = retention_loss_request();
+        assert_eq!(
+            request.authority.host_session_sha256().as_str(),
+            "862073604fa26db438db93d79f6bfeb711785b194b1364c325a8043d04c581ff"
+        );
+        let digest = request.digest().unwrap();
+        assert_eq!(
+            digest.as_str(),
+            "71668b1818798631b3ec7c5f219b83c745ce437c27ffcf1010dee4c28007c2a1"
+        );
+        assert_eq!(
+            plugin_retention_loss_request_digest(
+                request.operation_id,
+                &request.authority.plugin_id,
+                request.authority.package_generation,
+                request.authority.activation_epoch,
+                &request.authority.host_session_sha256(),
+                request.authority.mode,
+                &request.expected_cursor,
+            )
+            .unwrap(),
+            digest
+        );
+
+        let mutations: [fn(&mut MarkPluginRetentionLossRequest); 8] = [
+            |value| value.operation_id = OperationId::new(),
+            |value| value.authority.plugin_id = PluginId::parse("changed").unwrap(),
+            |value| value.authority.package_generation += 1,
+            |value| value.authority.activation_epoch += 1,
+            |value| value.authority.host_session_id = OperationId::new(),
+            |value| value.authority.mode = PluginDeliveryMode::StartingCatchUp,
+            |value| value.expected_cursor.event_epoch.push_str("-changed"),
+            |value| value.expected_cursor.revision += 1,
+        ];
+        for mutate in mutations {
+            let mut changed = request.clone();
+            mutate(&mut changed);
+            assert_ne!(changed.digest().unwrap(), digest);
         }
     }
 

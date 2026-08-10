@@ -1445,6 +1445,16 @@ impl PluginRepository for SqliteRepository {
         })
     }
 
+    fn mark_plugin_retention_loss(
+        &self,
+        request: junban_app::MarkPluginRetentionLossRequest,
+        now: Timestamp,
+    ) -> RepositoryFuture<'_, junban_app::PluginEventCursor> {
+        self.plugin_request(move |connection, _| {
+            plugin_ops::mark_plugin_retention_loss(connection, request, now)
+        })
+    }
+
     fn verified_skip_plugin_cursor(
         &self,
         request: junban_app::VerifiedPluginCursorSkipRequest,

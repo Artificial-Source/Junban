@@ -22,9 +22,9 @@ use junban_plugin_sdk::{
 use serde::{Deserialize, Serialize};
 
 use crate::{
-    BulkAction, CommittedMutation, PluginOperatorRequestIdentity, ProjectDraft, ProjectPatch,
-    RepositoryError, RepositoryFuture, TagDraft, TagPatch, TaskPatch, TemporalContext,
-    VerifiedPluginCursorSkipRequest,
+    BulkAction, CommittedMutation, MarkPluginRetentionLossRequest, PluginOperatorRequestIdentity,
+    ProjectDraft, ProjectPatch, RepositoryError, RepositoryFuture, TagDraft, TagPatch, TaskPatch,
+    TemporalContext, VerifiedPluginCursorSkipRequest,
 };
 
 pub const PLUGINS_INSTALLED_MAX: usize = 64;
@@ -1774,6 +1774,16 @@ pub trait PluginRepository: Send + Sync + 'static {
     fn advance_plugin_cursor(
         &self,
         _request: AdvancePluginCursorRequest,
+        _now: Timestamp,
+    ) -> RepositoryFuture<'_, PluginEventCursor> {
+        plugin_unavailable()
+    }
+
+    /// Persist SQLite-proven retention loss after trusted composition has
+    /// matched the request's raw host session to its current runtime actor.
+    fn mark_plugin_retention_loss(
+        &self,
+        _request: MarkPluginRetentionLossRequest,
         _now: Timestamp,
     ) -> RepositoryFuture<'_, PluginEventCursor> {
         plugin_unavailable()

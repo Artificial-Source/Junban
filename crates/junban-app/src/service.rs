@@ -2486,6 +2486,20 @@ where
             .map_err(AppError::from)
     }
 
+    /// Mark a SQLite-proven retained-event gap after trusted server
+    /// composition has exact-matched the request's runtime-local host session.
+    pub async fn mark_plugin_retention_loss(
+        &self,
+        request: crate::MarkPluginRetentionLossRequest,
+        now: Timestamp,
+    ) -> Result<crate::PluginEventCursor, AppError> {
+        request.validate().map_err(AppError::from)?;
+        self.repository
+            .mark_plugin_retention_loss(request, now)
+            .await
+            .map_err(AppError::from)
+    }
+
     pub async fn verified_skip_plugin_cursor(
         &self,
         request: crate::VerifiedPluginCursorSkipRequest,

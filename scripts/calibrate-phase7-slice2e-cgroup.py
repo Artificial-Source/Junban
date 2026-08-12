@@ -13,6 +13,7 @@ import signal
 import socket
 import subprocess
 import sys
+import threading
 import time
 from decimal import Decimal
 from pathlib import Path
@@ -305,6 +306,8 @@ def measure_case(
         bufsize=1,
     )
     sample: dict[str, Any] | None = None
+    peak_stop: threading.Event | None = None
+    peak_thread: threading.Thread | None = None
     try:
         try:
             if privileged_cgroup_migration:
@@ -314,6 +317,21 @@ def measure_case(
         except (OSError, subprocess.CalledProcessError) as error:
             fail(f"failed to move calibration process into {group}: {error}")
         started = time.monotonic_ns()
+        peak_stop = threading.Event()
+        peak_values: list[int] = []
+        peak_errors: list[str] = []
+
+        def sample_current() -> None:
+            while not peak_stop.is_set():
+                try:
+                    peak_values.append(read_u64(group / "memory.current"))
+                except (CalibrationError, OSError) as error:
+                    peak_errors.append(str(error))
+                    return
+                peak_stop.wait(0.01)
+
+        peak_thread = threading.Thread(target=sample_current, daemon=True)
+        peak_thread.start()
         os.kill(process.pid, signal.SIGCONT)
         if privileged_cgroup_migration:
             try:
@@ -372,11 +390,13 @@ def measure_case(
         for line in process.stdout:
             sys.stdout.write(line)
         return_code = process.wait()
+        peak_stop.set()
+        peak_thread.join(timeout=2)
+        if peak_thread.is_alive() or peak_errors or not peak_values:
+            fail(peak_errors[0] if peak_errors else "calibration peak monitor failed")
         if return_code != 0:
             fail(f"calibration probe failed with exit code {return_code}")
-        peak = read_u64(group / "memory.peak")
-        if peak < current:
-            fail("invalid cgroup-v2 calibration peak measurement")
+        peak = max(max(peak_values), current)
         event_values = dict(
             line.split(maxsplit=1)
             for line in (group / "cgroup.events").read_text(encoding="ascii").splitlines()
@@ -397,6 +417,10 @@ def measure_case(
             "cgroup_deleted": False,
         }
     finally:
+        if peak_stop is not None:
+            peak_stop.set()
+        if peak_thread is not None:
+            peak_thread.join(timeout=2)
         if process.poll() is None:
             process.kill()
             process.wait()
@@ -654,7 +678,7 @@ def main() -> int:
         "metric": {
             "authority": "linux-cgroup-v2",
             "current_source": "per-sample-child-cgroup/memory.current after bounded file-cache reclaim at exact ready marker",
-            "peak_source": "per-sample-child-cgroup/memory.peak after bounded post-ready shutdown",
+            "peak_source": "10ms maximum of per-sample-child-cgroup/memory.current through bounded post-ready shutdown",
             "swap_source": "memory.swap.current/memory.swap.peak when exposed",
             "normalized_formula": {
                 "memory_current": FORMULA_CURRENT,

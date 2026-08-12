@@ -712,7 +712,7 @@ def audit_calibration_evidence(path: Path) -> None:
     if evidence["metric"] != {
         "authority": "linux-cgroup-v2",
         "current_source": "per-sample-child-cgroup/memory.current after bounded file-cache reclaim at exact ready marker",
-        "peak_source": "per-sample-child-cgroup/memory.peak after bounded post-ready shutdown",
+        "peak_source": "10ms maximum of per-sample-child-cgroup/memory.current through bounded post-ready shutdown",
         "swap_source": "memory.swap.current/memory.swap.peak when exposed",
         "normalized_formula": {
             "memory_current": FORMULA_CURRENT,

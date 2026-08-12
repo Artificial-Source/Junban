@@ -422,9 +422,11 @@ def audit_static() -> None:
     workflow = CALIBRATION_WORKFLOW.read_text(encoding="utf-8")
     workflow_authority = [
         'candidate="${current}"',
-        'grep -qw memory "${candidate}/cgroup.subtree_control"',
-        'candidate="$(dirname "${candidate}")"',
-        "no cgroup-v2 ancestor delegates the memory controller",
+        'parent_candidate="$(dirname "${candidate}")"',
+        'grep -qw memory "${parent_candidate}/cgroup.subtree_control"',
+        'delegated_from="${candidate}"',
+        'candidate="${parent_candidate}"',
+        "no cgroup-v2 ancestor receives the delegated memory controller",
         'grep -qw memory "${parent}/cgroup.controllers"',
         'sudo chown "$(id -u):$(id -g)"',
         '"${parent}/cgroup.procs" "${parent}/cgroup.threads"',

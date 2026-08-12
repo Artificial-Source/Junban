@@ -34,22 +34,24 @@ jobs:
           set -euo pipefail
           membership="$(awk -F: '$1 == "0" { print $3 }' /proc/self/cgroup)"
           current="/sys/fs/cgroup${membership%/}"
-          delegate=""
           candidate="${current}"
+          delegated_from=""
           while [[ "${candidate}" == /sys/fs/cgroup* ]]; do
+            parent_candidate="$(dirname "${candidate}")"
             if [[ -f "${candidate}/cgroup.subtree_control" ]] && \
-              grep -qw memory "${candidate}/cgroup.subtree_control"; then
-              delegate="${candidate}"
+              [[ -f "${parent_candidate}/cgroup.subtree_control" ]] && \
+              grep -qw memory "${parent_candidate}/cgroup.subtree_control"; then
+              delegated_from="${candidate}"
               break
             fi
             [[ "${candidate}" == /sys/fs/cgroup ]] && break
-            candidate="$(dirname "${candidate}")"
+            candidate="${parent_candidate}"
           done
-          if [[ -z "${delegate}" ]]; then
-            echo "no cgroup-v2 ancestor delegates the memory controller" >&2
+          if [[ -z "${delegated_from}" ]]; then
+            echo "no cgroup-v2 ancestor receives the delegated memory controller" >&2
             exit 1
           fi
-          parent="${delegate}/junban-slice2e-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}"
+          parent="${delegated_from}/junban-slice2e-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}"
           sudo mkdir "${parent}"
           echo "JUNBAN_SLICE2E_CGROUP_PARENT=${parent}" >> "${GITHUB_ENV}"
           grep -qw memory "${parent}/cgroup.controllers"

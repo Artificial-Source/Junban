@@ -421,22 +421,16 @@ def audit_static() -> None:
 
     workflow = CALIBRATION_WORKFLOW.read_text(encoding="utf-8")
     workflow_authority = [
-        'candidate="${current}"',
-        'parent_candidate="$(dirname "${candidate}")"',
-        'grep -qw memory "${parent_candidate}/cgroup.subtree_control"',
-        'delegated_from="${candidate}"',
-        'candidate="${parent_candidate}"',
-        "no cgroup-v2 ancestor receives the delegated memory controller",
-        'echo +memory | sudo tee "${delegated_from}/cgroup.subtree_control"',
-        'sudo test -f "${parent}/memory.current"',
-        'sudo test -f "${parent}/memory.peak"',
-        'sudo chown "$(id -u):$(id -g)"',
-        '"${parent}/cgroup.procs" "${parent}/cgroup.threads"',
-        'sudo env "PATH=${PATH}" "HOME=${HOME}"',
-        "python3 scripts/calibrate-phase7-slice2e-cgroup.py",
+        "command -v systemd-run",
+        "systemctl --version",
+        "sudo systemd-run --wait --collect --pipe --quiet",
+        '--unit "junban-slice2e-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}"',
+        "--property Delegate=yes",
+        '--setenv PATH="${PATH}"',
+        '--setenv HOME="${HOME}"',
+        '--setenv JUNBAN_SLICE2E_CGROUP_PARENT=self',
+        'python3 "${GITHUB_WORKSPACE}/scripts/calibrate-phase7-slice2e-cgroup.py"',
         "--privileged-cgroup-migration",
-        'find "${JUNBAN_SLICE2E_CGROUP_PARENT}" -mindepth 1 -maxdepth 1',
-        'sudo rmdir "${JUNBAN_SLICE2E_CGROUP_PARENT}"',
         "--idle-host-confirmed",
         "timeout-minutes: 90",
         "- name: Upload raw calibration JSON",
@@ -444,26 +438,14 @@ def audit_static() -> None:
         "if-no-files-found: warn",
     ]
     if any(needle not in workflow for needle in workflow_authority):
-        fail("Slice 2E cgroup ancestor delegation authority drifted")
-    if 'echo +memory | sudo tee "${parent}/cgroup.subtree_control"' in workflow:
-        fail("Slice 2E parent wrongly delegates memory away from measured child leaves")
-    created = workflow.index('sudo mkdir "${parent}"')
-    exported = workflow.index('echo "JUNBAN_SLICE2E_CGROUP_PARENT=${parent}"')
-    verified = workflow.index('sudo test -f "${parent}/memory.peak"')
-    if not created < exported < verified:
-        fail("Slice 2E delegated parent cleanup authority is not published immediately")
-    if 'parent="${current}/junban-slice2e-' in workflow or re.search(
-        r'sudo rmdir "\$\{JUNBAN_SLICE2E_CGROUP_PARENT\}"\s*\|\|\s*true', workflow
-    ):
-        fail("Slice 2E workflow retained leaf delegation or ignored cleanup")
-    campaign_step = workflow.index("python3 scripts/calibrate-phase7-slice2e-cgroup.py")
+        fail("Slice 2E systemd cgroup delegation authority drifted")
+    campaign_step = workflow.index("sudo systemd-run --wait --collect --pipe --quiet")
     privileged_migration = workflow.index("--privileged-cgroup-migration")
-    cleanup_step = workflow.index("- name: Remove delegated cgroup parent")
     upload_step = workflow.index("- name: Upload raw calibration JSON")
-    if not verified < campaign_step < privileged_migration:
-        fail("Slice 2E campaign does not own privileged child-cgroup migration")
-    if not campaign_step < cleanup_step < upload_step or "if: always()" not in workflow[upload_step:]:
-        fail("Slice 2E workflow no longer preserves failed raw evidence after cleanup")
+    if not campaign_step < privileged_migration < upload_step:
+        fail("Slice 2E delegated campaign ordering drifted")
+    if "if: always()" not in workflow[upload_step:]:
+        fail("Slice 2E workflow no longer preserves failed raw evidence")
 
     workspace = WORKSPACE_MANIFEST.read_text(encoding="utf-8")
     if f'wasmtime = {{ version = "={WASMTIME_VERSION}"' not in workspace:

@@ -140,7 +140,7 @@ def release_host(selected: Path | None) -> Path:
 
 def current_cgroup() -> Path:
     delegated = os.environ.get("JUNBAN_SLICE2E_CGROUP_PARENT")
-    if delegated:
+    if delegated and delegated != "self":
         path = Path(delegated).resolve(strict=True)
     else:
         unified = None

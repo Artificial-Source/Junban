@@ -28,72 +28,28 @@ jobs:
         with:
           toolchain: "1.93.0"
 
-      - name: Delegate an isolated cgroup-v2 parent
+      - name: Prepare systemd cgroup-v2 calibration authority
         shell: bash
         run: |
           set -euo pipefail
-          membership="$(awk -F: '$1 == "0" { print $3 }' /proc/self/cgroup)"
-          current="/sys/fs/cgroup${membership%/}"
-          candidate="${current}"
-          delegated_from=""
-          while [[ "${candidate}" == /sys/fs/cgroup* ]]; do
-            parent_candidate="$(dirname "${candidate}")"
-            if [[ -f "${candidate}/cgroup.subtree_control" ]] && \
-              [[ -f "${parent_candidate}/cgroup.subtree_control" ]] && \
-              grep -qw memory "${parent_candidate}/cgroup.subtree_control"; then
-              delegated_from="${candidate}"
-              break
-            fi
-            [[ "${candidate}" == /sys/fs/cgroup ]] && break
-            candidate="${parent_candidate}"
-          done
-          if [[ -z "${delegated_from}" ]]; then
-            echo "no cgroup-v2 ancestor receives the delegated memory controller" >&2
-            exit 1
-          fi
-          parent="${delegated_from}/junban-slice2e-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}"
-          echo +memory | sudo tee "${delegated_from}/cgroup.subtree_control" >/dev/null
-          sudo mkdir "${parent}"
-          echo "JUNBAN_SLICE2E_CGROUP_PARENT=${parent}" >> "${GITHUB_ENV}"
-          sudo test -f "${parent}/memory.current"
-          sudo test -f "${parent}/memory.peak"
-          sudo chown "$(id -u):$(id -g)" \
-            "${parent}" "${parent}/cgroup.procs" "${parent}/cgroup.threads" \
-            "${parent}/cgroup.subtree_control"
+          command -v systemd-run >/dev/null
+          systemctl --version
 
       - name: Run five samples for baseline and each language/scale
-        env:
-          JUNBAN_SLICE2E_CGROUP_PARENT: ${{ env.JUNBAN_SLICE2E_CGROUP_PARENT }}
         shell: bash
         run: |
           set -euo pipefail
-          sudo env "PATH=${PATH}" "HOME=${HOME}" \
-            python3 scripts/calibrate-phase7-slice2e-cgroup.py \
+          sudo systemd-run --wait --collect --pipe --quiet \
+            --unit "junban-slice2e-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}" \
+            --property Delegate=yes \
+            --setenv PATH="${PATH}" \
+            --setenv HOME="${HOME}" \
+            --setenv GITHUB_SHA="${GITHUB_SHA}" \
+            --setenv JUNBAN_SLICE2E_CGROUP_PARENT=self \
+            python3 "${GITHUB_WORKSPACE}/scripts/calibrate-phase7-slice2e-cgroup.py" \
             --privileged-cgroup-migration \
             --idle-host-confirmed \
             --output "${{ runner.temp }}/phase7-slice2e-cgroup-memory.json"
-
-      - name: Remove delegated cgroup parent
-        if: always()
-        shell: bash
-        run: |
-          if [[ -n "${JUNBAN_SLICE2E_CGROUP_PARENT:-}" ]] && \
-            [[ -d "${JUNBAN_SLICE2E_CGROUP_PARENT}" ]]; then
-            while IFS= read -r -d "" child; do
-              if ! grep -qx "populated 0" "${child}/cgroup.events"; then
-                echo "delegated calibration child remains populated: ${child}" >&2
-                exit 1
-              fi
-              sudo rmdir "${child}"
-            done < <(find "${JUNBAN_SLICE2E_CGROUP_PARENT}" -mindepth 1 -maxdepth 1 \
-              -type d -print0)
-            if find "${JUNBAN_SLICE2E_CGROUP_PARENT}" -mindepth 1 -maxdepth 1 \
-              -type d -print -quit | grep -q .; then
-              echo "delegated cgroup retains child cgroups" >&2
-              exit 1
-            fi
-            sudo rmdir "${JUNBAN_SLICE2E_CGROUP_PARENT}"
-          fi
 
       - name: Upload raw calibration JSON
         if: always()

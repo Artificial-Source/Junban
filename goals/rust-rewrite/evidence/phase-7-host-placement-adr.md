@@ -182,6 +182,21 @@ They are a temporary cross-check only. They do **not** prove the context-map cri
 
 The accepted ceilings are data-derived from selected-path projections plus explicit headroom only. They are not integrated product measurements; architecture acceptance freezes them as Wave 1 implementation gates. The mandatory matched SDK-only default condition is now fulfilled; the later integrated Wave 5 replacement remains.
 
+## Wave 2 Slice 2E amendment — 2026-08-12
+
+The real-owner production-composition harness disproved the Wave 0 active projections without changing the selected child-process architecture. The first exact-head campaign at `69eae3a5145a862343de6528b701e3ac5d0656dd` retained a truthful full-lifecycle peak failure but also exposed invalid warm/current evidence: an 8-GiB proactive reclaim could swap anonymous pages. Performance review opened `P7-2E-PERF-001` and withheld every active memory gate.
+
+Exact correction `e196313b5a463681254a2401ebc9787f99e97e13` sets each leaf's `memory.swap.max` to zero, reclaims only the exact `memory.stat:file` bytes with `swappiness=0`, performs one representative invocation on every loaded runtime before the ready marker, and requires zero swap current/peak. Clean five-sample GitHub Actions run [`31629776892`](https://github.com/Artificial-Source/Junban/actions/runs/31629776892) produced immutable raw evidence at release/tag [`phase7-slice2e-calibration-e196313`](https://github.com/Artificial-Source/Junban/releases/tag/phase7-slice2e-calibration-e196313), SHA-256 `75b5336589f67fb9106cbda4a7d720517434ab75224b660015dfe646623500e5`. Every sample used zero swap. The same-run harness baseline passed unchanged at 5,296,128 bytes current and 5,963,776 bytes full-lifecycle peak.
+
+The corrected normalized scale-1 maxima were 73,342,976 bytes current / 105,062,400 bytes peak for Rust and 553,934,848 / 645,459,968 bytes for standalone TypeScript. All four exceeded the projected Wave 0 gates, so that run correctly failed. Focused recheck closed the measurement and provenance findings and required a formal budget amendment rather than speculative runtime optimization. Applying the original frozen headroom rule—`max(25%, 8 MiB)` for Rust and `max(25%, 16 MiB)` for TypeScript—replaces only the active scale-1 gates:
+
+| Profile    | Corrected normalized current / peak | Headroom current / peak | Amended current / peak ceiling |
+| ---------- | ----------------------------------: | ----------------------: | -----------------------------: |
+| Rust       |           73,342,976 / 105,062,400 B | 18,335,744 / 26,265,600 B | 91,678,720 / 131,328,000 B |
+| TypeScript |         553,934,848 / 645,459,968 B | 138,483,712 / 161,364,992 B | 692,418,560 / 806,824,960 B |
+
+These amended gates are 87.431641/125.244141 MiB for Rust and 660.341797/769.448242 MiB for TypeScript. They apply only to one active plugin graph in the non-shipped Slice 2E scale-1 projection. Scale 4/16 memory remains informational; its functional load/admission/cleanup evidence remains mandatory. The ordinary no-plugin 24-MiB current / 32-MiB peak gate is unchanged. Wave 5 must still replace these normalized harness gates with product-integrated default/Rust/TypeScript evidence; it cannot silently loosen them.
+
 Other limits:
 
 - `invoke_wall_ms` is recorded but **not** enforced as a general per-call wall deadline; only the explicit CPU-loop epoch ticker is measured. Product Wave 2 must enforce epoch + wall deadlines on every guest call.

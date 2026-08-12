@@ -425,7 +425,7 @@ This clarification changes no WIT/WIT SHA/generated body, JBP1/JRI1/package hash
 
 ### Resource ceilings frozen for implementation
 
-Wave 0 accepted the functional ceilings below and froze separate selected-child active cgroup gates: Rust 18.6016 MiB warm / 19.5078 MiB peak and TypeScript 357.334 MiB warm / 415.6201 MiB peak. Wave 5 replaces the projected active gates with integrated product evidence; the ordinary no-plugin 24/32-MiB ceiling never changes silently.
+Wave 0 initially froze projected selected-child active gates of Rust 18.6016/19.5078 MiB current/peak and TypeScript 357.334/415.6201 MiB. Real-owner Slice 2E zero-swap evidence at exact `e196313b5a463681254a2401ebc9787f99e97e13` disproved those projections: clean run `31629776892` measured normalized scale-1 maxima of 73,342,976/105,062,400 bytes for Rust and 553,934,848/645,459,968 bytes for standalone TypeScript. The formal amendment applies the original `max(25%, 8 MiB)` Rust and `max(25%, 16 MiB)` TypeScript headroom rule and freezes revised active scale-1 cgroup gates of 91,678,720/131,328,000 bytes (87.431641/125.244141 MiB) for Rust and 692,418,560/806,824,960 bytes (660.341797/769.448242 MiB) for TypeScript. Scale 4/16 memory is informational. Wave 5 replaces the normalized active gates with integrated product evidence; the ordinary no-plugin 24/32-MiB ceiling remains unchanged.
 
 - installed plugins 64; enabled plugins 16; dependencies/plugin 16; graph depth 16;
 - one active invocation/plugin and four active invocations total, enforced independently by parent and child; nested dependency invokes count against both admission bounds and fail immediately/bounded on saturation; dependency service-call edge depth 8 (root 0, eighth allowed, ninth rejected);

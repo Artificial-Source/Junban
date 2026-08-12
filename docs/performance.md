@@ -304,7 +304,20 @@ python3 scripts/check-phase7-sdk-matched-release.py --quick --output /tmp/phase7
 python3 scripts/check-phase7-sdk-matched-release.py --idle-host-confirmed
 ```
 
-The default build must remain within 24/32 MiB warm/peak, within `max(15%, 1 MiB)` median warm growth versus feature-off, and within 1.255665 MiB of the frozen Phase 6 8.3711-MiB median. No authoritative report is claimed by the SDK implementation worktree; Wave 1 remains blocked on the clean parent-run report and package security review.
+The accepted Wave 1 report measured 9.5312 MiB maximum warm current and 9.5820 MiB maximum peak, within the unchanged default 24/32-MiB gate and below feature-off at the median.
+
+## Phase 7 Slice 2E active-plugin calibration
+
+The non-shipped optimized harness constructs the real plugin supervisor with real `AppService`/SQLite and the real sibling host. Linux cgroup-v2 authority uses one fresh leaf per sample, `memory.swap.max=0`, exact file-byte reclaim with `swappiness=0`, one representative invocation per loaded runtime before the ready marker, five samples, and full-lifecycle `memory.peak`. Same-run harness baseline is normalized onto the accepted Wave 1 default-server maxima. Scale 1 is gated; scale 4/16 memory is informational while its functional load/admission/cleanup behavior remains required.
+
+The clean zero-swap campaign at exact `e196313b5a463681254a2401ebc9787f99e97e13` is GitHub Actions run `31629776892`; immutable raw JSON is attached to release/tag `phase7-slice2e-calibration-e196313` with SHA-256 `75b5336589f67fb9106cbda4a7d720517434ab75224b660015dfe646623500e5`. It disproved the Wave 0 projected active gates. Applying the original profile-specific 25%/minimum-headroom rule freezes amended scale-1 current/peak gates:
+
+| Profile | Corrected normalized max | Amended current / peak gate |
+| --- | ---: | ---: |
+| Rust | 73,342,976 / 105,062,400 bytes | 91,678,720 / 131,328,000 bytes |
+| TypeScript standalone | 553,934,848 / 645,459,968 bytes | 692,418,560 / 806,824,960 bytes |
+
+These active-only gates do not change the ordinary no-plugin 24-MiB current / 32-MiB peak ceiling. Wave 5 must replace normalized harness evidence with product-integrated default/Rust/TypeScript evidence.
 
 ## Measurement rules
 

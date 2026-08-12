@@ -14,7 +14,6 @@ import socket
 import subprocess
 import sys
 import time
-from decimal import Decimal
 from pathlib import Path
 from typing import Any
 
@@ -66,23 +65,18 @@ RELEASE_COMMAND = [
 ]
 
 
-def budget_bytes(mib: str) -> int:
-    """A decimal MiB ceiling admits only whole bytes at or below that ceiling."""
-    return int(Decimal(mib) * MIB)
-
-
 BUDGETS = {
     "raw_harness_baseline": {
         "memory_current_bytes": 24 * MIB,
         "memory_peak_bytes": 32 * MIB,
     },
     "normalized_rust_scale1": {
-        "memory_current_bytes": budget_bytes("18.6016"),
-        "memory_peak_bytes": budget_bytes("19.5078"),
+        "memory_current_bytes": 91_678_720,
+        "memory_peak_bytes": 131_328_000,
     },
     "normalized_typescript_standalone_scale1": {
-        "memory_current_bytes": budget_bytes("357.334"),
-        "memory_peak_bytes": budget_bytes("415.6201"),
+        "memory_current_bytes": 692_418_560,
+        "memory_peak_bytes": 806_824_960,
     },
 }
 

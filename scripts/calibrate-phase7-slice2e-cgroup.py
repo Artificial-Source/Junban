@@ -300,6 +300,10 @@ def measure_case(
         }
         if marker != expected_marker:
             fail(f"calibration ready marker drifted: {marker}")
+        try:
+            (group / "memory.reclaim").write_text("8G\n", encoding="ascii")
+        except (FileNotFoundError, BlockingIOError):
+            pass
         current = read_u64(group / "memory.current")
         peak = read_u64(group / "memory.peak")
         if peak < current or current == 0:

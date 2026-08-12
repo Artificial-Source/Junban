@@ -41,6 +41,7 @@ CASES = [
     ("typescript", 4, 1),
     ("typescript", 16, 1),
 ]
+METRIC_RECLAIM_BYTES = 8 * 1024 * 1024 * 1024
 MIB = 1024 * 1024
 FORMULA_CURRENT = (
     "matched_default_release_current_max + "
@@ -193,6 +194,24 @@ def optional_metric(path: Path) -> int | None:
     return read_u64(path) if path.is_file() else None
 
 
+def reclaim_cgroup_file_cache(group: Path) -> None:
+    stat = dict(
+        line.split(maxsplit=1)
+        for line in (group / "memory.stat").read_text(encoding="ascii").splitlines()
+        if " " in line
+    )
+    for key in ("anon", "file", "kernel"):
+        if key not in stat or not stat[key].isdigit():
+            fail(f"calibration cgroup memory.stat omitted {key}")
+    reclaim = group / "memory.reclaim"
+    if not reclaim.is_file():
+        fail(f"calibration cgroup lacks memory.reclaim: {group}")
+    try:
+        reclaim.write_text(f"{METRIC_RECLAIM_BYTES}\n", encoding="ascii")
+    except BlockingIOError:
+        pass
+
+
 def graph_metadata(profile: str, scale: int) -> tuple[int, int]:
     graph_size = 0 if profile == "baseline" else scale
     support_plugins = int(profile == "typescript" and scale > 1)
@@ -300,10 +319,7 @@ def measure_case(
         }
         if marker != expected_marker:
             fail(f"calibration ready marker drifted: {marker}")
-        try:
-            (group / "memory.reclaim").write_text("8G\n", encoding="ascii")
-        except (FileNotFoundError, BlockingIOError):
-            pass
+        reclaim_cgroup_file_cache(group)
         current = read_u64(group / "memory.current")
         peak = read_u64(group / "memory.peak")
         if peak < current or current == 0:
@@ -595,7 +611,7 @@ def main() -> int:
         "wasmtime": WASMTIME_VERSION,
         "metric": {
             "authority": "linux-cgroup-v2",
-            "current_source": "per-sample-child-cgroup/memory.current at exact ready marker",
+            "current_source": "per-sample-child-cgroup/memory.current after bounded file-cache reclaim at exact ready marker",
             "peak_source": "per-sample-child-cgroup/memory.peak at exact ready marker",
             "swap_source": "memory.swap.current/memory.swap.peak when exposed",
             "normalized_formula": {
@@ -667,11 +683,6 @@ def main() -> int:
                     privileged_cgroup_migration=options.privileged_cgroup_migration,
                 )
                 samples.append(sample)
-                if profile == "typescript":
-                    try:
-                        (parent / "memory.reclaim").write_text("4G\n", encoding="ascii")
-                    except (FileNotFoundError, BlockingIOError):
-                        pass
             graph_size, expected_support = graph_metadata(profile, scale)
             if support_plugins != expected_support:
                 fail("calibration case support authority drifted")

@@ -711,7 +711,7 @@ def audit_calibration_evidence(path: Path) -> None:
         fail("Slice 2E calibration runtime/sample authority drifted")
     if evidence["metric"] != {
         "authority": "linux-cgroup-v2",
-        "current_source": "per-sample-child-cgroup/memory.current at exact ready marker",
+        "current_source": "per-sample-child-cgroup/memory.current after bounded file-cache reclaim at exact ready marker",
         "peak_source": "per-sample-child-cgroup/memory.peak at exact ready marker",
         "swap_source": "memory.swap.current/memory.swap.peak when exposed",
         "normalized_formula": {

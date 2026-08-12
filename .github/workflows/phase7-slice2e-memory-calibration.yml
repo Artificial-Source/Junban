@@ -40,23 +40,20 @@ jobs:
         run: |
           set -euo pipefail
           unit="junban-slice2e-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}"
-          sudo systemd-run --collect --quiet \
+          sudo systemd-run --wait --collect --pipe --quiet \
             --unit "${unit}" \
             --property Delegate=yes \
+            --property DelegateSubgroup=supervisor \
             --property Type=notify \
             --setenv PATH="${PATH}" \
             --setenv HOME="${HOME}" \
             --setenv GITHUB_SHA="${GITHUB_SHA}" \
+            --setenv JUNBAN_SLICE2E_CGROUP_PARENT=parent \
             python3 "${GITHUB_WORKSPACE}/scripts/calibrate-phase7-slice2e-cgroup.py" \
             --privileged-cgroup-migration \
             --systemd-unit "${unit}.service" \
             --idle-host-confirmed \
             --output "${{ runner.temp }}/phase7-slice2e-cgroup-memory.json"
-          while [[ "$(sudo systemctl show -p ActiveState --value "${unit}.service")" == active ]]; do
-            sleep 5
-          done
-          sudo journalctl -u "${unit}.service" --no-pager
-          [[ "$(sudo systemctl show -p Result --value "${unit}.service")" == success ]]
 
       - name: Upload raw calibration JSON
         if: always()

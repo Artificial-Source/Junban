@@ -141,7 +141,7 @@ def release_host(selected: Path | None) -> Path:
 
 def current_cgroup() -> Path:
     delegated = os.environ.get("JUNBAN_SLICE2E_CGROUP_PARENT")
-    if delegated and delegated != "self":
+    if delegated and delegated not in {"self", "parent"}:
         path = Path(delegated).resolve(strict=True)
     else:
         unified = None
@@ -152,6 +152,8 @@ def current_cgroup() -> Path:
         if unified is None:
             fail("unified cgroup-v2 membership is unavailable")
         path = Path("/sys/fs/cgroup") / unified.lstrip("/")
+        if delegated == "parent":
+            path = path.parent
     if not (path / "memory.current").is_file():
         fail(f"memory controller is unavailable in calibration cgroup: {path}")
     try:

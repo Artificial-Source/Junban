@@ -333,6 +333,13 @@ def measure_case(
         if process.poll() is None:
             process.kill()
             process.wait()
+        if privileged_cgroup_migration:
+            try:
+                (group / "cgroup.kill").write_text("1\n", encoding="ascii")
+            except FileNotFoundError:
+                pass
+            except OSError as error:
+                fail(f"failed to kill remaining calibration cgroup processes in {group}: {error}")
         removal_error: OSError | None = None
         deadline = time.monotonic() + 5
         while time.monotonic() < deadline:

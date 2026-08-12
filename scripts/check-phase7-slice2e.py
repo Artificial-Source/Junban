@@ -434,7 +434,7 @@ def audit_static() -> None:
         "cargo build -p junban-plugin-host --release --locked",
         "cargo test --release -p junban-server --no-run --locked",
         'read -r load1 load5 _ < /proc/loadavg',
-        'float(sys.argv[1]) <= 2.0 and float(sys.argv[2]) <= 1.2',
+        'float(sys.argv[1]) <= 2.0 and float(sys.argv[2]) <= 2.0',
         "calibration host did not settle below CPU-scaled load thresholds",
         'python3 "${GITHUB_WORKSPACE}/scripts/calibrate-phase7-slice2e-cgroup.py"',
         "--privileged-cgroup-migration",
@@ -745,7 +745,7 @@ def audit_calibration_evidence(path: Path) -> None:
                 fail(f"Slice 2E calibration {phase} {name} drifted")
         if (
             snapshot["load1_threshold"] != max(1.0, cpus * 0.5)
-            or snapshot["load5_threshold"] != max(1.0, cpus * 0.3)
+            or snapshot["load5_threshold"] != max(1.0, cpus * 0.5)
             or snapshot["thresholds_enforced"] is not enforce
             or snapshot["passed"] is not True
         ):

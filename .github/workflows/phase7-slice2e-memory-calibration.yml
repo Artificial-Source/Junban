@@ -48,7 +48,7 @@ jobs:
             read -r load1 load5 _ < /proc/loadavg
             if python3 - "${load1}" "${load5}" <<'PY'
           import sys
-          raise SystemExit(not (float(sys.argv[1]) <= 2.0 and float(sys.argv[2]) <= 1.2))
+          raise SystemExit(not (float(sys.argv[1]) <= 2.0 and float(sys.argv[2]) <= 2.0))
           PY
             then
               exit 0

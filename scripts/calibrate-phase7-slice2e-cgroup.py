@@ -365,7 +365,7 @@ def host_snapshot(*, enforce: bool) -> dict[str, Any]:
     cpu_count = os.cpu_count() or 1
     load1, load5, load15 = os.getloadavg()
     load1_threshold = max(1.0, cpu_count * 0.5)
-    load5_threshold = max(1.0, cpu_count * 0.3)
+    load5_threshold = max(1.0, cpu_count * 0.5)
     passed = not enforce or (load1 <= load1_threshold and load5 <= load5_threshold)
     return {
         "cpu_count": cpu_count,

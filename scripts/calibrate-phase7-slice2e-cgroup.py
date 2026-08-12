@@ -261,6 +261,13 @@ def measure_case(
             fail(f"failed to move calibration process into {group}: {error}")
         started = time.monotonic_ns()
         os.kill(process.pid, signal.SIGCONT)
+        if privileged_cgroup_migration:
+            try:
+                (group / "memory.reclaim").write_text("max\n", encoding="ascii")
+            except FileNotFoundError:
+                pass
+            except OSError as error:
+                fail(f"failed to reclaim calibration cgroup cache in {group}: {error}")
         assert process.stdout is not None
         marker: dict[str, Any] | None = None
         marker_deadline = time.monotonic() + 300

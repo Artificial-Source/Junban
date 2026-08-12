@@ -52,10 +52,9 @@ jobs:
             --systemd-unit "${unit}.service" \
             --idle-host-confirmed \
             --output "${{ runner.temp }}/phase7-slice2e-cgroup-memory.json"
-          if ! sudo systemctl wait "${unit}.service"; then
-            sudo journalctl -u "${unit}.service" --no-pager
-            exit 1
-          fi
+          while [[ "$(sudo systemctl show -p ActiveState --value "${unit}.service")" == active ]]; do
+            sleep 5
+          done
           sudo journalctl -u "${unit}.service" --no-pager
           [[ "$(sudo systemctl show -p Result --value "${unit}.service")" == success ]]
 

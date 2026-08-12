@@ -434,6 +434,7 @@ def audit_static() -> None:
         'echo "${calibration_pid}" > "${JUNBAN_SLICE2E_CGROUP_PARENT}/cgroup.procs"',
         'child="${JUNBAN_SLICE2E_CGROUP_PARENT}/junban-slice2e-${calibration_pid}-${profile}-${scale}-${sequence}"',
         'chown "${JUNBAN_SLICE2E_UID}:${JUNBAN_SLICE2E_GID}"',
+        'chmod u+rw "${child}/cgroup.procs" "${child}/cgroup.threads"',
         'JUNBAN_SLICE2E_PRECREATED_CGROUPS=1',
         'setpriv --reuid "${JUNBAN_SLICE2E_UID}"',
         '--regid "${JUNBAN_SLICE2E_GID}" --init-groups',

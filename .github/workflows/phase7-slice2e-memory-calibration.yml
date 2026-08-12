@@ -89,6 +89,7 @@ jobs:
                   mkdir "${child}"
                   chown "${JUNBAN_SLICE2E_UID}:${JUNBAN_SLICE2E_GID}" \
                     "${child}" "${child}/cgroup.procs" "${child}/cgroup.threads"
+                  chmod u+rw "${child}/cgroup.procs" "${child}/cgroup.threads"
                 done
               done
               printf x > "${gate}"

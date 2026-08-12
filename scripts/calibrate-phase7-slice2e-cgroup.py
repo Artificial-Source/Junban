@@ -270,9 +270,10 @@ def measure_case(
                 line = process.stdout.readline()
                 if line:
                     sys.stdout.write(line)
-                    if line.startswith(READY_PREFIX):
+                    marker_offset = line.find(READY_PREFIX)
+                    if marker_offset >= 0:
                         try:
-                            decoded = json.loads(line.removeprefix(READY_PREFIX))
+                            decoded = json.loads(line[marker_offset + len(READY_PREFIX) :])
                         except json.JSONDecodeError as error:
                             fail(f"malformed calibration ready marker: {error}")
                         if not isinstance(decoded, dict):

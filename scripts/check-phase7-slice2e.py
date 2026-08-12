@@ -433,6 +433,8 @@ def audit_static() -> None:
         '--setenv JUNBAN_SLICE2E_CGROUP_PARENT=parent',
         "cargo build -p junban-plugin-host --release --locked",
         "cargo test --release -p junban-server --no-run --locked",
+        "sudo sync",
+        "echo 3 > /proc/sys/vm/drop_caches",
         'read -r load1 load5 _ < /proc/loadavg',
         'float(sys.argv[1]) <= 2.0 and float(sys.argv[2]) <= 2.0',
         "calibration host did not settle below CPU-scaled load thresholds",

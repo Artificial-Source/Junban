@@ -39,6 +39,8 @@ jobs:
         run: |
           cargo build -p junban-plugin-host --release --locked
           cargo test --release -p junban-server --no-run --locked
+          sudo sync
+          sudo sh -c 'echo 3 > /proc/sys/vm/drop_caches'
 
       - name: Wait for an idle calibration host
         shell: bash

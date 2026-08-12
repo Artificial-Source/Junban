@@ -72,7 +72,8 @@ jobs:
               rm -f "${gate}"
               mkfifo "${gate}"
               chown "${JUNBAN_SLICE2E_UID}:${JUNBAN_SLICE2E_GID}" "${gate}"
-              setpriv --reuid "${JUNBAN_SLICE2E_UID}" \
+              JUNBAN_SLICE2E_PRECREATED_CGROUPS=1 \
+                setpriv --reuid "${JUNBAN_SLICE2E_UID}" \
                 --regid "${JUNBAN_SLICE2E_GID}" --init-groups \
                 python3 -c "import os,sys; print(os.getpid(), flush=True); open(sys.argv[1], \"rb\").read(1); os.execv(sys.executable, [sys.executable, *sys.argv[2:]])" \
                 "${gate}" scripts/calibrate-phase7-slice2e-cgroup.py \

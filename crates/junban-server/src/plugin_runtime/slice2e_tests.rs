@@ -1797,6 +1797,7 @@ async fn phase7_slice2e_linux_cgroup_calibration_probe() {
     let mut supervisor = None;
     let mut graph_size = 0;
     if profile_name != "baseline" {
+        let warm_invocations;
         assert!([1, 4, 16].contains(&scale));
         let rust_component = fs::read(&paths.rust).expect("read calibration Rust fixture");
         let typescript_component =
@@ -1826,6 +1827,11 @@ async fn phase7_slice2e_linux_cgroup_calibration_probe() {
                 .await
                 .expect("load Rust calibration graph")
                 .graph_size;
+            warm_invocations = service
+                .get_installed_plugin_profile()
+                .await
+                .expect("read Rust calibration graph")
+                .plugins;
         } else {
             assert_eq!(
                 profile_name, "typescript",
@@ -1878,8 +1884,21 @@ async fn phase7_slice2e_linux_cgroup_calibration_probe() {
                 .await
                 .expect("load TypeScript calibration graph")
                 .graph_size;
+            warm_invocations = service
+                .get_installed_plugin_profile()
+                .await
+                .expect("read TypeScript calibration graph")
+                .plugins;
         }
         assert_eq!(graph_size, scale, "plugin_scale is the total loaded graph");
+        for plugin in &warm_invocations {
+            let command_id = match plugin.manifest.runtime_profile {
+                RuntimeProfile::Rust => "memory-calibration-barrier",
+                RuntimeProfile::Typescript if scale == 1 => "normal",
+                RuntimeProfile::Typescript => "memory-calibration-barrier",
+            };
+            assert_command_ok(&invoke_completed(&runtime, plugin, command_id, Vec::new()).await);
+        }
         supervisor = Some(runtime);
     } else {
         assert_eq!(scale, 0, "baseline scale must be zero");

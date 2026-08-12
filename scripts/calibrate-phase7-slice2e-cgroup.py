@@ -41,7 +41,6 @@ CASES = [
     ("typescript", 4, 1),
     ("typescript", 16, 1),
 ]
-METRIC_RECLAIM_BYTES = 8 * 1024 * 1024 * 1024
 MIB = 1024 * 1024
 FORMULA_CURRENT = (
     "matched_default_release_current_max + "
@@ -234,8 +233,11 @@ def reclaim_cgroup_file_cache(group: Path) -> None:
     reclaim = group / "memory.reclaim"
     if not reclaim.is_file():
         fail(f"calibration cgroup lacks memory.reclaim: {group}")
+    file_bytes = int(stat["file"])
+    if file_bytes == 0:
+        return
     try:
-        reclaim.write_text(f"{METRIC_RECLAIM_BYTES}\n", encoding="ascii")
+        reclaim.write_text(f"{file_bytes} swappiness=0\n", encoding="ascii")
     except BlockingIOError:
         pass
 
@@ -305,7 +307,11 @@ def measure_case(
         bufsize=1,
     )
     sample: dict[str, Any] | None = None
+    swap_max_path = group / "memory.swap.max"
+    if not swap_max_path.is_file():
+        fail(f"calibration cgroup lacks memory.swap.max: {group}")
     try:
+        swap_max_path.write_text("0\n", encoding="ascii")
         try:
             if privileged_cgroup_migration:
                 run(["sudo", "tee", str(group / "cgroup.procs")], capture=False, input_text=f"{process.pid}\n")
@@ -365,6 +371,8 @@ def measure_case(
             fail("invalid cgroup-v2 calibration current measurement")
         swap_current = optional_metric(group / "memory.swap.current")
         swap_peak = optional_metric(group / "memory.swap.peak")
+        if (swap_current not in (None, 0)) or (swap_peak not in (None, 0)):
+            fail("calibration sample used swap despite its zero-swap authority")
         assert process.stdin is not None
         process.stdin.write("release\n")
         process.stdin.flush()
@@ -653,9 +661,9 @@ def main() -> int:
         "wasmtime": WASMTIME_VERSION,
         "metric": {
             "authority": "linux-cgroup-v2",
-            "current_source": "per-sample-child-cgroup/memory.current after bounded file-cache reclaim at exact ready marker",
+            "current_source": "per-sample-child-cgroup/memory.current after exact file-byte reclaim with swappiness=0 at the post-warm-work ready marker",
             "peak_source": "per-sample-child-cgroup/memory.peak after bounded post-ready shutdown",
-            "swap_source": "memory.swap.current/memory.swap.peak when exposed",
+            "swap_source": "memory.swap.max=0 with zero memory.swap.current/memory.swap.peak when exposed",
             "normalized_formula": {
                 "memory_current": FORMULA_CURRENT,
                 "memory_peak": FORMULA_PEAK,

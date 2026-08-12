@@ -361,6 +361,9 @@ def audit_static() -> None:
         "if scale == 1",
         "for index in 0..(scale - 1)",
         'assert_eq!(graph_size, scale, "plugin_scale is the total loaded graph")',
+        "for plugin in &warm_invocations",
+        'RuntimeProfile::Typescript if scale == 1 => "normal"',
+        'RuntimeProfile::Typescript => "memory-calibration-barrier"',
         "phase7_slice2e_linux_cgroup_calibration_probe",
         '#[ignore = "Linux cgroup-v2 calibration is an explicit evidence campaign"]',
     ]
@@ -430,6 +433,9 @@ def audit_static() -> None:
         "--property Type=notify",
         '--setenv PATH="${PATH}"',
         '--setenv HOME="${HOME}"',
+        '--setenv GITHUB_SHA="${GITHUB_SHA}"',
+        '--setenv GITHUB_RUN_ID="${GITHUB_RUN_ID}"',
+        '--setenv GITHUB_RUN_ATTEMPT="${GITHUB_RUN_ATTEMPT}"',
         '--setenv JUNBAN_SLICE2E_CGROUP_PARENT=parent',
         "cargo build -p junban-plugin-host --release --locked",
         "cargo test --release -p junban-server --no-run --locked",
@@ -643,9 +649,9 @@ def audit_calibration_evidence(path: Path) -> None:
     }
     if not isinstance(evidence, dict) or set(evidence) != expected_keys:
         fail("Slice 2E calibration JSON schema-v2 drifted")
-    if evidence["status"] != "passed":
-        fail("Slice 2E calibration evidence is failed or nonpassing")
-    if evidence["schema_version"] != 2 or evidence["failure_reasons"] != []:
+    if evidence["status"] not in {"passed", "failed"}:
+        fail("Slice 2E calibration status authority drifted")
+    if evidence["schema_version"] != 2 or not isinstance(evidence["failure_reasons"], list):
         fail("Slice 2E calibration status authority drifted")
 
     git = evidence["git"]
@@ -662,9 +668,7 @@ def audit_calibration_evidence(path: Path) -> None:
     if git["github_sha"] is not None and git["github_sha"] != git["commit"]:
         fail("Slice 2E calibration GitHub SHA does not bind the measured commit")
     for name in ("github_run_id", "github_run_attempt"):
-        if git[name] is not None and (
-            not isinstance(git[name], str) or re.fullmatch(r"[1-9][0-9]*", git[name]) is None
-        ):
+        if not isinstance(git[name], str) or re.fullmatch(r"[1-9][0-9]*", git[name]) is None:
             fail(f"Slice 2E calibration {name} drifted")
 
     platform_record = evidence["platform"]
@@ -711,9 +715,9 @@ def audit_calibration_evidence(path: Path) -> None:
         fail("Slice 2E calibration runtime/sample authority drifted")
     if evidence["metric"] != {
         "authority": "linux-cgroup-v2",
-        "current_source": "per-sample-child-cgroup/memory.current after bounded file-cache reclaim at exact ready marker",
+        "current_source": "per-sample-child-cgroup/memory.current after exact file-byte reclaim with swappiness=0 at the post-warm-work ready marker",
         "peak_source": "per-sample-child-cgroup/memory.peak after bounded post-ready shutdown",
-        "swap_source": "memory.swap.current/memory.swap.peak when exposed",
+        "swap_source": "memory.swap.max=0 with zero memory.swap.current/memory.swap.peak when exposed",
         "normalized_formula": {
             "memory_current": FORMULA_CURRENT,
             "memory_peak": FORMULA_PEAK,
@@ -856,8 +860,8 @@ def audit_calibration_evidence(path: Path) -> None:
                 integer(swap_current, "memory.swap.current")
             if swap_peak is not None:
                 integer(swap_peak, "memory.swap.peak")
-            if swap_current is not None and swap_peak is not None and swap_peak < swap_current:
-                fail("Slice 2E calibration swap current/peak sample drifted")
+            if swap_current not in (None, 0) or swap_peak not in (None, 0):
+                fail("Slice 2E calibration sample used swap")
             if (
                 integer(sample["ready_elapsed_ms"], "ready elapsed ms") < 0
                 or sample["ready_marker"] != expected_marker
@@ -881,6 +885,12 @@ def audit_calibration_evidence(path: Path) -> None:
     expected_adjudication = recompute_adjudication(cases)
     if evidence["adjudication"] != expected_adjudication:
         fail("Slice 2E normalized adjudication/check/aggregate derivation drifted")
+    failed_checks = [
+        name for name, passed in expected_adjudication["checks"].items() if not passed
+    ]
+    expected_status = "passed" if not failed_checks else "failed"
+    if evidence["status"] != expected_status or evidence["failure_reasons"] != failed_checks:
+        fail("Slice 2E calibration status does not match recomputed adjudication")
     if expected_adjudication["aggregate_gate"] is not True:
         fail("Slice 2E frozen memory gate failed")
 

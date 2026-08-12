@@ -73,6 +73,8 @@ jobs:
             --setenv PATH="${PATH}" \
             --setenv HOME="${HOME}" \
             --setenv GITHUB_SHA="${GITHUB_SHA}" \
+            --setenv GITHUB_RUN_ID="${GITHUB_RUN_ID}" \
+            --setenv GITHUB_RUN_ATTEMPT="${GITHUB_RUN_ATTEMPT}" \
             --setenv JUNBAN_SLICE2E_CGROUP_PARENT=parent \
             python3 "${GITHUB_WORKSPACE}/scripts/calibrate-phase7-slice2e-cgroup.py" \
             --privileged-cgroup-migration \

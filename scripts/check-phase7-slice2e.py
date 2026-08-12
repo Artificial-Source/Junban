@@ -429,9 +429,14 @@ def audit_static() -> None:
         'echo +memory | sudo tee "${parent}/cgroup.subtree_control"',
         'sudo chown "$(id -u):$(id -g)"',
         '"${parent}/cgroup.procs" "${parent}/cgroup.threads"',
-        'echo "$$" > "${JUNBAN_SLICE2E_CGROUP_PARENT}/cgroup.procs"',
-        'exec setpriv --reuid "${JUNBAN_SLICE2E_UID}"',
+        'mkfifo "${gate}"',
+        'calibration_pid="$!"',
+        'echo "${calibration_pid}" > "${JUNBAN_SLICE2E_CGROUP_PARENT}/cgroup.procs"',
+        'child="${JUNBAN_SLICE2E_CGROUP_PARENT}/junban-slice2e-${calibration_pid}-${profile}-${scale}-${sequence}"',
+        'chown "${JUNBAN_SLICE2E_UID}:${JUNBAN_SLICE2E_GID}"',
+        'setpriv --reuid "${JUNBAN_SLICE2E_UID}"',
         '--regid "${JUNBAN_SLICE2E_GID}" --init-groups',
+        'printf x > "${gate}"',
         'find "${JUNBAN_SLICE2E_CGROUP_PARENT}" -mindepth 1 -maxdepth 1',
         'sudo rmdir "${JUNBAN_SLICE2E_CGROUP_PARENT}"',
         "--idle-host-confirmed",
@@ -451,15 +456,20 @@ def audit_static() -> None:
         r'sudo rmdir "\$\{JUNBAN_SLICE2E_CGROUP_PARENT\}"\s*\|\|\s*true', workflow
     ):
         fail("Slice 2E workflow retained leaf delegation or ignored cleanup")
+    dropped_privileges = workflow.index('setpriv --reuid "${JUNBAN_SLICE2E_UID}"')
+    campaign_step = workflow.index("scripts/calibrate-phase7-slice2e-cgroup.py")
+    captured_pid = workflow.index('calibration_pid="$!"')
     entered_delegate = workflow.index(
-        'echo "$$" > "${JUNBAN_SLICE2E_CGROUP_PARENT}/cgroup.procs"'
+        'echo "${calibration_pid}" > "${JUNBAN_SLICE2E_CGROUP_PARENT}/cgroup.procs"'
     )
-    dropped_privileges = workflow.index('exec setpriv --reuid "${JUNBAN_SLICE2E_UID}"')
-    campaign_step = workflow.index("python3 scripts/calibrate-phase7-slice2e-cgroup.py")
+    precreated = workflow.index(
+        'child="${JUNBAN_SLICE2E_CGROUP_PARENT}/junban-slice2e-${calibration_pid}-${profile}-${scale}-${sequence}"'
+    )
+    released_gate = workflow.index('printf x > "${gate}"')
     cleanup_step = workflow.index("- name: Remove delegated cgroup parent")
     upload_step = workflow.index("- name: Upload raw calibration JSON")
-    if not verified < entered_delegate < dropped_privileges < campaign_step:
-        fail("Slice 2E campaign is not entered as root and run as the unprivileged owner")
+    if not verified < dropped_privileges < campaign_step < captured_pid < entered_delegate < precreated < released_gate:
+        fail("Slice 2E campaign is not entered and predelegated before measurement")
     if not campaign_step < cleanup_step < upload_step or "if: always()" not in workflow[upload_step:]:
         fail("Slice 2E workflow no longer preserves failed raw evidence after cleanup")
 

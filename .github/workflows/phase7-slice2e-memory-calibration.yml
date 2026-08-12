@@ -66,14 +66,37 @@ jobs:
           set -euo pipefail
           export JUNBAN_SLICE2E_UID="$(id -u)"
           export JUNBAN_SLICE2E_GID="$(id -g)"
-          sudo --preserve-env=PATH,HOME,GITHUB_SHA,GITHUB_RUN_ID,GITHUB_RUN_ATTEMPT,JUNBAN_SLICE2E_CGROUP_PARENT,JUNBAN_SLICE2E_UID,JUNBAN_SLICE2E_GID \
+          sudo --preserve-env=PATH,HOME,GITHUB_SHA,GITHUB_RUN_ID,GITHUB_RUN_ATTEMPT,GITHUB_WORKSPACE,RUNNER_TEMP,JUNBAN_SLICE2E_CGROUP_PARENT,JUNBAN_SLICE2E_UID,JUNBAN_SLICE2E_GID \
             bash -c '
-              echo "$$" > "${JUNBAN_SLICE2E_CGROUP_PARENT}/cgroup.procs"
-              exec setpriv --reuid "${JUNBAN_SLICE2E_UID}" \
+              gate="${RUNNER_TEMP}/phase7-slice2e-gate"
+              rm -f "${gate}"
+              mkfifo "${gate}"
+              chown "${JUNBAN_SLICE2E_UID}:${JUNBAN_SLICE2E_GID}" "${gate}"
+              setpriv --reuid "${JUNBAN_SLICE2E_UID}" \
                 --regid "${JUNBAN_SLICE2E_GID}" --init-groups \
-                python3 scripts/calibrate-phase7-slice2e-cgroup.py \
+                python3 -c "import os,sys; print(os.getpid(), flush=True); open(sys.argv[1], \"rb\").read(1); os.execv(sys.executable, [sys.executable, *sys.argv[2:]])" \
+                "${gate}" scripts/calibrate-phase7-slice2e-cgroup.py \
                 --idle-host-confirmed \
-                --output "${{ runner.temp }}/phase7-slice2e-cgroup-memory.json"
+                --output "${{ runner.temp }}/phase7-slice2e-cgroup-memory.json" \
+                > "${RUNNER_TEMP}/phase7-slice2e-calibration.log" 2>&1 &
+              calibration_pid="$!"
+              echo "${calibration_pid}" > "${JUNBAN_SLICE2E_CGROUP_PARENT}/cgroup.procs"
+              for profile_scale in baseline:0 rust:1 rust:4 rust:16 typescript:1 typescript:4 typescript:16; do
+                IFS=: read -r profile scale <<< "${profile_scale}"
+                for sequence in 1 2 3 4 5; do
+                  child="${JUNBAN_SLICE2E_CGROUP_PARENT}/junban-slice2e-${calibration_pid}-${profile}-${scale}-${sequence}"
+                  mkdir "${child}"
+                  chown "${JUNBAN_SLICE2E_UID}:${JUNBAN_SLICE2E_GID}" \
+                    "${child}" "${child}/cgroup.procs" "${child}/cgroup.threads"
+                done
+              done
+              printf x > "${gate}"
+              if ! wait "${calibration_pid}"; then
+                cat "${RUNNER_TEMP}/phase7-slice2e-calibration.log"
+                exit 1
+              fi
+              cat "${RUNNER_TEMP}/phase7-slice2e-calibration.log"
+              rm -f "${gate}" "${RUNNER_TEMP}/phase7-slice2e-calibration.log"
             '
 
       - name: Remove delegated cgroup parent
@@ -82,6 +105,14 @@ jobs:
         run: |
           if [[ -n "${JUNBAN_SLICE2E_CGROUP_PARENT:-}" ]] && \
             [[ -d "${JUNBAN_SLICE2E_CGROUP_PARENT}" ]]; then
+            while IFS= read -r -d "" child; do
+              if ! grep -qx "populated 0" "${child}/cgroup.events"; then
+                echo "delegated calibration child remains populated: ${child}" >&2
+                exit 1
+              fi
+              sudo rmdir "${child}"
+            done < <(find "${JUNBAN_SLICE2E_CGROUP_PARENT}" -mindepth 1 -maxdepth 1 \
+              -type d -print0)
             if find "${JUNBAN_SLICE2E_CGROUP_PARENT}" -mindepth 1 -maxdepth 1 \
               -type d -print -quit | grep -q .; then
               echo "delegated cgroup retains child cgroups" >&2

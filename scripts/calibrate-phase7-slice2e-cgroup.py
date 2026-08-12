@@ -148,19 +148,24 @@ def current_cgroup() -> Path:
         path = Path("/sys/fs/cgroup") / unified.lstrip("/")
     if not (path / "memory.current").is_file():
         fail(f"memory controller is unavailable in calibration cgroup: {path}")
-    probe = path / f"junban-slice2e-probe-{os.getpid()}"
-    try:
-        probe.mkdir()
+    if os.environ.get("JUNBAN_SLICE2E_PRECREATED_CGROUPS") == "1":
+        probe = path / f"junban-slice2e-{os.getpid()}-baseline-0-1"
         if not (probe / "memory.current").is_file() or not (probe / "memory.peak").is_file():
-            fail("delegated calibration cgroup lacks memory.current or memory.peak")
-    except PermissionError:
-        fail(
-            "cgroup-v2 delegation is unavailable; set JUNBAN_SLICE2E_CGROUP_PARENT "
-            "to a writable delegated cgroup"
-        )
-    finally:
-        if probe.exists():
-            probe.rmdir()
+            fail("precreated calibration cgroups lack memory.current or memory.peak")
+    else:
+        probe = path / f"junban-slice2e-probe-{os.getpid()}"
+        try:
+            probe.mkdir()
+            if not (probe / "memory.current").is_file() or not (probe / "memory.peak").is_file():
+                fail("delegated calibration cgroup lacks memory.current or memory.peak")
+        except PermissionError:
+            fail(
+                "cgroup-v2 delegation is unavailable; set JUNBAN_SLICE2E_CGROUP_PARENT "
+                "to a writable delegated cgroup"
+            )
+        finally:
+            if probe.exists():
+                probe.rmdir()
     return path
 
 
@@ -194,8 +199,13 @@ def measure_case(
     sequence: int,
 ) -> dict[str, Any]:
     group = parent / f"junban-slice2e-{os.getpid()}-{profile}-{scale}-{sequence}"
+    precreated = os.environ.get("JUNBAN_SLICE2E_PRECREATED_CGROUPS") == "1"
     try:
-        group.mkdir()
+        if precreated:
+            if not group.is_dir():
+                fail(f"precreated sample cgroup is missing: {group}")
+        else:
+            group.mkdir()
     except OSError as error:
         fail(f"failed to create sample cgroup {group}: {error}")
     graph_size, support_plugins = graph_metadata(profile, scale)

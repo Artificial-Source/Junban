@@ -266,6 +266,8 @@ def measure_case(
                 (group / "memory.reclaim").write_text("1G\n", encoding="ascii")
             except FileNotFoundError:
                 pass
+            except BlockingIOError:
+                pass
             except OSError as error:
                 fail(f"failed to reclaim calibration cgroup cache in {group}: {error}")
         assert process.stdout is not None

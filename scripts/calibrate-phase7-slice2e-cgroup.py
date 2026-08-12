@@ -263,7 +263,7 @@ def measure_case(
         os.kill(process.pid, signal.SIGCONT)
         if privileged_cgroup_migration:
             try:
-                (group / "memory.reclaim").write_text("max\n", encoding="ascii")
+                (group / "memory.reclaim").write_text("1G\n", encoding="ascii")
             except FileNotFoundError:
                 pass
             except OSError as error:

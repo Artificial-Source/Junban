@@ -423,14 +423,18 @@ def audit_static() -> None:
     workflow_authority = [
         "command -v systemd-run",
         "systemctl --version",
-        "sudo systemd-run --wait --collect --pipe --quiet",
-        '--unit "junban-slice2e-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}"',
+        "sudo systemd-run --collect --quiet",
+        '--unit "${unit}"',
         "--property Delegate=yes",
+        "--property Type=notify",
         '--setenv PATH="${PATH}"',
         '--setenv HOME="${HOME}"',
-        '--setenv JUNBAN_SLICE2E_CGROUP_PARENT=self',
         'python3 "${GITHUB_WORKSPACE}/scripts/calibrate-phase7-slice2e-cgroup.py"',
         "--privileged-cgroup-migration",
+        '--systemd-unit "${unit}.service"',
+        'sudo systemctl wait "${unit}.service"',
+        'sudo journalctl -u "${unit}.service" --no-pager',
+        'systemctl show -p Result --value "${unit}.service"',
         "--idle-host-confirmed",
         "timeout-minutes: 90",
         "- name: Upload raw calibration JSON",
@@ -439,7 +443,7 @@ def audit_static() -> None:
     ]
     if any(needle not in workflow for needle in workflow_authority):
         fail("Slice 2E systemd cgroup delegation authority drifted")
-    campaign_step = workflow.index("sudo systemd-run --wait --collect --pipe --quiet")
+    campaign_step = workflow.index("sudo systemd-run --collect --quiet")
     privileged_migration = workflow.index("--privileged-cgroup-migration")
     upload_step = workflow.index("- name: Upload raw calibration JSON")
     if not campaign_step < privileged_migration < upload_step:

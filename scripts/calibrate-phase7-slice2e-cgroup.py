@@ -9,6 +9,7 @@ import os
 import platform
 import re
 import signal
+import socket
 import subprocess
 import sys
 import time
@@ -510,6 +511,7 @@ def main() -> int:
     parser.add_argument("--host", type=Path)
     parser.add_argument("--idle-host-confirmed", action="store_true")
     parser.add_argument("--privileged-cgroup-migration", action="store_true")
+    parser.add_argument("--systemd-unit")
     parser.add_argument(
         "--output",
         type=Path,
@@ -521,6 +523,18 @@ def main() -> int:
 
     if options.privileged_cgroup_migration and os.geteuid() != 0:
         raise SystemExit("--privileged-cgroup-migration requires root")
+    if options.systemd_unit:
+        notify_socket = os.environ.get("NOTIFY_SOCKET")
+        if not notify_socket:
+            raise SystemExit("--systemd-unit requires NOTIFY_SOCKET")
+        address = notify_socket
+        if address.startswith("@"):
+            address = f"\0{address[1:]}"
+        with socket.socket(socket.AF_UNIX, socket.SOCK_DGRAM) as notifier:
+            notifier.connect(address)
+            notifier.sendall(
+                f"READY=1\nMAINPID={os.getpid()}\nSTATUS=running Slice 2E calibration".encode()
+            )
 
     git = git_provenance()
     pre = host_snapshot(enforce=True)

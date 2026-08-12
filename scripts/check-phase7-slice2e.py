@@ -427,6 +427,7 @@ def audit_static() -> None:
         'delegated_from="${candidate}"',
         'candidate="${parent_candidate}"',
         "no cgroup-v2 ancestor receives the delegated memory controller",
+        'echo +memory | sudo tee "${delegated_from}/cgroup.subtree_control"',
         'sudo test -f "${parent}/memory.current"',
         'sudo test -f "${parent}/memory.peak"',
         'sudo chown "$(id -u):$(id -g)"',

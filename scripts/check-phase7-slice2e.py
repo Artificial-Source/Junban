@@ -461,16 +461,16 @@ def audit_static() -> None:
     dropped_privileges = workflow.index('setpriv --reuid "${JUNBAN_SLICE2E_UID}"')
     campaign_step = workflow.index("scripts/calibrate-phase7-slice2e-cgroup.py")
     captured_pid = workflow.index('calibration_pid="$!"')
-    entered_delegate = workflow.index(
-        'echo "${calibration_pid}" > "${JUNBAN_SLICE2E_CGROUP_PARENT}/cgroup.procs"'
-    )
     precreated = workflow.index(
         'child="${JUNBAN_SLICE2E_CGROUP_PARENT}/junban-slice2e-${calibration_pid}-${profile}-${scale}-${sequence}"'
+    )
+    entered_delegate = workflow.index(
+        'echo "${calibration_pid}" > "${JUNBAN_SLICE2E_CGROUP_PARENT}/cgroup.procs"'
     )
     released_gate = workflow.index('printf x > "${gate}"')
     cleanup_step = workflow.index("- name: Remove delegated cgroup parent")
     upload_step = workflow.index("- name: Upload raw calibration JSON")
-    if not verified < dropped_privileges < campaign_step < captured_pid < entered_delegate < precreated < released_gate:
+    if not verified < dropped_privileges < campaign_step < captured_pid < precreated < entered_delegate < released_gate:
         fail("Slice 2E campaign is not entered and predelegated before measurement")
     if not campaign_step < cleanup_step < upload_step or "if: always()" not in workflow[upload_step:]:
         fail("Slice 2E workflow no longer preserves failed raw evidence after cleanup")

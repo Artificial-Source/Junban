@@ -81,7 +81,6 @@ jobs:
                 --output "${{ runner.temp }}/phase7-slice2e-cgroup-memory.json" \
                 > "${RUNNER_TEMP}/phase7-slice2e-calibration.log" 2>&1 &
               calibration_pid="$!"
-              echo "${calibration_pid}" > "${JUNBAN_SLICE2E_CGROUP_PARENT}/cgroup.procs"
               for profile_scale in baseline:0 rust:1 rust:4 rust:16 typescript:1 typescript:4 typescript:16; do
                 IFS=: read -r profile scale <<< "${profile_scale}"
                 for sequence in 1 2 3 4 5; do
@@ -92,6 +91,7 @@ jobs:
                   chmod u+rw "${child}/cgroup.procs" "${child}/cgroup.threads"
                 done
               done
+              echo "${calibration_pid}" > "${JUNBAN_SLICE2E_CGROUP_PARENT}/cgroup.procs"
               printf x > "${gate}"
               if ! wait "${calibration_pid}"; then
                 cat "${RUNNER_TEMP}/phase7-slice2e-calibration.log"

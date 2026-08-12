@@ -153,6 +153,10 @@ def current_cgroup() -> Path:
         path = Path("/sys/fs/cgroup") / unified.lstrip("/")
     if not (path / "memory.current").is_file():
         fail(f"memory controller is unavailable in calibration cgroup: {path}")
+    try:
+        (path / "cgroup.subtree_control").write_text("+memory\n", encoding="ascii")
+    except OSError as error:
+        fail(f"failed to delegate memory controller from calibration cgroup {path}: {error}")
     if os.environ.get("JUNBAN_SLICE2E_PRECREATED_CGROUPS") == "1":
         probe = path / f"junban-slice2e-{os.getpid()}-baseline-0-1"
         if not (probe / "memory.current").is_file() or not (probe / "memory.peak").is_file():

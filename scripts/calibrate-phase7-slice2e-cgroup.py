@@ -333,10 +333,18 @@ def measure_case(
         if process.poll() is None:
             process.kill()
             process.wait()
-        try:
-            group.rmdir()
-        except OSError as error:
-            fail(f"failed to remove calibration cgroup {group}: {error}")
+        removal_error: OSError | None = None
+        deadline = time.monotonic() + 5
+        while time.monotonic() < deadline:
+            try:
+                group.rmdir()
+                removal_error = None
+                break
+            except OSError as error:
+                removal_error = error
+                select.select([], [], [], 0.1)
+        if removal_error is not None:
+            fail(f"failed to remove calibration cgroup {group}: {removal_error}")
         if sample is not None:
             sample["cgroup_deleted"] = not group.exists()
     if sample is None:

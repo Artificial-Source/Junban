@@ -8,6 +8,7 @@ import json
 import os
 import platform
 import re
+import select
 import signal
 import socket
 import subprocess
@@ -262,20 +263,29 @@ def measure_case(
         os.kill(process.pid, signal.SIGCONT)
         assert process.stdout is not None
         marker: dict[str, Any] | None = None
-        for line in process.stdout:
-            sys.stdout.write(line)
-            if line.startswith(READY_PREFIX):
-                try:
-                    decoded = json.loads(line.removeprefix(READY_PREFIX))
-                except json.JSONDecodeError as error:
-                    fail(f"malformed calibration ready marker: {error}")
-                if not isinstance(decoded, dict):
-                    fail("calibration ready marker must be an object")
-                marker = decoded
+        marker_deadline = time.monotonic() + 120
+        while time.monotonic() < marker_deadline:
+            readable, _, _ = select.select([process.stdout], [], [], 1)
+            if readable:
+                line = process.stdout.readline()
+                if line:
+                    sys.stdout.write(line)
+                    if line.startswith(READY_PREFIX):
+                        try:
+                            decoded = json.loads(line.removeprefix(READY_PREFIX))
+                        except json.JSONDecodeError as error:
+                            fail(f"malformed calibration ready marker: {error}")
+                        if not isinstance(decoded, dict):
+                            fail("calibration ready marker must be an object")
+                        marker = decoded
+                        break
+            if process.poll() is not None:
                 break
         if marker is None:
+            if process.poll() is None:
+                process.kill()
             return_code = process.wait()
-            fail(f"calibration probe exited {return_code} before its ready marker")
+            fail(f"calibration probe exited {return_code} or timed out before its ready marker")
         ready_elapsed_ms = (time.monotonic_ns() - started) // 1_000_000
         expected_marker = {
             "profile": profile,

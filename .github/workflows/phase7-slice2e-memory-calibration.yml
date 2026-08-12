@@ -35,6 +35,11 @@ jobs:
           command -v systemd-run >/dev/null
           systemctl --version
 
+      - name: Prebuild release calibration binaries
+        run: |
+          cargo build -p junban-plugin-host --release --locked
+          cargo test --release -p junban-server --no-run --locked
+
       - name: Run five samples for baseline and each language/scale
         shell: bash
         run: |

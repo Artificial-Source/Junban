@@ -431,6 +431,8 @@ def audit_static() -> None:
         '--setenv PATH="${PATH}"',
         '--setenv HOME="${HOME}"',
         '--setenv JUNBAN_SLICE2E_CGROUP_PARENT=parent',
+        "cargo build -p junban-plugin-host --release --locked",
+        "cargo test --release -p junban-server --no-run --locked",
         'python3 "${GITHUB_WORKSPACE}/scripts/calibrate-phase7-slice2e-cgroup.py"',
         "--privileged-cgroup-migration",
         '--systemd-unit "${unit}.service"',

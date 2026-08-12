@@ -652,8 +652,9 @@ def main() -> int:
         records = []
         for profile, scale, support_plugins in CASES:
             print(f"Slice 2E cgroup calibration: profile={profile} scale={scale}")
-            samples = [
-                measure_case(
+            samples = []
+            for sequence in range(1, SAMPLES + 1):
+                sample = measure_case(
                     parent,
                     host,
                     profile,
@@ -661,8 +662,12 @@ def main() -> int:
                     sequence,
                     privileged_cgroup_migration=options.privileged_cgroup_migration,
                 )
-                for sequence in range(1, SAMPLES + 1)
-            ]
+                samples.append(sample)
+                if profile == "typescript":
+                    try:
+                        (parent / "memory.reclaim").write_text("4G\n", encoding="ascii")
+                    except (FileNotFoundError, BlockingIOError):
+                        pass
             graph_size, expected_support = graph_metadata(profile, scale)
             if support_plugins != expected_support:
                 fail("calibration case support authority drifted")

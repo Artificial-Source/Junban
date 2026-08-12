@@ -776,6 +776,7 @@ def audit_calibration_evidence(path: Path) -> None:
     artifacts = evidence["artifacts"]
     if not isinstance(artifacts, dict) or set(artifacts) != {
         "host",
+        "test_binary",
         "rust_component",
         "typescript_full_component",
         "typescript_standalone_component",
@@ -783,6 +784,7 @@ def audit_calibration_evidence(path: Path) -> None:
     }:
         fail("Slice 2E calibration artifact inventory drifted")
     audit_calibration_artifact(artifacts["host"], None)
+    audit_calibration_artifact(artifacts["test_binary"], None)
     audit_calibration_artifact(artifacts["rust_component"], RUST_ARTIFACT)
     audit_calibration_artifact(artifacts["typescript_full_component"], TYPESCRIPT_ARTIFACT)
     audit_calibration_artifact(

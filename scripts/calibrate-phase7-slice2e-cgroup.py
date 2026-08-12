@@ -141,6 +141,34 @@ def release_host(selected: Path | None) -> Path:
     return regular(target_directory() / "release/junban-plugin-host", "built plugin host")
 
 
+def release_test_binary() -> Path:
+    output = run(
+        [
+            "cargo",
+            "test",
+            "--release",
+            "-p",
+            "junban-server",
+            "--lib",
+            "--locked",
+            "--no-run",
+            "--message-format=json",
+        ],
+        capture=True,
+    )
+    executable: str | None = None
+    for line in output.splitlines():
+        message = json.loads(line)
+        if message.get("reason") != "compiler-artifact" or not isinstance(message.get("executable"), str):
+            continue
+        target = message.get("target")
+        if isinstance(target, dict) and target.get("name") == "junban_server" and target.get("test") is True:
+            executable = message["executable"]
+    if executable is None:
+        fail("cargo omitted the release junban-server library test executable")
+    return regular(Path(executable), "release junban-server library test executable")
+
+
 def current_cgroup() -> Path:
     delegated = os.environ.get("JUNBAN_SLICE2E_CGROUP_PARENT")
     if delegated and delegated not in {"self", "parent"}:
@@ -254,8 +282,20 @@ def measure_case(
             "JUNBAN_SLICE2E_CONFORMANCE_COMPONENT": str(CONFORMANCE_ARTIFACT.resolve(strict=True)),
         }
     )
+    test_binary = regular(Path(environment["JUNBAN_SLICE2E_TEST_BINARY"]), "calibration test binary")
     process = subprocess.Popen(
-        ["bash", "-c", 'kill -STOP "$$"; exec "$@"', "slice2e-calibration", *RELEASE_COMMAND],
+        [
+            "bash",
+            "-c",
+            'kill -STOP "$$"; exec "$@"',
+            "slice2e-calibration",
+            str(test_binary),
+            TEST_NAME,
+            "--ignored",
+            "--exact",
+            "--nocapture",
+            "--test-threads=1",
+        ],
         cwd=ROOT,
         env=environment,
         stdin=subprocess.PIPE,
@@ -661,9 +701,12 @@ def main() -> int:
                 "--no-run",
             ]
         )
+        test_binary = release_test_binary()
+        os.environ["JUNBAN_SLICE2E_TEST_BINARY"] = str(test_binary)
         parent = current_cgroup()
         result["artifacts"] = {
             "host": artifact_record(host),
+            "test_binary": artifact_record(test_binary),
             "rust_component": artifact_record(RUST_ARTIFACT),
             "typescript_full_component": artifact_record(TYPESCRIPT_ARTIFACT),
             "typescript_standalone_component": artifact_record(TYPESCRIPT_STANDALONE_ARTIFACT),

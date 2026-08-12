@@ -330,8 +330,6 @@ def measure_case(
                     return
                 peak_stop.wait(0.01)
 
-        peak_thread = threading.Thread(target=sample_current, daemon=True)
-        peak_thread.start()
         os.kill(process.pid, signal.SIGCONT)
         if privileged_cgroup_migration:
             try:
@@ -377,6 +375,8 @@ def measure_case(
         }
         if marker != expected_marker:
             fail(f"calibration ready marker drifted: {marker}")
+        peak_thread = threading.Thread(target=sample_current, daemon=True)
+        peak_thread.start()
         reclaim_cgroup_file_cache(group)
         current = read_u64(group / "memory.current")
         if current == 0:
@@ -678,7 +678,7 @@ def main() -> int:
         "metric": {
             "authority": "linux-cgroup-v2",
             "current_source": "per-sample-child-cgroup/memory.current after bounded file-cache reclaim at exact ready marker",
-            "peak_source": "10ms maximum of per-sample-child-cgroup/memory.current through bounded post-ready shutdown",
+            "peak_source": "10ms maximum of per-sample-child-cgroup/memory.current from exact ready marker through bounded shutdown",
             "swap_source": "memory.swap.current/memory.swap.peak when exposed",
             "normalized_formula": {
                 "memory_current": FORMULA_CURRENT,

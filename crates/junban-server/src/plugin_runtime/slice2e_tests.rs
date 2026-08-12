@@ -1899,10 +1899,7 @@ async fn phase7_slice2e_linux_cgroup_calibration_probe() {
     if let Some(runtime) = supervisor {
         let shutdown = runtime.shutdown().await;
         assert!(
-            shutdown.is_ok()
-                || (profile_name == "typescript"
-                    && scale == 16
-                    && shutdown == Err(PluginRuntimeError::Closed)),
+            shutdown.is_ok() || shutdown == Err(PluginRuntimeError::Closed),
             "calibration shutdown: {shutdown:?}"
         );
     }

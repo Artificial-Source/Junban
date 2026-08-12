@@ -53,7 +53,6 @@ jobs:
           sudo mkdir "${parent}"
           echo "JUNBAN_SLICE2E_CGROUP_PARENT=${parent}" >> "${GITHUB_ENV}"
           grep -qw memory "${parent}/cgroup.controllers"
-          echo +memory | sudo tee "${parent}/cgroup.subtree_control" >/dev/null
           sudo chown "$(id -u):$(id -g)" \
             "${parent}" "${parent}/cgroup.procs" "${parent}/cgroup.threads" \
             "${parent}/cgroup.subtree_control"

@@ -161,10 +161,6 @@ def current_cgroup() -> Path:
         probe = path / f"junban-slice2e-probe-{os.getpid()}"
         try:
             probe.mkdir()
-            try:
-                (path / "cgroup.subtree_control").write_text("+memory\n", encoding="ascii")
-            except OSError:
-                pass
             if not (probe / "memory.current").is_file() or not (probe / "memory.peak").is_file():
                 fail("delegated calibration cgroup lacks memory.current or memory.peak")
         except PermissionError:
@@ -217,10 +213,6 @@ def measure_case(
                 fail(f"precreated sample cgroup is missing: {group}")
         else:
             group.mkdir()
-            try:
-                (parent / "cgroup.subtree_control").write_text("+memory\n", encoding="ascii")
-            except OSError:
-                pass
     except OSError as error:
         fail(f"failed to create sample cgroup {group}: {error}")
     graph_size, support_plugins = graph_metadata(profile, scale)

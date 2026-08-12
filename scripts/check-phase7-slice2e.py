@@ -426,7 +426,6 @@ def audit_static() -> None:
         'candidate="$(dirname "${candidate}")"',
         "no cgroup-v2 ancestor delegates the memory controller",
         'grep -qw memory "${parent}/cgroup.controllers"',
-        'echo +memory | sudo tee "${parent}/cgroup.subtree_control"',
         'sudo chown "$(id -u):$(id -g)"',
         '"${parent}/cgroup.procs" "${parent}/cgroup.threads"',
         'sudo env "PATH=${PATH}" "HOME=${HOME}"',
@@ -442,6 +441,8 @@ def audit_static() -> None:
     ]
     if any(needle not in workflow for needle in workflow_authority):
         fail("Slice 2E cgroup ancestor delegation authority drifted")
+    if 'echo +memory | sudo tee "${parent}/cgroup.subtree_control"' in workflow:
+        fail("Slice 2E parent wrongly delegates memory away from measured child leaves")
     created = workflow.index('sudo mkdir "${parent}"')
     exported = workflow.index('echo "JUNBAN_SLICE2E_CGROUP_PARENT=${parent}"')
     verified = workflow.index('grep -qw memory "${parent}/cgroup.controllers"')

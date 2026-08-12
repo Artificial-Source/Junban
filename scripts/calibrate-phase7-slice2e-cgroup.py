@@ -361,8 +361,7 @@ def measure_case(
             fail(f"calibration ready marker drifted: {marker}")
         reclaim_cgroup_file_cache(group)
         current = read_u64(group / "memory.current")
-        peak = read_u64(group / "memory.peak")
-        if peak < current or current == 0:
+        if current == 0:
             fail("invalid cgroup-v2 calibration current measurement")
         swap_current = optional_metric(group / "memory.swap.current")
         swap_peak = optional_metric(group / "memory.swap.peak")
@@ -375,6 +374,9 @@ def measure_case(
         return_code = process.wait()
         if return_code != 0:
             fail(f"calibration probe failed with exit code {return_code}")
+        peak = read_u64(group / "memory.peak")
+        if peak < current:
+            fail("invalid cgroup-v2 calibration peak measurement")
         event_values = dict(
             line.split(maxsplit=1)
             for line in (group / "cgroup.events").read_text(encoding="ascii").splitlines()
@@ -652,7 +654,7 @@ def main() -> int:
         "metric": {
             "authority": "linux-cgroup-v2",
             "current_source": "per-sample-child-cgroup/memory.current after bounded file-cache reclaim at exact ready marker",
-            "peak_source": "per-sample-child-cgroup/memory.peak at exact ready marker",
+            "peak_source": "per-sample-child-cgroup/memory.peak after bounded post-ready shutdown",
             "swap_source": "memory.swap.current/memory.swap.peak when exposed",
             "normalized_formula": {
                 "memory_current": FORMULA_CURRENT,

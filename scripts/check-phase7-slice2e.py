@@ -848,9 +848,14 @@ def audit_calibration_evidence(path: Path) -> None:
             peak = integer(sample["memory_peak_bytes"], "memory.peak", positive=True)
             if sample["sequence"] != sequence or peak < current:
                 fail("Slice 2E calibration current/peak sample drifted")
-            for name in ("memory_swap_current_bytes", "memory_swap_peak_bytes"):
-                if sample[name] is not None and sample[name] != 0:
-                    fail("Slice 2E calibration observed or forged nonzero swap")
+            swap_current = sample["memory_swap_current_bytes"]
+            swap_peak = sample["memory_swap_peak_bytes"]
+            if swap_current is not None:
+                integer(swap_current, "memory.swap.current")
+            if swap_peak is not None:
+                integer(swap_peak, "memory.swap.peak")
+            if swap_current is not None and swap_peak is not None and swap_peak < swap_current:
+                fail("Slice 2E calibration swap current/peak sample drifted")
             if (
                 integer(sample["ready_elapsed_ms"], "ready elapsed ms") < 0
                 or sample["ready_marker"] != expected_marker

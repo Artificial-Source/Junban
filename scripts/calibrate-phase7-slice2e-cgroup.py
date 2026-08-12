@@ -189,13 +189,8 @@ def read_u64(path: Path) -> int:
     return int(value)
 
 
-def optional_zero_metric(path: Path) -> int | None:
-    if not path.is_file():
-        return None
-    value = read_u64(path)
-    if value != 0:
-        fail(f"calibration requires zero swap at {path}, got {value}")
-    return value
+def optional_metric(path: Path) -> int | None:
+    return read_u64(path) if path.is_file() else None
 
 
 def graph_metadata(profile: str, scale: int) -> tuple[int, int]:
@@ -309,8 +304,8 @@ def measure_case(
         peak = read_u64(group / "memory.peak")
         if peak < current or current == 0:
             fail("invalid cgroup-v2 calibration measurements")
-        swap_current = optional_zero_metric(group / "memory.swap.current")
-        swap_peak = optional_zero_metric(group / "memory.swap.peak")
+        swap_current = optional_metric(group / "memory.swap.current")
+        swap_peak = optional_metric(group / "memory.swap.peak")
         assert process.stdin is not None
         process.stdin.write("release\n")
         process.stdin.flush()

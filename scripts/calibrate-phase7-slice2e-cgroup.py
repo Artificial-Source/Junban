@@ -326,7 +326,7 @@ def measure_case(
                 fail(f"failed to reclaim calibration cgroup cache in {group}: {error}")
         assert process.stdout is not None
         marker: dict[str, Any] | None = None
-        marker_deadline = time.monotonic() + 300
+        marker_deadline = time.monotonic() + 600
         while time.monotonic() < marker_deadline:
             readable, _, _ = select.select([process.stdout], [], [], 1)
             if readable:

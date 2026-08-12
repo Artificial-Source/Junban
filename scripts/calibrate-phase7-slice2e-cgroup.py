@@ -263,7 +263,7 @@ def measure_case(
         os.kill(process.pid, signal.SIGCONT)
         assert process.stdout is not None
         marker: dict[str, Any] | None = None
-        marker_deadline = time.monotonic() + 120
+        marker_deadline = time.monotonic() + 300
         while time.monotonic() < marker_deadline:
             readable, _, _ = select.select([process.stdout], [], [], 1)
             if readable:

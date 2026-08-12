@@ -427,7 +427,8 @@ def audit_static() -> None:
         'delegated_from="${candidate}"',
         'candidate="${parent_candidate}"',
         "no cgroup-v2 ancestor receives the delegated memory controller",
-        'grep -qw memory "${parent}/cgroup.controllers"',
+        '[[ -f "${parent}/memory.current" ]]',
+        '[[ -f "${parent}/memory.peak" ]]',
         'sudo chown "$(id -u):$(id -g)"',
         '"${parent}/cgroup.procs" "${parent}/cgroup.threads"',
         'sudo env "PATH=${PATH}" "HOME=${HOME}"',
@@ -447,7 +448,7 @@ def audit_static() -> None:
         fail("Slice 2E parent wrongly delegates memory away from measured child leaves")
     created = workflow.index('sudo mkdir "${parent}"')
     exported = workflow.index('echo "JUNBAN_SLICE2E_CGROUP_PARENT=${parent}"')
-    verified = workflow.index('grep -qw memory "${parent}/cgroup.controllers"')
+    verified = workflow.index('[[ -f "${parent}/memory.peak" ]]')
     if not created < exported < verified:
         fail("Slice 2E delegated parent cleanup authority is not published immediately")
     if 'parent="${current}/junban-slice2e-' in workflow or re.search(

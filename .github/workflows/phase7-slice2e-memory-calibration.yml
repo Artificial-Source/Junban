@@ -54,7 +54,8 @@ jobs:
           parent="${delegated_from}/junban-slice2e-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}"
           sudo mkdir "${parent}"
           echo "JUNBAN_SLICE2E_CGROUP_PARENT=${parent}" >> "${GITHUB_ENV}"
-          grep -qw memory "${parent}/cgroup.controllers"
+          [[ -f "${parent}/memory.current" ]]
+          [[ -f "${parent}/memory.peak" ]]
           sudo chown "$(id -u):$(id -g)" \
             "${parent}" "${parent}/cgroup.procs" "${parent}/cgroup.threads" \
             "${parent}/cgroup.subtree_control"

@@ -429,16 +429,8 @@ def audit_static() -> None:
         'echo +memory | sudo tee "${parent}/cgroup.subtree_control"',
         'sudo chown "$(id -u):$(id -g)"',
         '"${parent}/cgroup.procs" "${parent}/cgroup.threads"',
-        'mkfifo "${gate}"',
-        'calibration_pid="$!"',
-        'echo "${calibration_pid}" > "${JUNBAN_SLICE2E_CGROUP_PARENT}/cgroup.procs"',
-        'child="${JUNBAN_SLICE2E_CGROUP_PARENT}/junban-slice2e-${calibration_pid}-${profile}-${scale}-${sequence}"',
-        'chown "${JUNBAN_SLICE2E_UID}:${JUNBAN_SLICE2E_GID}"',
-        'chmod u+rw "${child}/cgroup.procs" "${child}/cgroup.threads"',
-        'JUNBAN_SLICE2E_PRECREATED_CGROUPS=1',
-        'setpriv --reuid "${JUNBAN_SLICE2E_UID}"',
-        '--regid "${JUNBAN_SLICE2E_GID}" --init-groups',
-        'printf x > "${gate}"',
+        "sudo -E python3 scripts/calibrate-phase7-slice2e-cgroup.py",
+        "--privileged-cgroup-migration",
         'find "${JUNBAN_SLICE2E_CGROUP_PARENT}" -mindepth 1 -maxdepth 1',
         'sudo rmdir "${JUNBAN_SLICE2E_CGROUP_PARENT}"',
         "--idle-host-confirmed",
@@ -458,20 +450,12 @@ def audit_static() -> None:
         r'sudo rmdir "\$\{JUNBAN_SLICE2E_CGROUP_PARENT\}"\s*\|\|\s*true', workflow
     ):
         fail("Slice 2E workflow retained leaf delegation or ignored cleanup")
-    dropped_privileges = workflow.index('setpriv --reuid "${JUNBAN_SLICE2E_UID}"')
-    campaign_step = workflow.index("scripts/calibrate-phase7-slice2e-cgroup.py")
-    captured_pid = workflow.index('calibration_pid="$!"')
-    precreated = workflow.index(
-        'child="${JUNBAN_SLICE2E_CGROUP_PARENT}/junban-slice2e-${calibration_pid}-${profile}-${scale}-${sequence}"'
-    )
-    entered_delegate = workflow.index(
-        'echo "${calibration_pid}" > "${JUNBAN_SLICE2E_CGROUP_PARENT}/cgroup.procs"'
-    )
-    released_gate = workflow.index('printf x > "${gate}"')
+    campaign_step = workflow.index("sudo -E python3 scripts/calibrate-phase7-slice2e-cgroup.py")
+    privileged_migration = workflow.index("--privileged-cgroup-migration")
     cleanup_step = workflow.index("- name: Remove delegated cgroup parent")
     upload_step = workflow.index("- name: Upload raw calibration JSON")
-    if not verified < dropped_privileges < campaign_step < captured_pid < precreated < entered_delegate < released_gate:
-        fail("Slice 2E campaign is not entered and predelegated before measurement")
+    if not verified < campaign_step < privileged_migration:
+        fail("Slice 2E campaign does not own privileged child-cgroup migration")
     if not campaign_step < cleanup_step < upload_step or "if: always()" not in workflow[upload_step:]:
         fail("Slice 2E workflow no longer preserves failed raw evidence after cleanup")
 
@@ -722,6 +706,7 @@ def audit_calibration_evidence(path: Path) -> None:
         "exact_command": expected_command,
         "workload": "real-host-load-and-idle-ready-marker",
         "idle_host_confirmed": True,
+        "privileged_cgroup_migration": True,
     }:
         fail("Slice 2E calibration release command/workload authority drifted")
     if evidence["wasmtime"] != WASMTIME_VERSION or evidence["samples_per_case"] != 5:

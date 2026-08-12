@@ -64,42 +64,10 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          export JUNBAN_SLICE2E_UID="$(id -u)"
-          export JUNBAN_SLICE2E_GID="$(id -g)"
-          sudo --preserve-env=PATH,HOME,GITHUB_SHA,GITHUB_RUN_ID,GITHUB_RUN_ATTEMPT,GITHUB_WORKSPACE,RUNNER_TEMP,JUNBAN_SLICE2E_CGROUP_PARENT,JUNBAN_SLICE2E_UID,JUNBAN_SLICE2E_GID \
-            bash -c '
-              gate="${RUNNER_TEMP}/phase7-slice2e-gate"
-              rm -f "${gate}"
-              mkfifo "${gate}"
-              chown "${JUNBAN_SLICE2E_UID}:${JUNBAN_SLICE2E_GID}" "${gate}"
-              JUNBAN_SLICE2E_PRECREATED_CGROUPS=1 \
-                setpriv --reuid "${JUNBAN_SLICE2E_UID}" \
-                --regid "${JUNBAN_SLICE2E_GID}" --init-groups \
-                python3 -c "import os,sys; print(os.getpid(), flush=True); open(sys.argv[1], \"rb\").read(1); os.execv(sys.executable, [sys.executable, *sys.argv[2:]])" \
-                "${gate}" scripts/calibrate-phase7-slice2e-cgroup.py \
-                --idle-host-confirmed \
-                --output "${{ runner.temp }}/phase7-slice2e-cgroup-memory.json" \
-                > "${RUNNER_TEMP}/phase7-slice2e-calibration.log" 2>&1 &
-              calibration_pid="$!"
-              for profile_scale in baseline:0 rust:1 rust:4 rust:16 typescript:1 typescript:4 typescript:16; do
-                IFS=: read -r profile scale <<< "${profile_scale}"
-                for sequence in 1 2 3 4 5; do
-                  child="${JUNBAN_SLICE2E_CGROUP_PARENT}/junban-slice2e-${calibration_pid}-${profile}-${scale}-${sequence}"
-                  mkdir "${child}"
-                  chown "${JUNBAN_SLICE2E_UID}:${JUNBAN_SLICE2E_GID}" \
-                    "${child}" "${child}/cgroup.procs" "${child}/cgroup.threads"
-                  chmod u+rw "${child}/cgroup.procs" "${child}/cgroup.threads"
-                done
-              done
-              echo "${calibration_pid}" > "${JUNBAN_SLICE2E_CGROUP_PARENT}/cgroup.procs"
-              printf x > "${gate}"
-              if ! wait "${calibration_pid}"; then
-                cat "${RUNNER_TEMP}/phase7-slice2e-calibration.log"
-                exit 1
-              fi
-              cat "${RUNNER_TEMP}/phase7-slice2e-calibration.log"
-              rm -f "${gate}" "${RUNNER_TEMP}/phase7-slice2e-calibration.log"
-            '
+          sudo -E python3 scripts/calibrate-phase7-slice2e-cgroup.py \
+            --privileged-cgroup-migration \
+            --idle-host-confirmed \
+            --output "${{ runner.temp }}/phase7-slice2e-cgroup-memory.json"
 
       - name: Remove delegated cgroup parent
         if: always()

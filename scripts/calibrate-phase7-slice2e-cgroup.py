@@ -101,8 +101,13 @@ def digest(path: Path) -> str:
     return value.hexdigest()
 
 
-def run(args: list[str], *, capture: bool = False) -> str:
-    result = subprocess.run(args, cwd=ROOT, check=True, text=True, capture_output=capture)
+def run(args: list[str], *, capture: bool = False, input_text: str | None = None) -> str:
+    options: dict[str, Any] = {"cwd": ROOT, "check": True, "text": True}
+    if capture:
+        options["capture_output"] = True
+    elif input_text is not None:
+        options["stdout"] = subprocess.DEVNULL
+    result = subprocess.run(args, input=input_text, **options)
     return result.stdout if capture else ""
 
 
@@ -197,6 +202,8 @@ def measure_case(
     profile: str,
     scale: int,
     sequence: int,
+    *,
+    privileged_cgroup_migration: bool,
 ) -> dict[str, Any]:
     group = parent / f"junban-slice2e-{os.getpid()}-{profile}-{scale}-{sequence}"
     precreated = os.environ.get("JUNBAN_SLICE2E_PRECREATED_CGROUPS") == "1"
@@ -238,8 +245,11 @@ def measure_case(
     sample: dict[str, Any] | None = None
     try:
         try:
-            (group / "cgroup.procs").write_text(f"{process.pid}\n", encoding="ascii")
-        except OSError as error:
+            if privileged_cgroup_migration:
+                run(["sudo", "tee", str(group / "cgroup.procs")], capture=False, input_text=f"{process.pid}\n")
+            else:
+                (group / "cgroup.procs").write_text(f"{process.pid}\n", encoding="ascii")
+        except (OSError, subprocess.CalledProcessError) as error:
             fail(f"failed to move calibration process into {group}: {error}")
         started = time.monotonic_ns()
         os.kill(process.pid, signal.SIGCONT)
@@ -495,6 +505,7 @@ def main() -> int:
     parser = argparse.ArgumentParser()
     parser.add_argument("--host", type=Path)
     parser.add_argument("--idle-host-confirmed", action="store_true")
+    parser.add_argument("--privileged-cgroup-migration", action="store_true")
     parser.add_argument(
         "--output",
         type=Path,
@@ -503,6 +514,9 @@ def main() -> int:
     options = parser.parse_args()
     if platform.system() != "Linux" or not Path("/sys/fs/cgroup/cgroup.controllers").is_file():
         raise SystemExit("Slice 2E memory calibration requires Linux cgroup v2")
+
+    if options.privileged_cgroup_migration and os.geteuid() != 0:
+        raise SystemExit("--privileged-cgroup-migration requires root")
 
     git = git_provenance()
     pre = host_snapshot(enforce=True)
@@ -522,6 +536,7 @@ def main() -> int:
             "exact_command": RELEASE_COMMAND,
             "workload": "real-host-load-and-idle-ready-marker",
             "idle_host_confirmed": options.idle_host_confirmed,
+            "privileged_cgroup_migration": options.privileged_cgroup_migration,
         },
         "wasmtime": WASMTIME_VERSION,
         "metric": {
@@ -588,7 +603,14 @@ def main() -> int:
         for profile, scale, support_plugins in CASES:
             print(f"Slice 2E cgroup calibration: profile={profile} scale={scale}")
             samples = [
-                measure_case(parent, host, profile, scale, sequence)
+                measure_case(
+                    parent,
+                    host,
+                    profile,
+                    scale,
+                    sequence,
+                    privileged_cgroup_migration=options.privileged_cgroup_migration,
+                )
                 for sequence in range(1, SAMPLES + 1)
             ]
             graph_size, expected_support = graph_metadata(profile, scale)

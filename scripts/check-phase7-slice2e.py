@@ -429,7 +429,8 @@ def audit_static() -> None:
         'echo +memory | sudo tee "${parent}/cgroup.subtree_control"',
         'sudo chown "$(id -u):$(id -g)"',
         '"${parent}/cgroup.procs" "${parent}/cgroup.threads"',
-        "sudo -E python3 scripts/calibrate-phase7-slice2e-cgroup.py",
+        'sudo env "PATH=${PATH}" "HOME=${HOME}"',
+        "python3 scripts/calibrate-phase7-slice2e-cgroup.py",
         "--privileged-cgroup-migration",
         'find "${JUNBAN_SLICE2E_CGROUP_PARENT}" -mindepth 1 -maxdepth 1',
         'sudo rmdir "${JUNBAN_SLICE2E_CGROUP_PARENT}"',
@@ -450,7 +451,7 @@ def audit_static() -> None:
         r'sudo rmdir "\$\{JUNBAN_SLICE2E_CGROUP_PARENT\}"\s*\|\|\s*true', workflow
     ):
         fail("Slice 2E workflow retained leaf delegation or ignored cleanup")
-    campaign_step = workflow.index("sudo -E python3 scripts/calibrate-phase7-slice2e-cgroup.py")
+    campaign_step = workflow.index("python3 scripts/calibrate-phase7-slice2e-cgroup.py")
     privileged_migration = workflow.index("--privileged-cgroup-migration")
     cleanup_step = workflow.index("- name: Remove delegated cgroup parent")
     upload_step = workflow.index("- name: Upload raw calibration JSON")

@@ -64,7 +64,8 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          sudo -E python3 scripts/calibrate-phase7-slice2e-cgroup.py \
+          sudo env "PATH=${PATH}" "HOME=${HOME}" \
+            python3 scripts/calibrate-phase7-slice2e-cgroup.py \
             --privileged-cgroup-migration \
             --idle-host-confirmed \
             --output "${{ runner.temp }}/phase7-slice2e-cgroup-memory.json"

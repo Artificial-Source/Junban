@@ -1,0 +1,21 @@
+{
+  "schema_version": 1,
+  "artifact": "artifacts/pomodoro.wasm",
+  "size_bytes": 145056,
+  "sha256": "24d498d3b2551547a506d94c46fca3a7ff68235a1d9709e86d77a8d006f07faf",
+  "source_wit_sha256": "5705801973219a0e6981693653f2caefdf1090345b65494750c8d8a9bf4b15f4",
+  "world_wit_sha256": "d223802a5294069e77f7dbda274b7e1e0e6617bec07c52e26d69bf2bc90c4b97",
+  "imports": [
+    "junban:plugin/host-clock@0.1.0",
+    "junban:plugin/host-settings@0.1.0",
+    "junban:plugin/host-storage@0.1.0",
+    "junban:plugin/types@0.1.0",
+    "wasi:cli/environment@0.2.6",
+    "wasi:cli/exit@0.2.6",
+    "wasi:cli/stderr@0.2.6",
+    "wasi:io/error@0.2.6",
+    "wasi:io/streams@0.2.6"
+  ],
+  "exports": ["junban:plugin/guest@0.1.0"],
+  "reproducibility": "byte-for-byte"
+}

@@ -1,0 +1,8 @@
+package junban:reference-pomodoro@0.1.0;
+
+world reference-pomodoro {
+  include junban:plugin/plugin@0.1.0;
+  import junban:plugin/host-settings@0.1.0;
+  import junban:plugin/host-storage@0.1.0;
+  import junban:plugin/host-clock@0.1.0;
+}

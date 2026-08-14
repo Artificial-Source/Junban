@@ -1,7 +1,7 @@
 /**
  * Sidebar: full navigation, project tree, saved filters, Phase 3 tools, workspace chrome.
  * Phase 3 authority places Calendar/Matrix/Stats/Timeblocking after projects and keeps a
- * non-functional Workspace footer (AI Chat / Settings) matching the frozen legacy shell.
+ * Workspace footer: AI Chat navigates to the canonical /ai-chat route; Settings is live.
  * Filters & Labels and Quick Wins remain reachable via routes/command palette; they are
  * omitted from the primary tool strip so the Phase 3 visual authority chrome matches.
  */
@@ -22,9 +22,11 @@ import {
   MessageSquare,
   Settings,
   GripVertical,
+  Puzzle,
 } from "lucide-react";
-import type { View, AppRoute } from "../hooks/useRouting";
+import type { View, AppRoute, NavigateTarget } from "../hooks/useRouting";
 import type { CatalogResponse, ProjectDto, SavedFilterDto } from "../api/client";
+import { PluginSidebarPanels } from "../plugins/contributions";
 
 interface NavItem {
   id: View;
@@ -55,7 +57,7 @@ const TOOL_NAV_ITEMS: NavItem[] = [
 interface SidebarProps {
   currentView: View;
   currentRoute: AppRoute;
-  onNavigate: (target: View | AppRoute) => void;
+  onNavigate: (target: NavigateTarget) => void;
   onAddTask: () => void;
   onSearch: () => void;
   collapsed: boolean;
@@ -69,6 +71,13 @@ interface SidebarProps {
   phase2VisualFixture?: boolean;
   /** Align explicit Phase 3 evidence with the legacy plugin row gutter. */
   phase3VisualFixture?: boolean;
+  /** Server-confirmed plugin tool/navigation contributions (namespaced). */
+  pluginTools?: Array<{
+    id: string;
+    label: string;
+    pluginId: string;
+    surfaceId: string;
+  }>;
 }
 
 export function Sidebar({
@@ -85,6 +94,7 @@ export function Sidebar({
   onOpenProjectModal,
   phase2VisualFixture = false,
   phase3VisualFixture = false,
+  pluginTools = [],
 }: SidebarProps) {
   const [projectsExpanded, setProjectsExpanded] = useState(true);
   const [filtersExpanded, setFiltersExpanded] = useState(true);
@@ -414,8 +424,42 @@ export function Sidebar({
                   </button>
                 );
               })}
+              {pluginTools.map((item) => {
+                const isActive =
+                  currentRoute.name === "plugin-view" &&
+                  currentRoute.pluginId === item.pluginId &&
+                  currentRoute.surfaceId === item.surfaceId;
+                return (
+                  <button
+                    key={item.id}
+                    type="button"
+                    onClick={() =>
+                      onNavigate({
+                        name: "plugin-view",
+                        pluginId: item.pluginId,
+                        surfaceId: item.surfaceId,
+                      })
+                    }
+                    aria-current={isActive ? "page" : undefined}
+                    className={`group relative text-left px-3 py-1.5 rounded-md text-sm flex items-center transition-colors ${
+                      phase3VisualFixture && !collapsed ? "ml-[26px] w-[calc(100%-26px)]" : "w-full"
+                    } ${collapsed ? "justify-center" : "gap-3"} ${
+                      isActive
+                        ? "bg-accent-action/10 text-accent-foreground font-medium"
+                        : "text-on-surface-secondary hover:bg-surface-tertiary hover:text-on-surface"
+                    }`}
+                    title={collapsed ? item.label : undefined}
+                  >
+                    <Puzzle size={18} strokeWidth={isActive ? 2.25 : 1.75} />
+                    {!collapsed && <span className="flex-1">{item.label}</span>}
+                  </button>
+                );
+              })}
             </div>
           )}
+
+          {/* Server-confirmed declarative plugin panels (desktop + mobile drawer share this tree). */}
+          {!phase2VisualFixture ? <PluginSidebarPanels collapsed={collapsed} /> : null}
 
           {/* Saved Filters section */}
           {!collapsed && savedFilters.length > 0 && (
@@ -470,7 +514,7 @@ export function Sidebar({
           )}
         </div>
 
-        {/* Workspace chrome — presentational until AI (Phase 6) and Settings (Phase 4). */}
+        {/* Workspace chrome — AI Chat + Settings. */}
         {!phase2VisualFixture && (
           <div
             className={`shrink-0 border-t border-border/60 ${collapsed ? "pt-2 pb-3" : "pt-3 pb-3"}`}
@@ -484,26 +528,38 @@ export function Sidebar({
               <li>
                 <button
                   type="button"
-                  title="AI Chat arrives in a later phase"
-                  aria-disabled="true"
-                  onClick={(event) => event.preventDefault()}
-                  className={`group relative flex w-full items-center rounded-md px-3 py-1.5 text-left text-sm text-on-surface-secondary transition-colors hover:bg-surface-tertiary hover:text-on-surface ${
+                  title={collapsed ? "AI Chat" : undefined}
+                  onClick={() => onNavigate("ai-chat")}
+                  aria-current={currentView === "ai-chat" ? "page" : undefined}
+                  className={`group relative flex w-full items-center rounded-md px-3 py-1.5 text-left text-sm transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-focus ${
                     collapsed ? "justify-center" : "gap-3"
+                  } ${
+                    currentView === "ai-chat"
+                      ? "bg-accent-action/10 text-accent-foreground font-medium"
+                      : "text-on-surface-secondary hover:bg-surface-tertiary hover:text-on-surface"
                   }`}
                 >
-                  <MessageSquare size={18} strokeWidth={1.75} aria-hidden="true" />
+                  <MessageSquare
+                    size={18}
+                    strokeWidth={currentView === "ai-chat" ? 2.25 : 1.75}
+                    aria-hidden="true"
+                  />
                   {!collapsed && <span>AI Chat</span>}
+                  {collapsed && (
+                    <span className="pointer-events-none absolute left-full top-1/2 z-50 ml-2 -translate-y-1/2 whitespace-nowrap rounded-md border border-border bg-surface px-2 py-1 text-xs text-on-surface opacity-0 shadow-md transition-opacity group-hover:opacity-100">
+                      AI Chat
+                    </span>
+                  )}
                 </button>
               </li>
               <li>
                 <button
                   type="button"
-                  title="Settings arrives in Phase 4"
-                  aria-disabled="true"
-                  onClick={(event) => event.preventDefault()}
-                  className={`group relative flex w-full items-center rounded-md px-3 py-1.5 text-left text-sm text-on-surface-secondary transition-colors hover:bg-surface-tertiary hover:text-on-surface ${
+                  title={collapsed ? "Settings" : undefined}
+                  onClick={() => onNavigate({ name: "settings" })}
+                  className={`group relative flex w-full items-center rounded-md px-3 py-1.5 text-left text-sm transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-focus ${
                     collapsed ? "justify-center" : "gap-3"
-                  }`}
+                  } text-on-surface-secondary hover:bg-surface-tertiary hover:text-on-surface`}
                 >
                   <Settings size={18} strokeWidth={1.75} aria-hidden="true" />
                   {!collapsed && <span>Settings</span>}

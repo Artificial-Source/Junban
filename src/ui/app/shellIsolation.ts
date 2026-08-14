@@ -27,6 +27,7 @@ export type ShellBlockingFlags = {
   endOfDayOpen?: boolean;
   weeklyReviewOpen?: boolean;
   focusModeOpen?: boolean;
+  settingsOpen?: boolean;
 };
 
 export function isShellBlocking(flags: ShellBlockingFlags): boolean {
@@ -40,7 +41,8 @@ export function isShellBlocking(flags: ShellBlockingFlags): boolean {
     Boolean(flags.planMyDayOpen) ||
     Boolean(flags.endOfDayOpen) ||
     Boolean(flags.weeklyReviewOpen) ||
-    Boolean(flags.focusModeOpen)
+    Boolean(flags.focusModeOpen) ||
+    Boolean(flags.settingsOpen)
   );
 }
 

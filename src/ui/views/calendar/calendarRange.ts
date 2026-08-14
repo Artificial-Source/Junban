@@ -9,6 +9,19 @@ export { todayKey };
 
 export type CalendarMode = "day" | "week" | "month";
 
+/** Map confirmed week_start onto JS getDay() numbers (Sun=0 … Sat=6). */
+export function weekStartToDayNumber(weekStart: string): number {
+  switch (weekStart) {
+    case "monday":
+      return 1;
+    case "saturday":
+      return 6;
+    case "sunday":
+    default:
+      return 0;
+  }
+}
+
 /** Inclusive civil day span bound for calendar and timeblocking reads. */
 export const CALENDAR_MAX_RANGE_DAYS = 42;
 
@@ -139,17 +152,8 @@ export function splitDayTasks(tasks: TaskDto[]): {
   return { allDayTasks, timedTasks };
 }
 
-/** Format a civil wall-clock `HH:MM[:SS]` for display. */
-export function formatCivilTime(time: string, hour12 = true): string {
-  const match = /^(\d{2}):(\d{2})(?::(\d{2}))?$/.exec(time);
-  if (!match) return time;
-  const hour = Number(match[1]);
-  const minute = match[2]!;
-  if (!hour12) return `${match[1]}:${minute}`;
-  const suffix = hour >= 12 ? "PM" : "AM";
-  const hour12Value = hour % 12 === 0 ? 12 : hour % 12;
-  return `${hour12Value}:${minute} ${suffix}`;
-}
+/** Format a civil wall-clock `HH:MM[:SS]` using confirmed time_format (re-export). */
+export { formatCivilTime } from "../../lib/dates";
 
 export function isTodayCivil(key: string, now: Date = new Date()): boolean {
   return key === todayKey(now);

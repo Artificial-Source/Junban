@@ -1,9 +1,11 @@
-import { useCallback, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { getWeekStart, toCivilDateKey, type CalendarMode } from "./calendarRange";
 
 interface UseCalendarNavigationOptions {
   initialMode?: CalendarMode;
   weekStartDay?: number;
+  /** Confirmed server calendar_default; applied once until the user changes mode. */
+  authoritativeMode?: CalendarMode | null;
   onModeChange?: (mode: CalendarMode) => void;
 }
 
@@ -11,15 +13,23 @@ export function useCalendarNavigation(options: UseCalendarNavigationOptions = {}
   const weekStartDay = options.weekStartDay ?? 0;
   const [selectedDate, setSelectedDate] = useState(() => new Date());
   const [mode, setModeInternal] = useState<CalendarMode>(options.initialMode ?? "week");
+  const manualModeRef = useRef(false);
 
   const onModeChange = options.onModeChange;
   const setMode = useCallback(
     (next: CalendarMode) => {
+      manualModeRef.current = true;
       setModeInternal(next);
       onModeChange?.(next);
     },
     [onModeChange],
   );
+
+  useEffect(() => {
+    if (manualModeRef.current) return;
+    if (!options.authoritativeMode) return;
+    setModeInternal(options.authoritativeMode);
+  }, [options.authoritativeMode]);
 
   const goNext = useCallback(() => {
     setSelectedDate((d) => {

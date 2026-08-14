@@ -1,0 +1,142 @@
+{
+  "schema_version": 1,
+  "id": "pomodoro",
+  "name": "Pomodoro Timer",
+  "description": "A deterministic Pomodoro timer with host-owned settings and durable state.",
+  "version": "0.1.0",
+  "publisher": {
+    "id": "junban-reference",
+    "name": "Junban Reference Plugins"
+  },
+  "license": "MIT",
+  "junban_compatibility": "^0.1",
+  "wit": {
+    "package": "junban:plugin",
+    "world": "plugin",
+    "version": "0.1.0"
+  },
+  "runtime_profile": "rust",
+  "permissions": [
+    {
+      "capability": "commands",
+      "scope": {}
+    },
+    {
+      "capability": "settings",
+      "scope": {}
+    },
+    {
+      "capability": "storage",
+      "scope": {}
+    },
+    {
+      "capability": "ui:status",
+      "scope": {}
+    },
+    {
+      "capability": "ui:view",
+      "scope": {}
+    }
+  ],
+  "dependencies": [],
+  "commands": [
+    {
+      "id": "pause",
+      "title": "Pause timer",
+      "description": "Pause the current interval at its displayed remaining time.",
+      "icon": null,
+      "inputs": []
+    },
+    {
+      "id": "reset",
+      "title": "Reset timer",
+      "description": "Reset and pause the current interval using the latest settings.",
+      "icon": null,
+      "inputs": []
+    },
+    {
+      "id": "skip",
+      "title": "Skip interval",
+      "description": "Advance to the next work or break interval and pause it.",
+      "icon": null,
+      "inputs": []
+    },
+    {
+      "id": "start",
+      "title": "Start timer",
+      "description": "Start or resume the current interval.",
+      "icon": "play",
+      "inputs": []
+    }
+  ],
+  "subscriptions": [],
+  "surfaces": [
+    {
+      "id": "status",
+      "kind": "status",
+      "title": "Pomodoro status",
+      "icon": "timer",
+      "location": "status",
+      "actions": ["pause", "start"]
+    },
+    {
+      "id": "timer",
+      "kind": "view",
+      "title": "Pomodoro timer",
+      "icon": "timer",
+      "location": "tools",
+      "actions": ["pause", "reset", "skip", "start"]
+    }
+  ],
+  "settings": [
+    {
+      "id": "break-minutes",
+      "label": "Break minutes",
+      "description": "Length of a regular break.",
+      "schema": {
+        "type": "integer",
+        "default": 5,
+        "min": 1,
+        "max": 60,
+        "step": 1
+      }
+    },
+    {
+      "id": "long-break-minutes",
+      "label": "Long break minutes",
+      "description": "Length of a long break.",
+      "schema": {
+        "type": "integer",
+        "default": 15,
+        "min": 1,
+        "max": 60,
+        "step": 1
+      }
+    },
+    {
+      "id": "sessions-before-long-break",
+      "label": "Sessions before long break",
+      "description": "Completed work intervals before a long break.",
+      "schema": {
+        "type": "integer",
+        "default": 4,
+        "min": 1,
+        "max": 10,
+        "step": 1
+      }
+    },
+    {
+      "id": "work-minutes",
+      "label": "Work minutes",
+      "description": "Length of a focused work interval.",
+      "schema": {
+        "type": "integer",
+        "default": 25,
+        "min": 1,
+        "max": 120,
+        "step": 1
+      }
+    }
+  ],
+  "services": []
+}

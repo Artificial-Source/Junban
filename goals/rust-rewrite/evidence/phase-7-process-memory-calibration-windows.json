@@ -1,0 +1,1431 @@
+{
+  "schema_version": 1,
+  "protocol": "junban-phase7-process-memory-calibration-v1",
+  "status": "single-machine/platform preliminary calibration only; no process cap or acceptance claim",
+  "git_commit": "9bb5941e42270d65798d86ec3b652bd1001b0744",
+  "git_tree_clean": true,
+  "os": "windows",
+  "architecture": "x86_64",
+  "metric_authority": "Get-Process exact child: private commit/pagefile/working set/virtual size",
+  "executable": {
+    "file_name": "junban-plugin-host.exe",
+    "sha256": "7568bb7c69331711cf13def71b7d0332a8043f1598cb6b68c7cfca33ded8caf6"
+  },
+  "engine": {
+    "wasmtime": "36.0.13",
+    "memory_reservation_bytes": 134217728,
+    "memory_guard_bytes": 0,
+    "memory_reservation_for_growth_bytes": 0,
+    "explicit_bounds_checks_below_wasm32_address_space": true
+  },
+  "profiles": [
+    {
+      "profile": "rust",
+      "component_sha256": "7b14a85ec91105cafd174e0cd65e3e2064512deefe1ba7fa981ece5683e24d62",
+      "guest_linear_memory_limit_bytes": 67108864,
+      "barrier_allocation_bytes": 50331648,
+      "warm_up": {
+        "sequence": 0,
+        "warm_up": true,
+        "duration_millis": 15944,
+        "sample_count": 8,
+        "phase_maxima": [
+          {
+            "phase": "spawn",
+            "sample_count": 1,
+            "metrics": {
+              "virtual_address_bytes": 4379025408,
+              "rss_bytes": null,
+              "peak_virtual_address_bytes": 4379025408,
+              "peak_rss_bytes": null,
+              "private_commit_bytes": 1073152,
+              "pagefile_bytes": 1073152,
+              "working_set_bytes": 5259264,
+              "peak_private_commit_bytes": null,
+              "peak_pagefile_bytes": 1085440,
+              "peak_working_set_bytes": 5259264
+            }
+          },
+          {
+            "phase": "hello",
+            "sample_count": 1,
+            "metrics": {
+              "virtual_address_bytes": 4379025408,
+              "rss_bytes": null,
+              "peak_virtual_address_bytes": 4379025408,
+              "peak_rss_bytes": null,
+              "private_commit_bytes": 1073152,
+              "pagefile_bytes": 1073152,
+              "working_set_bytes": 5259264,
+              "peak_private_commit_bytes": null,
+              "peak_pagefile_bytes": 1085440,
+              "peak_working_set_bytes": 5259264
+            }
+          },
+          {
+            "phase": "compile_and_instantiate",
+            "sample_count": 2,
+            "metrics": {
+              "virtual_address_bytes": 4394754048,
+              "rss_bytes": null,
+              "peak_virtual_address_bytes": 4400259072,
+              "peak_rss_bytes": null,
+              "private_commit_bytes": 7266304,
+              "pagefile_bytes": 7266304,
+              "working_set_bytes": 15736832,
+              "peak_private_commit_bytes": null,
+              "peak_pagefile_bytes": 17076224,
+              "peak_working_set_bytes": 21598208
+            }
+          },
+          {
+            "phase": "valid_max_working_set_barrier",
+            "sample_count": 2,
+            "metrics": {
+              "virtual_address_bytes": 4529704960,
+              "rss_bytes": null,
+              "peak_virtual_address_bytes": 4529704960,
+              "peak_rss_bytes": null,
+              "private_commit_bytes": 56721408,
+              "pagefile_bytes": 56721408,
+              "working_set_bytes": 65728512,
+              "peak_private_commit_bytes": null,
+              "peak_pagefile_bytes": 56721408,
+              "peak_working_set_bytes": 65728512
+            }
+          },
+          {
+            "phase": "representative_invocation",
+            "sample_count": 1,
+            "metrics": {
+              "virtual_address_bytes": 4529704960,
+              "rss_bytes": null,
+              "peak_virtual_address_bytes": 4529704960,
+              "peak_rss_bytes": null,
+              "private_commit_bytes": 56725504,
+              "pagefile_bytes": 56725504,
+              "working_set_bytes": 65867776,
+              "peak_private_commit_bytes": null,
+              "peak_pagefile_bytes": 56745984,
+              "peak_working_set_bytes": 65867776
+            }
+          },
+          {
+            "phase": "shutdown",
+            "sample_count": 1,
+            "metrics": {
+              "virtual_address_bytes": 4529704960,
+              "rss_bytes": null,
+              "peak_virtual_address_bytes": 4529704960,
+              "peak_rss_bytes": null,
+              "private_commit_bytes": 56725504,
+              "pagefile_bytes": 56725504,
+              "working_set_bytes": 65961984,
+              "peak_private_commit_bytes": null,
+              "peak_pagefile_bytes": 56745984,
+              "peak_working_set_bytes": 65961984
+            }
+          }
+        ],
+        "whole_run_maximum": {
+          "virtual_address_bytes": 4529704960,
+          "rss_bytes": null,
+          "peak_virtual_address_bytes": 4529704960,
+          "peak_rss_bytes": null,
+          "private_commit_bytes": 56725504,
+          "pagefile_bytes": 56725504,
+          "working_set_bytes": 65961984,
+          "peak_private_commit_bytes": null,
+          "peak_pagefile_bytes": 56745984,
+          "peak_working_set_bytes": 65961984
+        }
+      },
+      "measured": [
+        {
+          "sequence": 1,
+          "warm_up": false,
+          "duration_millis": 3252,
+          "sample_count": 8,
+          "phase_maxima": [
+            {
+              "phase": "spawn",
+              "sample_count": 1,
+              "metrics": {
+                "virtual_address_bytes": 4378357760,
+                "rss_bytes": null,
+                "peak_virtual_address_bytes": 4378357760,
+                "peak_rss_bytes": null,
+                "private_commit_bytes": 1028096,
+                "pagefile_bytes": 1028096,
+                "working_set_bytes": 4820992,
+                "peak_private_commit_bytes": null,
+                "peak_pagefile_bytes": 1040384,
+                "peak_working_set_bytes": 4820992
+              }
+            },
+            {
+              "phase": "hello",
+              "sample_count": 1,
+              "metrics": {
+                "virtual_address_bytes": 4378357760,
+                "rss_bytes": null,
+                "peak_virtual_address_bytes": 4378357760,
+                "peak_rss_bytes": null,
+                "private_commit_bytes": 1028096,
+                "pagefile_bytes": 1028096,
+                "working_set_bytes": 4820992,
+                "peak_private_commit_bytes": null,
+                "peak_pagefile_bytes": 1040384,
+                "peak_working_set_bytes": 4820992
+              }
+            },
+            {
+              "phase": "compile_and_instantiate",
+              "sample_count": 2,
+              "metrics": {
+                "virtual_address_bytes": 4394086400,
+                "rss_bytes": null,
+                "peak_virtual_address_bytes": 4399534080,
+                "peak_rss_bytes": null,
+                "private_commit_bytes": 6729728,
+                "pagefile_bytes": 6729728,
+                "working_set_bytes": 15265792,
+                "peak_private_commit_bytes": null,
+                "peak_pagefile_bytes": 17190912,
+                "peak_working_set_bytes": 20910080
+              }
+            },
+            {
+              "phase": "valid_max_working_set_barrier",
+              "sample_count": 2,
+              "metrics": {
+                "virtual_address_bytes": 4529037312,
+                "rss_bytes": null,
+                "peak_virtual_address_bytes": 4529037312,
+                "peak_rss_bytes": null,
+                "private_commit_bytes": 56705024,
+                "pagefile_bytes": 56705024,
+                "working_set_bytes": 65359872,
+                "peak_private_commit_bytes": null,
+                "peak_pagefile_bytes": 56705024,
+                "peak_working_set_bytes": 65359872
+              }
+            },
+            {
+              "phase": "representative_invocation",
+              "sample_count": 1,
+              "metrics": {
+                "virtual_address_bytes": 4529037312,
+                "rss_bytes": null,
+                "peak_virtual_address_bytes": 4529037312,
+                "peak_rss_bytes": null,
+                "private_commit_bytes": 56709120,
+                "pagefile_bytes": 56709120,
+                "working_set_bytes": 65499136,
+                "peak_private_commit_bytes": null,
+                "peak_pagefile_bytes": 56729600,
+                "peak_working_set_bytes": 65499136
+              }
+            },
+            {
+              "phase": "shutdown",
+              "sample_count": 1,
+              "metrics": {
+                "virtual_address_bytes": 4529037312,
+                "rss_bytes": null,
+                "peak_virtual_address_bytes": 4529037312,
+                "peak_rss_bytes": null,
+                "private_commit_bytes": 56709120,
+                "pagefile_bytes": 56709120,
+                "working_set_bytes": 65593344,
+                "peak_private_commit_bytes": null,
+                "peak_pagefile_bytes": 56729600,
+                "peak_working_set_bytes": 65593344
+              }
+            }
+          ],
+          "whole_run_maximum": {
+            "virtual_address_bytes": 4529037312,
+            "rss_bytes": null,
+            "peak_virtual_address_bytes": 4529037312,
+            "peak_rss_bytes": null,
+            "private_commit_bytes": 56709120,
+            "pagefile_bytes": 56709120,
+            "working_set_bytes": 65593344,
+            "peak_private_commit_bytes": null,
+            "peak_pagefile_bytes": 56729600,
+            "peak_working_set_bytes": 65593344
+          }
+        },
+        {
+          "sequence": 2,
+          "warm_up": false,
+          "duration_millis": 3241,
+          "sample_count": 8,
+          "phase_maxima": [
+            {
+              "phase": "spawn",
+              "sample_count": 1,
+              "metrics": {
+                "virtual_address_bytes": 4378357760,
+                "rss_bytes": null,
+                "peak_virtual_address_bytes": 4378357760,
+                "peak_rss_bytes": null,
+                "private_commit_bytes": 1048576,
+                "pagefile_bytes": 1048576,
+                "working_set_bytes": 4837376,
+                "peak_private_commit_bytes": null,
+                "peak_pagefile_bytes": 1060864,
+                "peak_working_set_bytes": 4837376
+              }
+            },
+            {
+              "phase": "hello",
+              "sample_count": 1,
+              "metrics": {
+                "virtual_address_bytes": 4378357760,
+                "rss_bytes": null,
+                "peak_virtual_address_bytes": 4378357760,
+                "peak_rss_bytes": null,
+                "private_commit_bytes": 1048576,
+                "pagefile_bytes": 1048576,
+                "working_set_bytes": 4837376,
+                "peak_private_commit_bytes": null,
+                "peak_pagefile_bytes": 1060864,
+                "peak_working_set_bytes": 4837376
+              }
+            },
+            {
+              "phase": "compile_and_instantiate",
+              "sample_count": 2,
+              "metrics": {
+                "virtual_address_bytes": 4394086400,
+                "rss_bytes": null,
+                "peak_virtual_address_bytes": 4399505408,
+                "peak_rss_bytes": null,
+                "private_commit_bytes": 10571776,
+                "pagefile_bytes": 10571776,
+                "working_set_bytes": 18116608,
+                "peak_private_commit_bytes": null,
+                "peak_pagefile_bytes": 17092608,
+                "peak_working_set_bytes": 21143552
+              }
+            },
+            {
+              "phase": "valid_max_working_set_barrier",
+              "sample_count": 2,
+              "metrics": {
+                "virtual_address_bytes": 4529037312,
+                "rss_bytes": null,
+                "peak_virtual_address_bytes": 4529037312,
+                "peak_rss_bytes": null,
+                "private_commit_bytes": 56799232,
+                "pagefile_bytes": 56799232,
+                "working_set_bytes": 65323008,
+                "peak_private_commit_bytes": null,
+                "peak_pagefile_bytes": 56799232,
+                "peak_working_set_bytes": 65323008
+              }
+            },
+            {
+              "phase": "representative_invocation",
+              "sample_count": 1,
+              "metrics": {
+                "virtual_address_bytes": 4529037312,
+                "rss_bytes": null,
+                "peak_virtual_address_bytes": 4529037312,
+                "peak_rss_bytes": null,
+                "private_commit_bytes": 56803328,
+                "pagefile_bytes": 56803328,
+                "working_set_bytes": 65462272,
+                "peak_private_commit_bytes": null,
+                "peak_pagefile_bytes": 56823808,
+                "peak_working_set_bytes": 65462272
+              }
+            },
+            {
+              "phase": "shutdown",
+              "sample_count": 1,
+              "metrics": {
+                "virtual_address_bytes": 4529037312,
+                "rss_bytes": null,
+                "peak_virtual_address_bytes": 4529037312,
+                "peak_rss_bytes": null,
+                "private_commit_bytes": 56803328,
+                "pagefile_bytes": 56803328,
+                "working_set_bytes": 65556480,
+                "peak_private_commit_bytes": null,
+                "peak_pagefile_bytes": 56823808,
+                "peak_working_set_bytes": 65556480
+              }
+            }
+          ],
+          "whole_run_maximum": {
+            "virtual_address_bytes": 4529037312,
+            "rss_bytes": null,
+            "peak_virtual_address_bytes": 4529037312,
+            "peak_rss_bytes": null,
+            "private_commit_bytes": 56803328,
+            "pagefile_bytes": 56803328,
+            "working_set_bytes": 65556480,
+            "peak_private_commit_bytes": null,
+            "peak_pagefile_bytes": 56823808,
+            "peak_working_set_bytes": 65556480
+          }
+        },
+        {
+          "sequence": 3,
+          "warm_up": false,
+          "duration_millis": 3279,
+          "sample_count": 8,
+          "phase_maxima": [
+            {
+              "phase": "spawn",
+              "sample_count": 1,
+              "metrics": {
+                "virtual_address_bytes": 4378357760,
+                "rss_bytes": null,
+                "peak_virtual_address_bytes": 4378357760,
+                "peak_rss_bytes": null,
+                "private_commit_bytes": 1024000,
+                "pagefile_bytes": 1024000,
+                "working_set_bytes": 4816896,
+                "peak_private_commit_bytes": null,
+                "peak_pagefile_bytes": 1036288,
+                "peak_working_set_bytes": 4816896
+              }
+            },
+            {
+              "phase": "hello",
+              "sample_count": 1,
+              "metrics": {
+                "virtual_address_bytes": 4378357760,
+                "rss_bytes": null,
+                "peak_virtual_address_bytes": 4378357760,
+                "peak_rss_bytes": null,
+                "private_commit_bytes": 1024000,
+                "pagefile_bytes": 1024000,
+                "working_set_bytes": 4816896,
+                "peak_private_commit_bytes": null,
+                "peak_pagefile_bytes": 1036288,
+                "peak_working_set_bytes": 4816896
+              }
+            },
+            {
+              "phase": "compile_and_instantiate",
+              "sample_count": 2,
+              "metrics": {
+                "virtual_address_bytes": 4394086400,
+                "rss_bytes": null,
+                "peak_virtual_address_bytes": 4399480832,
+                "peak_rss_bytes": null,
+                "private_commit_bytes": 9707520,
+                "pagefile_bytes": 9707520,
+                "working_set_bytes": 17571840,
+                "peak_private_commit_bytes": null,
+                "peak_pagefile_bytes": 17207296,
+                "peak_working_set_bytes": 20983808
+              }
+            },
+            {
+              "phase": "valid_max_working_set_barrier",
+              "sample_count": 2,
+              "metrics": {
+                "virtual_address_bytes": 4529037312,
+                "rss_bytes": null,
+                "peak_virtual_address_bytes": 4529037312,
+                "peak_rss_bytes": null,
+                "private_commit_bytes": 56668160,
+                "pagefile_bytes": 56668160,
+                "working_set_bytes": 65204224,
+                "peak_private_commit_bytes": null,
+                "peak_pagefile_bytes": 56668160,
+                "peak_working_set_bytes": 65204224
+              }
+            },
+            {
+              "phase": "representative_invocation",
+              "sample_count": 1,
+              "metrics": {
+                "virtual_address_bytes": 4529037312,
+                "rss_bytes": null,
+                "peak_virtual_address_bytes": 4529037312,
+                "peak_rss_bytes": null,
+                "private_commit_bytes": 56672256,
+                "pagefile_bytes": 56672256,
+                "working_set_bytes": 65343488,
+                "peak_private_commit_bytes": null,
+                "peak_pagefile_bytes": 56692736,
+                "peak_working_set_bytes": 65343488
+              }
+            },
+            {
+              "phase": "shutdown",
+              "sample_count": 1,
+              "metrics": {
+                "virtual_address_bytes": 4529037312,
+                "rss_bytes": null,
+                "peak_virtual_address_bytes": 4529037312,
+                "peak_rss_bytes": null,
+                "private_commit_bytes": 56672256,
+                "pagefile_bytes": 56672256,
+                "working_set_bytes": 65437696,
+                "peak_private_commit_bytes": null,
+                "peak_pagefile_bytes": 56692736,
+                "peak_working_set_bytes": 65437696
+              }
+            }
+          ],
+          "whole_run_maximum": {
+            "virtual_address_bytes": 4529037312,
+            "rss_bytes": null,
+            "peak_virtual_address_bytes": 4529037312,
+            "peak_rss_bytes": null,
+            "private_commit_bytes": 56672256,
+            "pagefile_bytes": 56672256,
+            "working_set_bytes": 65437696,
+            "peak_private_commit_bytes": null,
+            "peak_pagefile_bytes": 56692736,
+            "peak_working_set_bytes": 65437696
+          }
+        },
+        {
+          "sequence": 4,
+          "warm_up": false,
+          "duration_millis": 3327,
+          "sample_count": 8,
+          "phase_maxima": [
+            {
+              "phase": "spawn",
+              "sample_count": 1,
+              "metrics": {
+                "virtual_address_bytes": 4377309184,
+                "rss_bytes": null,
+                "peak_virtual_address_bytes": 4377309184,
+                "peak_rss_bytes": null,
+                "private_commit_bytes": 1003520,
+                "pagefile_bytes": 1003520,
+                "working_set_bytes": 4808704,
+                "peak_private_commit_bytes": null,
+                "peak_pagefile_bytes": 1015808,
+                "peak_working_set_bytes": 4808704
+              }
+            },
+            {
+              "phase": "hello",
+              "sample_count": 1,
+              "metrics": {
+                "virtual_address_bytes": 4377309184,
+                "rss_bytes": null,
+                "peak_virtual_address_bytes": 4377309184,
+                "peak_rss_bytes": null,
+                "private_commit_bytes": 1003520,
+                "pagefile_bytes": 1003520,
+                "working_set_bytes": 4808704,
+                "peak_private_commit_bytes": null,
+                "peak_pagefile_bytes": 1015808,
+                "peak_working_set_bytes": 4808704
+              }
+            },
+            {
+              "phase": "compile_and_instantiate",
+              "sample_count": 2,
+              "metrics": {
+                "virtual_address_bytes": 4393037824,
+                "rss_bytes": null,
+                "peak_virtual_address_bytes": 4398456832,
+                "peak_rss_bytes": null,
+                "private_commit_bytes": 10432512,
+                "pagefile_bytes": 10432512,
+                "working_set_bytes": 17629184,
+                "peak_private_commit_bytes": null,
+                "peak_pagefile_bytes": 16977920,
+                "peak_working_set_bytes": 20844544
+              }
+            },
+            {
+              "phase": "valid_max_working_set_barrier",
+              "sample_count": 2,
+              "metrics": {
+                "virtual_address_bytes": 4527988736,
+                "rss_bytes": null,
+                "peak_virtual_address_bytes": 4527988736,
+                "peak_rss_bytes": null,
+                "private_commit_bytes": 56991744,
+                "pagefile_bytes": 56991744,
+                "working_set_bytes": 65540096,
+                "peak_private_commit_bytes": null,
+                "peak_pagefile_bytes": 56991744,
+                "peak_working_set_bytes": 65540096
+              }
+            },
+            {
+              "phase": "representative_invocation",
+              "sample_count": 1,
+              "metrics": {
+                "virtual_address_bytes": 4527988736,
+                "rss_bytes": null,
+                "peak_virtual_address_bytes": 4527988736,
+                "peak_rss_bytes": null,
+                "private_commit_bytes": 56995840,
+                "pagefile_bytes": 56995840,
+                "working_set_bytes": 65679360,
+                "peak_private_commit_bytes": null,
+                "peak_pagefile_bytes": 57016320,
+                "peak_working_set_bytes": 65679360
+              }
+            },
+            {
+              "phase": "shutdown",
+              "sample_count": 1,
+              "metrics": {
+                "virtual_address_bytes": 4527988736,
+                "rss_bytes": null,
+                "peak_virtual_address_bytes": 4527988736,
+                "peak_rss_bytes": null,
+                "private_commit_bytes": 56995840,
+                "pagefile_bytes": 56995840,
+                "working_set_bytes": 65773568,
+                "peak_private_commit_bytes": null,
+                "peak_pagefile_bytes": 57016320,
+                "peak_working_set_bytes": 65773568
+              }
+            }
+          ],
+          "whole_run_maximum": {
+            "virtual_address_bytes": 4527988736,
+            "rss_bytes": null,
+            "peak_virtual_address_bytes": 4527988736,
+            "peak_rss_bytes": null,
+            "private_commit_bytes": 56995840,
+            "pagefile_bytes": 56995840,
+            "working_set_bytes": 65773568,
+            "peak_private_commit_bytes": null,
+            "peak_pagefile_bytes": 57016320,
+            "peak_working_set_bytes": 65773568
+          }
+        },
+        {
+          "sequence": 5,
+          "warm_up": false,
+          "duration_millis": 3390,
+          "sample_count": 8,
+          "phase_maxima": [
+            {
+              "phase": "spawn",
+              "sample_count": 1,
+              "metrics": {
+                "virtual_address_bytes": 4378357760,
+                "rss_bytes": null,
+                "peak_virtual_address_bytes": 4378357760,
+                "peak_rss_bytes": null,
+                "private_commit_bytes": 1019904,
+                "pagefile_bytes": 1019904,
+                "working_set_bytes": 4820992,
+                "peak_private_commit_bytes": null,
+                "peak_pagefile_bytes": 1040384,
+                "peak_working_set_bytes": 4820992
+              }
+            },
+            {
+              "phase": "hello",
+              "sample_count": 1,
+              "metrics": {
+                "virtual_address_bytes": 4378357760,
+                "rss_bytes": null,
+                "peak_virtual_address_bytes": 4378357760,
+                "peak_rss_bytes": null,
+                "private_commit_bytes": 1019904,
+                "pagefile_bytes": 1019904,
+                "working_set_bytes": 4820992,
+                "peak_private_commit_bytes": null,
+                "peak_pagefile_bytes": 1040384,
+                "peak_working_set_bytes": 4820992
+              }
+            },
+            {
+              "phase": "compile_and_instantiate",
+              "sample_count": 2,
+              "metrics": {
+                "virtual_address_bytes": 4394086400,
+                "rss_bytes": null,
+                "peak_virtual_address_bytes": 4399517696,
+                "peak_rss_bytes": null,
+                "private_commit_bytes": 6762496,
+                "pagefile_bytes": 6762496,
+                "working_set_bytes": 15220736,
+                "peak_private_commit_bytes": null,
+                "peak_pagefile_bytes": 17068032,
+                "peak_working_set_bytes": 20828160
+              }
+            },
+            {
+              "phase": "valid_max_working_set_barrier",
+              "sample_count": 2,
+              "metrics": {
+                "virtual_address_bytes": 4529037312,
+                "rss_bytes": null,
+                "peak_virtual_address_bytes": 4529037312,
+                "peak_rss_bytes": null,
+                "private_commit_bytes": 57270272,
+                "pagefile_bytes": 57270272,
+                "working_set_bytes": 65703936,
+                "peak_private_commit_bytes": null,
+                "peak_pagefile_bytes": 57270272,
+                "peak_working_set_bytes": 65703936
+              }
+            },
+            {
+              "phase": "representative_invocation",
+              "sample_count": 1,
+              "metrics": {
+                "virtual_address_bytes": 4529037312,
+                "rss_bytes": null,
+                "peak_virtual_address_bytes": 4529037312,
+                "peak_rss_bytes": null,
+                "private_commit_bytes": 57274368,
+                "pagefile_bytes": 57274368,
+                "working_set_bytes": 65843200,
+                "peak_private_commit_bytes": null,
+                "peak_pagefile_bytes": 57294848,
+                "peak_working_set_bytes": 65843200
+              }
+            },
+            {
+              "phase": "shutdown",
+              "sample_count": 1,
+              "metrics": {
+                "virtual_address_bytes": 4529037312,
+                "rss_bytes": null,
+                "peak_virtual_address_bytes": 4529037312,
+                "peak_rss_bytes": null,
+                "private_commit_bytes": 57274368,
+                "pagefile_bytes": 57274368,
+                "working_set_bytes": 65937408,
+                "peak_private_commit_bytes": null,
+                "peak_pagefile_bytes": 57294848,
+                "peak_working_set_bytes": 65937408
+              }
+            }
+          ],
+          "whole_run_maximum": {
+            "virtual_address_bytes": 4529037312,
+            "rss_bytes": null,
+            "peak_virtual_address_bytes": 4529037312,
+            "peak_rss_bytes": null,
+            "private_commit_bytes": 57274368,
+            "pagefile_bytes": 57274368,
+            "working_set_bytes": 65937408,
+            "peak_private_commit_bytes": null,
+            "peak_pagefile_bytes": 57294848,
+            "peak_working_set_bytes": 65937408
+          }
+        }
+      ]
+    },
+    {
+      "profile": "typescript",
+      "component_sha256": "95c6dc4b94af838453d2236b47c270b5e8ceaa2b36eb31729610a1d9777ab5ca",
+      "guest_linear_memory_limit_bytes": 134217728,
+      "barrier_allocation_bytes": 67108864,
+      "warm_up": {
+        "sequence": 0,
+        "warm_up": true,
+        "duration_millis": 36747,
+        "sample_count": 77,
+        "phase_maxima": [
+          {
+            "phase": "spawn",
+            "sample_count": 1,
+            "metrics": {
+              "virtual_address_bytes": 4378357760,
+              "rss_bytes": null,
+              "peak_virtual_address_bytes": 4378357760,
+              "peak_rss_bytes": null,
+              "private_commit_bytes": 1024000,
+              "pagefile_bytes": 1024000,
+              "working_set_bytes": 4820992,
+              "peak_private_commit_bytes": null,
+              "peak_pagefile_bytes": 1044480,
+              "peak_working_set_bytes": 4820992
+            }
+          },
+          {
+            "phase": "hello",
+            "sample_count": 1,
+            "metrics": {
+              "virtual_address_bytes": 4378357760,
+              "rss_bytes": null,
+              "peak_virtual_address_bytes": 4378357760,
+              "peak_rss_bytes": null,
+              "private_commit_bytes": 1024000,
+              "pagefile_bytes": 1024000,
+              "working_set_bytes": 4820992,
+              "peak_private_commit_bytes": null,
+              "peak_pagefile_bytes": 1044480,
+              "peak_working_set_bytes": 4820992
+            }
+          },
+          {
+            "phase": "compile_and_instantiate",
+            "sample_count": 70,
+            "metrics": {
+              "virtual_address_bytes": 4815732736,
+              "rss_bytes": null,
+              "peak_virtual_address_bytes": 4841558016,
+              "peak_rss_bytes": null,
+              "private_commit_bytes": 436076544,
+              "pagefile_bytes": 436076544,
+              "working_set_bytes": 361181184,
+              "peak_private_commit_bytes": null,
+              "peak_pagefile_bytes": 460259328,
+              "peak_working_set_bytes": 396664832
+            }
+          },
+          {
+            "phase": "valid_max_working_set_barrier",
+            "sample_count": 3,
+            "metrics": {
+              "virtual_address_bytes": 4860391424,
+              "rss_bytes": null,
+              "peak_virtual_address_bytes": 4875718656,
+              "peak_rss_bytes": null,
+              "private_commit_bytes": 178704384,
+              "pagefile_bytes": 178704384,
+              "working_set_bytes": 185200640,
+              "peak_private_commit_bytes": null,
+              "peak_pagefile_bytes": 460259328,
+              "peak_working_set_bytes": 396664832
+            }
+          },
+          {
+            "phase": "representative_invocation",
+            "sample_count": 1,
+            "metrics": {
+              "virtual_address_bytes": 4860391424,
+              "rss_bytes": null,
+              "peak_virtual_address_bytes": 4875718656,
+              "peak_rss_bytes": null,
+              "private_commit_bytes": 178708480,
+              "pagefile_bytes": 178708480,
+              "working_set_bytes": 185344000,
+              "peak_private_commit_bytes": null,
+              "peak_pagefile_bytes": 460259328,
+              "peak_working_set_bytes": 396664832
+            }
+          },
+          {
+            "phase": "shutdown",
+            "sample_count": 1,
+            "metrics": {
+              "virtual_address_bytes": 4860391424,
+              "rss_bytes": null,
+              "peak_virtual_address_bytes": 4875718656,
+              "peak_rss_bytes": null,
+              "private_commit_bytes": 178708480,
+              "pagefile_bytes": 178708480,
+              "working_set_bytes": 185442304,
+              "peak_private_commit_bytes": null,
+              "peak_pagefile_bytes": 460259328,
+              "peak_working_set_bytes": 396664832
+            }
+          }
+        ],
+        "whole_run_maximum": {
+          "virtual_address_bytes": 4860391424,
+          "rss_bytes": null,
+          "peak_virtual_address_bytes": 4875718656,
+          "peak_rss_bytes": null,
+          "private_commit_bytes": 436076544,
+          "pagefile_bytes": 436076544,
+          "working_set_bytes": 361181184,
+          "peak_private_commit_bytes": null,
+          "peak_pagefile_bytes": 460259328,
+          "peak_working_set_bytes": 396664832
+        }
+      },
+      "measured": [
+        {
+          "sequence": 1,
+          "warm_up": false,
+          "duration_millis": 36506,
+          "sample_count": 77,
+          "phase_maxima": [
+            {
+              "phase": "spawn",
+              "sample_count": 1,
+              "metrics": {
+                "virtual_address_bytes": 4378357760,
+                "rss_bytes": null,
+                "peak_virtual_address_bytes": 4378357760,
+                "peak_rss_bytes": null,
+                "private_commit_bytes": 1028096,
+                "pagefile_bytes": 1028096,
+                "working_set_bytes": 4825088,
+                "peak_private_commit_bytes": null,
+                "peak_pagefile_bytes": 1040384,
+                "peak_working_set_bytes": 4825088
+              }
+            },
+            {
+              "phase": "hello",
+              "sample_count": 1,
+              "metrics": {
+                "virtual_address_bytes": 4378357760,
+                "rss_bytes": null,
+                "peak_virtual_address_bytes": 4378357760,
+                "peak_rss_bytes": null,
+                "private_commit_bytes": 1028096,
+                "pagefile_bytes": 1028096,
+                "working_set_bytes": 4825088,
+                "peak_private_commit_bytes": null,
+                "peak_pagefile_bytes": 1040384,
+                "peak_working_set_bytes": 4825088
+              }
+            },
+            {
+              "phase": "compile_and_instantiate",
+              "sample_count": 71,
+              "metrics": {
+                "virtual_address_bytes": 4801097728,
+                "rss_bytes": null,
+                "peak_virtual_address_bytes": 4844457984,
+                "peak_rss_bytes": null,
+                "private_commit_bytes": 419471360,
+                "pagefile_bytes": 419471360,
+                "working_set_bytes": 356577280,
+                "peak_private_commit_bytes": null,
+                "peak_pagefile_bytes": 460001280,
+                "peak_working_set_bytes": 394678272
+              }
+            },
+            {
+              "phase": "valid_max_working_set_barrier",
+              "sample_count": 2,
+              "metrics": {
+                "virtual_address_bytes": 4860391424,
+                "rss_bytes": null,
+                "peak_virtual_address_bytes": 4875747328,
+                "peak_rss_bytes": null,
+                "private_commit_bytes": 178941952,
+                "pagefile_bytes": 178941952,
+                "working_set_bytes": 184848384,
+                "peak_private_commit_bytes": null,
+                "peak_pagefile_bytes": 460001280,
+                "peak_working_set_bytes": 394678272
+              }
+            },
+            {
+              "phase": "representative_invocation",
+              "sample_count": 1,
+              "metrics": {
+                "virtual_address_bytes": 4860391424,
+                "rss_bytes": null,
+                "peak_virtual_address_bytes": 4875747328,
+                "peak_rss_bytes": null,
+                "private_commit_bytes": 178946048,
+                "pagefile_bytes": 178946048,
+                "working_set_bytes": 184991744,
+                "peak_private_commit_bytes": null,
+                "peak_pagefile_bytes": 460001280,
+                "peak_working_set_bytes": 394678272
+              }
+            },
+            {
+              "phase": "shutdown",
+              "sample_count": 1,
+              "metrics": {
+                "virtual_address_bytes": 4860391424,
+                "rss_bytes": null,
+                "peak_virtual_address_bytes": 4875747328,
+                "peak_rss_bytes": null,
+                "private_commit_bytes": 178946048,
+                "pagefile_bytes": 178946048,
+                "working_set_bytes": 185090048,
+                "peak_private_commit_bytes": null,
+                "peak_pagefile_bytes": 460001280,
+                "peak_working_set_bytes": 394678272
+              }
+            }
+          ],
+          "whole_run_maximum": {
+            "virtual_address_bytes": 4860391424,
+            "rss_bytes": null,
+            "peak_virtual_address_bytes": 4875747328,
+            "peak_rss_bytes": null,
+            "private_commit_bytes": 419471360,
+            "pagefile_bytes": 419471360,
+            "working_set_bytes": 356577280,
+            "peak_private_commit_bytes": null,
+            "peak_pagefile_bytes": 460001280,
+            "peak_working_set_bytes": 394678272
+          }
+        },
+        {
+          "sequence": 2,
+          "warm_up": false,
+          "duration_millis": 39865,
+          "sample_count": 79,
+          "phase_maxima": [
+            {
+              "phase": "spawn",
+              "sample_count": 1,
+              "metrics": {
+                "virtual_address_bytes": 4377309184,
+                "rss_bytes": null,
+                "peak_virtual_address_bytes": 4377309184,
+                "peak_rss_bytes": null,
+                "private_commit_bytes": 987136,
+                "pagefile_bytes": 987136,
+                "working_set_bytes": 4800512,
+                "peak_private_commit_bytes": null,
+                "peak_pagefile_bytes": 1007616,
+                "peak_working_set_bytes": 4800512
+              }
+            },
+            {
+              "phase": "hello",
+              "sample_count": 1,
+              "metrics": {
+                "virtual_address_bytes": 4377309184,
+                "rss_bytes": null,
+                "peak_virtual_address_bytes": 4377309184,
+                "peak_rss_bytes": null,
+                "private_commit_bytes": 987136,
+                "pagefile_bytes": 987136,
+                "working_set_bytes": 4800512,
+                "peak_private_commit_bytes": null,
+                "peak_pagefile_bytes": 1007616,
+                "peak_working_set_bytes": 4800512
+              }
+            },
+            {
+              "phase": "compile_and_instantiate",
+              "sample_count": 72,
+              "metrics": {
+                "virtual_address_bytes": 4840022016,
+                "rss_bytes": null,
+                "peak_virtual_address_bytes": 4841369600,
+                "peak_rss_bytes": null,
+                "private_commit_bytes": 456949760,
+                "pagefile_bytes": 456949760,
+                "working_set_bytes": 386924544,
+                "peak_private_commit_bytes": null,
+                "peak_pagefile_bytes": 459776000,
+                "peak_working_set_bytes": 391200768
+              }
+            },
+            {
+              "phase": "valid_max_working_set_barrier",
+              "sample_count": 3,
+              "metrics": {
+                "virtual_address_bytes": 4860383232,
+                "rss_bytes": null,
+                "peak_virtual_address_bytes": 4875763712,
+                "peak_rss_bytes": null,
+                "private_commit_bytes": 178278400,
+                "pagefile_bytes": 178278400,
+                "working_set_bytes": 185073664,
+                "peak_private_commit_bytes": null,
+                "peak_pagefile_bytes": 459776000,
+                "peak_working_set_bytes": 394801152
+              }
+            },
+            {
+              "phase": "representative_invocation",
+              "sample_count": 1,
+              "metrics": {
+                "virtual_address_bytes": 4860383232,
+                "rss_bytes": null,
+                "peak_virtual_address_bytes": 4875763712,
+                "peak_rss_bytes": null,
+                "private_commit_bytes": 178282496,
+                "pagefile_bytes": 178282496,
+                "working_set_bytes": 185217024,
+                "peak_private_commit_bytes": null,
+                "peak_pagefile_bytes": 459776000,
+                "peak_working_set_bytes": 394801152
+              }
+            },
+            {
+              "phase": "shutdown",
+              "sample_count": 1,
+              "metrics": {
+                "virtual_address_bytes": 4860383232,
+                "rss_bytes": null,
+                "peak_virtual_address_bytes": 4875763712,
+                "peak_rss_bytes": null,
+                "private_commit_bytes": 178282496,
+                "pagefile_bytes": 178282496,
+                "working_set_bytes": 185315328,
+                "peak_private_commit_bytes": null,
+                "peak_pagefile_bytes": 459776000,
+                "peak_working_set_bytes": 394801152
+              }
+            }
+          ],
+          "whole_run_maximum": {
+            "virtual_address_bytes": 4860383232,
+            "rss_bytes": null,
+            "peak_virtual_address_bytes": 4875763712,
+            "peak_rss_bytes": null,
+            "private_commit_bytes": 456949760,
+            "pagefile_bytes": 456949760,
+            "working_set_bytes": 386924544,
+            "peak_private_commit_bytes": null,
+            "peak_pagefile_bytes": 459776000,
+            "peak_working_set_bytes": 394801152
+          }
+        },
+        {
+          "sequence": 3,
+          "warm_up": false,
+          "duration_millis": 31970,
+          "sample_count": 77,
+          "phase_maxima": [
+            {
+              "phase": "spawn",
+              "sample_count": 1,
+              "metrics": {
+                "virtual_address_bytes": 4378357760,
+                "rss_bytes": null,
+                "peak_virtual_address_bytes": 4378357760,
+                "peak_rss_bytes": null,
+                "private_commit_bytes": 1024000,
+                "pagefile_bytes": 1024000,
+                "working_set_bytes": 4825088,
+                "peak_private_commit_bytes": null,
+                "peak_pagefile_bytes": 1036288,
+                "peak_working_set_bytes": 4825088
+              }
+            },
+            {
+              "phase": "hello",
+              "sample_count": 1,
+              "metrics": {
+                "virtual_address_bytes": 4378357760,
+                "rss_bytes": null,
+                "peak_virtual_address_bytes": 4378357760,
+                "peak_rss_bytes": null,
+                "private_commit_bytes": 1024000,
+                "pagefile_bytes": 1024000,
+                "working_set_bytes": 4825088,
+                "peak_private_commit_bytes": null,
+                "peak_pagefile_bytes": 1036288,
+                "peak_working_set_bytes": 4825088
+              }
+            },
+            {
+              "phase": "compile_and_instantiate",
+              "sample_count": 70,
+              "metrics": {
+                "virtual_address_bytes": 4863578112,
+                "rss_bytes": null,
+                "peak_virtual_address_bytes": 4878913536,
+                "peak_rss_bytes": null,
+                "private_commit_bytes": 424267776,
+                "pagefile_bytes": 424267776,
+                "working_set_bytes": 359636992,
+                "peak_private_commit_bytes": null,
+                "peak_pagefile_bytes": 460472320,
+                "peak_working_set_bytes": 394813440
+              }
+            },
+            {
+              "phase": "valid_max_working_set_barrier",
+              "sample_count": 3,
+              "metrics": {
+                "virtual_address_bytes": 4860432384,
+                "rss_bytes": null,
+                "peak_virtual_address_bytes": 4878913536,
+                "peak_rss_bytes": null,
+                "private_commit_bytes": 179875840,
+                "pagefile_bytes": 179875840,
+                "working_set_bytes": 185262080,
+                "peak_private_commit_bytes": null,
+                "peak_pagefile_bytes": 460472320,
+                "peak_working_set_bytes": 394813440
+              }
+            },
+            {
+              "phase": "representative_invocation",
+              "sample_count": 1,
+              "metrics": {
+                "virtual_address_bytes": 4860432384,
+                "rss_bytes": null,
+                "peak_virtual_address_bytes": 4878913536,
+                "peak_rss_bytes": null,
+                "private_commit_bytes": 179879936,
+                "pagefile_bytes": 179879936,
+                "working_set_bytes": 185405440,
+                "peak_private_commit_bytes": null,
+                "peak_pagefile_bytes": 460472320,
+                "peak_working_set_bytes": 394813440
+              }
+            },
+            {
+              "phase": "shutdown",
+              "sample_count": 1,
+              "metrics": {
+                "virtual_address_bytes": 4860432384,
+                "rss_bytes": null,
+                "peak_virtual_address_bytes": 4878913536,
+                "peak_rss_bytes": null,
+                "private_commit_bytes": 179879936,
+                "pagefile_bytes": 179879936,
+                "working_set_bytes": 185503744,
+                "peak_private_commit_bytes": null,
+                "peak_pagefile_bytes": 460472320,
+                "peak_working_set_bytes": 394813440
+              }
+            }
+          ],
+          "whole_run_maximum": {
+            "virtual_address_bytes": 4863578112,
+            "rss_bytes": null,
+            "peak_virtual_address_bytes": 4878913536,
+            "peak_rss_bytes": null,
+            "private_commit_bytes": 424267776,
+            "pagefile_bytes": 424267776,
+            "working_set_bytes": 359636992,
+            "peak_private_commit_bytes": null,
+            "peak_pagefile_bytes": 460472320,
+            "peak_working_set_bytes": 394813440
+          }
+        },
+        {
+          "sequence": 4,
+          "warm_up": false,
+          "duration_millis": 31817,
+          "sample_count": 77,
+          "phase_maxima": [
+            {
+              "phase": "spawn",
+              "sample_count": 1,
+              "metrics": {
+                "virtual_address_bytes": 4378357760,
+                "rss_bytes": null,
+                "peak_virtual_address_bytes": 4378357760,
+                "peak_rss_bytes": null,
+                "private_commit_bytes": 1028096,
+                "pagefile_bytes": 1028096,
+                "working_set_bytes": 4829184,
+                "peak_private_commit_bytes": null,
+                "peak_pagefile_bytes": 1040384,
+                "peak_working_set_bytes": 4829184
+              }
+            },
+            {
+              "phase": "hello",
+              "sample_count": 1,
+              "metrics": {
+                "virtual_address_bytes": 4378357760,
+                "rss_bytes": null,
+                "peak_virtual_address_bytes": 4378357760,
+                "peak_rss_bytes": null,
+                "private_commit_bytes": 1028096,
+                "pagefile_bytes": 1028096,
+                "working_set_bytes": 4829184,
+                "peak_private_commit_bytes": null,
+                "peak_pagefile_bytes": 1040384,
+                "peak_working_set_bytes": 4829184
+              }
+            },
+            {
+              "phase": "compile_and_instantiate",
+              "sample_count": 70,
+              "metrics": {
+                "virtual_address_bytes": 4863574016,
+                "rss_bytes": null,
+                "peak_virtual_address_bytes": 4878938112,
+                "peak_rss_bytes": null,
+                "private_commit_bytes": 418889728,
+                "pagefile_bytes": 418889728,
+                "working_set_bytes": 356634624,
+                "peak_private_commit_bytes": null,
+                "peak_pagefile_bytes": 460083200,
+                "peak_working_set_bytes": 395579392
+              }
+            },
+            {
+              "phase": "valid_max_working_set_barrier",
+              "sample_count": 3,
+              "metrics": {
+                "virtual_address_bytes": 4860428288,
+                "rss_bytes": null,
+                "peak_virtual_address_bytes": 4878938112,
+                "peak_rss_bytes": null,
+                "private_commit_bytes": 179040256,
+                "pagefile_bytes": 179040256,
+                "working_set_bytes": 185114624,
+                "peak_private_commit_bytes": null,
+                "peak_pagefile_bytes": 460083200,
+                "peak_working_set_bytes": 395579392
+              }
+            },
+            {
+              "phase": "representative_invocation",
+              "sample_count": 1,
+              "metrics": {
+                "virtual_address_bytes": 4860428288,
+                "rss_bytes": null,
+                "peak_virtual_address_bytes": 4878938112,
+                "peak_rss_bytes": null,
+                "private_commit_bytes": 179044352,
+                "pagefile_bytes": 179044352,
+                "working_set_bytes": 185257984,
+                "peak_private_commit_bytes": null,
+                "peak_pagefile_bytes": 460083200,
+                "peak_working_set_bytes": 395579392
+              }
+            },
+            {
+              "phase": "shutdown",
+              "sample_count": 1,
+              "metrics": {
+                "virtual_address_bytes": 4860428288,
+                "rss_bytes": null,
+                "peak_virtual_address_bytes": 4878938112,
+                "peak_rss_bytes": null,
+                "private_commit_bytes": 179044352,
+                "pagefile_bytes": 179044352,
+                "working_set_bytes": 185294848,
+                "peak_private_commit_bytes": null,
+                "peak_pagefile_bytes": 460083200,
+                "peak_working_set_bytes": 395579392
+              }
+            }
+          ],
+          "whole_run_maximum": {
+            "virtual_address_bytes": 4863574016,
+            "rss_bytes": null,
+            "peak_virtual_address_bytes": 4878938112,
+            "peak_rss_bytes": null,
+            "private_commit_bytes": 418889728,
+            "pagefile_bytes": 418889728,
+            "working_set_bytes": 356634624,
+            "peak_private_commit_bytes": null,
+            "peak_pagefile_bytes": 460083200,
+            "peak_working_set_bytes": 395579392
+          }
+        },
+        {
+          "sequence": 5,
+          "warm_up": false,
+          "duration_millis": 31999,
+          "sample_count": 77,
+          "phase_maxima": [
+            {
+              "phase": "spawn",
+              "sample_count": 1,
+              "metrics": {
+                "virtual_address_bytes": 4378357760,
+                "rss_bytes": null,
+                "peak_virtual_address_bytes": 4378357760,
+                "peak_rss_bytes": null,
+                "private_commit_bytes": 1044480,
+                "pagefile_bytes": 1044480,
+                "working_set_bytes": 4837376,
+                "peak_private_commit_bytes": null,
+                "peak_pagefile_bytes": 1056768,
+                "peak_working_set_bytes": 4837376
+              }
+            },
+            {
+              "phase": "hello",
+              "sample_count": 1,
+              "metrics": {
+                "virtual_address_bytes": 4378357760,
+                "rss_bytes": null,
+                "peak_virtual_address_bytes": 4378357760,
+                "peak_rss_bytes": null,
+                "private_commit_bytes": 1044480,
+                "pagefile_bytes": 1044480,
+                "working_set_bytes": 4837376,
+                "peak_private_commit_bytes": null,
+                "peak_pagefile_bytes": 1056768,
+                "peak_working_set_bytes": 4837376
+              }
+            },
+            {
+              "phase": "compile_and_instantiate",
+              "sample_count": 70,
+              "metrics": {
+                "virtual_address_bytes": 4863508480,
+                "rss_bytes": null,
+                "peak_virtual_address_bytes": 4878831616,
+                "peak_rss_bytes": null,
+                "private_commit_bytes": 373469184,
+                "pagefile_bytes": 373469184,
+                "working_set_bytes": 331829248,
+                "peak_private_commit_bytes": null,
+                "peak_pagefile_bytes": 460173312,
+                "peak_working_set_bytes": 394461184
+              }
+            },
+            {
+              "phase": "valid_max_working_set_barrier",
+              "sample_count": 3,
+              "metrics": {
+                "virtual_address_bytes": 4860362752,
+                "rss_bytes": null,
+                "peak_virtual_address_bytes": 4878831616,
+                "peak_rss_bytes": null,
+                "private_commit_bytes": 178352128,
+                "pagefile_bytes": 178352128,
+                "working_set_bytes": 185094144,
+                "peak_private_commit_bytes": null,
+                "peak_pagefile_bytes": 460173312,
+                "peak_working_set_bytes": 394461184
+              }
+            },
+            {
+              "phase": "representative_invocation",
+              "sample_count": 1,
+              "metrics": {
+                "virtual_address_bytes": 4860362752,
+                "rss_bytes": null,
+                "peak_virtual_address_bytes": 4878831616,
+                "peak_rss_bytes": null,
+                "private_commit_bytes": 178356224,
+                "pagefile_bytes": 178356224,
+                "working_set_bytes": 185237504,
+                "peak_private_commit_bytes": null,
+                "peak_pagefile_bytes": 460173312,
+                "peak_working_set_bytes": 394461184
+              }
+            },
+            {
+              "phase": "shutdown",
+              "sample_count": 1,
+              "metrics": {
+                "virtual_address_bytes": 4860362752,
+                "rss_bytes": null,
+                "peak_virtual_address_bytes": 4878831616,
+                "peak_rss_bytes": null,
+                "private_commit_bytes": 178356224,
+                "pagefile_bytes": 178356224,
+                "working_set_bytes": 185331712,
+                "peak_private_commit_bytes": null,
+                "peak_pagefile_bytes": 460173312,
+                "peak_working_set_bytes": 394461184
+              }
+            }
+          ],
+          "whole_run_maximum": {
+            "virtual_address_bytes": 4863508480,
+            "rss_bytes": null,
+            "peak_virtual_address_bytes": 4878831616,
+            "peak_rss_bytes": null,
+            "private_commit_bytes": 373469184,
+            "pagefile_bytes": 373469184,
+            "working_set_bytes": 331829248,
+            "peak_private_commit_bytes": null,
+            "peak_pagefile_bytes": 460173312,
+            "peak_working_set_bytes": 394461184
+          }
+        }
+      ]
+    }
+  ]
+}

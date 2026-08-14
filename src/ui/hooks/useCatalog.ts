@@ -118,9 +118,9 @@ export function applyCatalogEvent(
 }
 
 export function useCatalog(): CatalogState & {
-  refresh: () => void;
+  refresh: () => Promise<void>;
   applyEvent: (event: CommittedEventDto) => void;
-  requestResync: () => void;
+  requestResync: () => Promise<void>;
 } {
   const [catalog, setCatalog] = useState<CatalogResponse | null>(null);
   const [revision, setRevision] = useState(0);
@@ -141,7 +141,7 @@ export function useCatalog(): CatalogState & {
     return true;
   }, []);
 
-  const refresh = useCallback(async () => {
+  const refreshStrict = useCallback(async () => {
     if (!hasStoredToken()) {
       setLoading(false);
       return;
@@ -153,11 +153,20 @@ export function useCatalog(): CatalogState & {
         setError(null);
       } catch (err) {
         setError(formatCatalogError(err));
+        throw err;
       } finally {
         setLoading(false);
       }
     });
   }, [applySnapshot]);
+
+  const refresh = useCallback(async () => {
+    try {
+      await refreshStrict();
+    } catch {
+      // Ordinary refreshes expose errors in state; event-reset handling uses strict refresh.
+    }
+  }, [refreshStrict]);
 
   useEffect(() => {
     void refresh();
@@ -196,11 +205,9 @@ export function useCatalog(): CatalogState & {
     refresh: () => {
       setError(null);
       setLoading(true);
-      void refresh();
+      return refresh();
     },
     applyEvent,
-    requestResync: () => {
-      void refresh();
-    },
+    requestResync: refreshStrict,
   };
 }

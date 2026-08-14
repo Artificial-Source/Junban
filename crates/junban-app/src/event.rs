@@ -2,11 +2,18 @@
 
 use jiff::Timestamp;
 use junban_domain::{
-    Comment, CommentId, OperationId, Project, ProjectId, SavedFilter, SavedFilterId, Section,
-    SectionId, Tag, TagId, Task, TaskId, Template, TemplateId, TimeBlock, TimeBlockId, TimeSlot,
-    TimeSlotId, UncompleteOutcome,
+    AiApprovalId, AiMemoryId, AiSessionId, Comment, CommentId, OperationId, Project, ProjectId,
+    SavedFilter, SavedFilterId, Section, SectionId, Tag, TagId, Task, TaskId, Template, TemplateId,
+    TimeBlock, TimeBlockId, TimeSlot, TimeSlotId, UncompleteOutcome,
 };
+use junban_plugin_sdk::PluginId;
 use serde::{Deserialize, Serialize};
+
+use crate::PluginSummary;
+
+const fn is_false(value: &bool) -> bool {
+    !*value
+}
 
 /// Stable event type strings used in storage, SSE, and receipts.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -55,6 +62,27 @@ impl EventType {
     pub const TIME_SLOT_UPDATED: &'static str = "time_slot.updated";
     pub const TIME_SLOT_DELETED: &'static str = "time_slot.deleted";
     pub const TIME_SLOT_MEMBERSHIP_UPDATED: &'static str = "time_slot.membership_updated";
+    pub const SETTINGS_UPDATED: &'static str = "settings.updated";
+    pub const IMPORT_APPLIED: &'static str = "import.applied";
+    pub const AI_SESSION_CHANGED: &'static str = "ai.session.changed";
+    pub const AI_SESSION_DELETED: &'static str = "ai.session.deleted";
+    pub const AI_MEMORY_CHANGED: &'static str = "ai.memory.changed";
+    pub const AI_MEMORY_DELETED: &'static str = "ai.memory.deleted";
+    pub const AI_APPROVAL_CHANGED: &'static str = "ai.approval.changed";
+    pub const PLUGIN_INSTALLED: &'static str = "plugin.installed";
+    pub const PLUGIN_REPLACED: &'static str = "plugin.replaced";
+    pub const PLUGIN_UNINSTALLED: &'static str = "plugin.uninstalled";
+    pub const PLUGIN_ENABLED: &'static str = "plugin.enabled";
+    pub const PLUGIN_DISABLED: &'static str = "plugin.disabled";
+    pub const PLUGIN_RETRY_REQUESTED: &'static str = "plugin.retry_requested";
+    pub const PLUGIN_PUBLISHER_TRUSTED: &'static str = "plugin.publisher_trusted";
+    pub const PLUGIN_PUBLISHER_REVOKED: &'static str = "plugin.publisher_revoked";
+    pub const PLUGIN_COMMUNITY_POLICY_UPDATED: &'static str = "plugin.community_policy_updated";
+    pub const PLUGIN_GRANTS_REPLACED: &'static str = "plugin.grants_replaced";
+    pub const PLUGIN_GRANTS_REVOKED: &'static str = "plugin.grants_revoked";
+    pub const PLUGIN_SETTING_UPDATED: &'static str = "plugin.setting_updated";
+    pub const PLUGIN_SETTING_DELETED: &'static str = "plugin.setting_deleted";
+    pub const PLUGIN_HEALTH_CHANGED: &'static str = "plugin.health_changed";
 
     #[must_use]
     pub fn new(value: impl Into<String>) -> Self {
@@ -87,6 +115,11 @@ pub enum ResourceType {
     Operation,
     TimeBlock,
     TimeSlot,
+    Settings,
+    AiSession,
+    AiMemory,
+    AiApproval,
+    Plugin,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -175,6 +208,46 @@ impl ResourceRef {
             id: id.to_string(),
         }
     }
+
+    #[must_use]
+    pub fn settings() -> Self {
+        Self {
+            resource_type: ResourceType::Settings,
+            id: "settings".to_owned(),
+        }
+    }
+
+    #[must_use]
+    pub fn ai_session(id: AiSessionId) -> Self {
+        Self {
+            resource_type: ResourceType::AiSession,
+            id: id.to_string(),
+        }
+    }
+
+    #[must_use]
+    pub fn ai_memory(id: AiMemoryId) -> Self {
+        Self {
+            resource_type: ResourceType::AiMemory,
+            id: id.to_string(),
+        }
+    }
+
+    #[must_use]
+    pub fn ai_approval(id: AiApprovalId) -> Self {
+        Self {
+            resource_type: ResourceType::AiApproval,
+            id: id.to_string(),
+        }
+    }
+
+    #[must_use]
+    pub fn plugin(id: &PluginId) -> Self {
+        Self {
+            resource_type: ResourceType::Plugin,
+            id: id.to_string(),
+        }
+    }
 }
 
 /// At most one tagged resource snapshot is attached to a single-resource event.
@@ -190,6 +263,7 @@ pub enum ResourceSnapshot {
     Comment { comment: Comment },
     TimeBlock { time_block: TimeBlock },
     TimeSlot { time_slot: TimeSlot },
+    Plugin { plugin: PluginSummary },
 }
 
 impl ResourceSnapshot {
@@ -231,6 +305,11 @@ impl ResourceSnapshot {
             _ => None,
         }
     }
+
+    #[must_use]
+    pub fn plugin(plugin: PluginSummary) -> Self {
+        Self::Plugin { plugin }
+    }
 }
 
 #[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
@@ -253,6 +332,8 @@ pub struct AffectedIds {
     pub time_block_ids: Vec<TimeBlockId>,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub time_slot_ids: Vec<TimeSlotId>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub plugin_ids: Vec<PluginId>,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
@@ -261,24 +342,50 @@ pub struct ResyncScope {
     pub tasks: bool,
     /// Clients should reload the organization catalog snapshot.
     pub catalog: bool,
+    /// Clients should reload the settings aggregate.
+    #[serde(default)]
+    pub settings: bool,
+    /// Clients should reload the installed plugin profile.
+    #[serde(default, skip_serializing_if = "is_false")]
+    pub plugins: bool,
 }
 
 impl ResyncScope {
     pub const NONE: Self = Self {
         tasks: false,
         catalog: false,
+        settings: false,
+        plugins: false,
     };
     pub const TASKS: Self = Self {
         tasks: true,
         catalog: false,
+        settings: false,
+        plugins: false,
     };
     pub const CATALOG: Self = Self {
         tasks: false,
         catalog: true,
+        settings: false,
+        plugins: false,
+    };
+    pub const SETTINGS: Self = Self {
+        tasks: false,
+        catalog: false,
+        settings: true,
+        plugins: false,
+    };
+    pub const PLUGINS: Self = Self {
+        tasks: false,
+        catalog: false,
+        settings: false,
+        plugins: true,
     };
     pub const BOTH: Self = Self {
         tasks: true,
         catalog: true,
+        settings: false,
+        plugins: false,
     };
 }
 

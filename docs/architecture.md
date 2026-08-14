@@ -23,17 +23,17 @@ Phases 1 and 2 implement the hosted product in `junban-domain`, `junban-app`, `j
 
 ## Crate boundaries
 
-| Crate                | Responsibility                                                                |
-| -------------------- | ----------------------------------------------------------------------------- |
-| `junban-domain`      | Pure task entities, UUID IDs, title validation, civil dates and UTC instants  |
-| `junban-storage`     | SQLite schema/migrations, profile lock, receipts, activity and durable events |
-| `junban-app`         | Framework-free task use cases and application-owned repository/event ports    |
-| `junban-server`      | Axum composition, HTTP DTO/OpenAPI authority, auth, static serving and SSE    |
-| `junban-cli`         | Native CLI                                                                    |
-| `junban-mcp`         | Native MCP adapter                                                            |
-| `junban-ai`          | Optional provider clients and orchestration                                   |
-| `junban-plugin-sdk`  | WIT contract and package types                                                |
-| `junban-plugin-host` | Optional Wasmtime runtime after a measured spike                              |
+| Crate                | Responsibility                                                                                                                                             |
+| -------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `junban-domain`      | Pure task entities, UUID IDs, title validation, civil dates and UTC instants                                                                               |
+| `junban-storage`     | SQLite schema/migrations, profile lock, receipts, activity and durable events                                                                              |
+| `junban-app`         | Framework-free task use cases and application-owned repository/event ports                                                                                 |
+| `junban-server`      | Axum composition, HTTP DTO/OpenAPI authority, principal/scope auth, static serving, SSE, and reusable API-only owner runtime                               |
+| `junban-cli`         | Native CLI session, HTTP executor, versioned automation catalog, and human/JSON commands                                                                   |
+| `junban-mcp`         | Native MCP stdio adapter over the CLI session/catalog (Wave 3 completes tools/resources/prompts)                                                           |
+| `junban-ai`          | Optional lazy chat/speech provider clients (no default-startup construct)                                                                                  |
+| `junban-plugin-sdk`  | Exact WIT, source/runtime manifests, JBP1/JRI1 trust, artifact tooling, capability/dependency inspection, and private protocol contracts; no runtime owner |
+| `junban-plugin-host` | Adjacent on-demand Wasmtime child with selective linking, bounded multi-plugin runtime ownership, typed callbacks, deadlines, and cleanup                  |
 
 Rules:
 
@@ -41,10 +41,14 @@ Rules:
 - HTTP, CLI, MCP, desktop, AI tools, and plugins invoke the same application use cases.
 - Avoid a generic “shared” crate. A type belongs to the layer that owns its meaning.
 - Transport DTOs are not domain entities.
+- AI chat tools mutate only through `junban-app`; raw provider API keys live outside SQLite in profile-private `ai-secrets.json`.
+- Browser-local speech (Whisper/Kokoro/Piper/VAD) runs in the page with pinned manifests and same-origin workers; it is not a server subsystem. Operator guide: [`ai-and-voice.md`](ai-and-voice.md).
 
 ## Runtime ownership
 
-At any moment, one process owns a profile’s SQLite authority. `fs4` acquires an exclusive profile lock before SQLite opens. The lock remains attached to every repository clone, so it cannot release while a connection is still usable.
+At any moment, one process owns a profile’s SQLite authority. `fs4` acquires an exclusive profile lock before SQLite opens. The lock remains attached to every repository clone, so it cannot release while a connection is still usable. Private `runtime.json` is a versioned discovery hint (`version`, `address`, `pid`, `instance_id`) and is never authoritative; clients may send a bearer only after an unauthenticated health probe returns the matching `instance_id`. CLI/MCP prefer a verified loopback owner and otherwise start an in-process API-only owner (`LocalApiOwner`) that holds the same lock for exactly their lifetime.
+
+Authenticated requests resolve a principal after Host/origin checks: the operator bearer, or a hashed automation credential with exact scopes `read`, `write`, and/or `data`. Route authorization is centralized and runs before body materialization and maintenance admission. Automation credentials live in private `automation-credentials.json` (not SQLite); operator-only routes cover token rotation, hostname policy, credential admin, restore/recovery mutations, diagnostics, and reminder delivery control-plane.
 
 One long-lived OS thread owns one bundled `rusqlite` connection. Async callers send typed commands over a standard channel and await Tokio one-shot replies; SQLite work never blocks a Tokio executor thread. The connection uses WAL, foreign keys, a 2.5-second busy timeout, `NORMAL` synchronization, and a 250-page (~1 MiB) WAL auto-checkpoint bound (below SQLite's 1000-page default) so commit-path checkpoints stay small. There is no pool.
 
@@ -58,6 +62,14 @@ SSE clients subscribe before durable catch-up. Revision IDs deduplicate queued/l
 
 Reminder delivery adds one process-global Tokio wake coordinator (started only from `main`, cancelled with the same shutdown token) and an authenticated ephemeral `GET /api/v1/reminders/events` stream. The coordinator sleeps until `next_reminder_wake_at`, broadcasts a content-free `reminders_due` signal with a process-local sequence, and recomputes on `Notify` after committed user mutations and successful reminder control-plane routes. Overdue wakes throttle at 30 seconds unless notified. These wakes are not committed task events and never increment the global revision. They share the same 64-connection SSE cap as `/api/v1/events`.
 
+## Durable AI response authority
+
+AI chat uses ordinary schema-v6 session/message/run rows. Daily briefing durably reserves only one assistant streaming message carrying the server-local `briefing_date`; a partial unique expression index permits at most one streaming/completed briefing for a profile date while failed/cancelled attempts remain history. Provider context adds one ephemeral server-owned user instruction with the exact date, read-only `plan_my_day`-first/no-apply language, and confirmed default energy when configured. No scheduler table or durable synthetic user message is involved.
+
+Edit, retry, and regenerate are typed suffix rewrites. Basic chat and typed actions share the same provider/configuration/context/credential preflight under the AI reconfiguration admission mutex before one storage transaction preserves the exact prefix, rejects an active suffix, tombstones removed run IDs for the 30-day receipt horizon, deletes the suffix, appends one completed user plus streaming assistant/run seed, and recomputes quotas. Invalidation session IDs are historical metadata independent of live session deletion and expire only with their receipt horizon. The setup task owns the response sender, SSE permit, mutex, request, and runtime admission through commit, so a dropped handler still terminalizes its durable run without cancelling unrelated runs. Exact terminal retries replay the retained seed and SSE transcript without provider setup or egress.
+
+Mutation tools require an approval bound to canonical tool name and arguments before `AppService` dispatch; streaming uses versioned local SSE envelopes rather than vendor frames. The response-action and chat routes are operator-only HTTP/SSE and intentionally do not extend the frozen CLI/MCP catalog. Configuration, credentials, tools, local voice, and operator troubleshooting: [`ai-and-voice.md`](ai-and-voice.md).
+
 ## Frontend boundary
 
 - `src/` is React/Vite/Tailwind only.
@@ -65,9 +77,15 @@ Reminder delivery adds one process-global Tokio wake coordinator (started only f
 - The production UI is static assets served by the Rust server (Phase 1+).
 - Components should not import backend, storage, or Node APIs.
 
-## Plugin direction
+## Plugin architecture
 
-Portable, capability-limited packages on the Wasmtime Component Model with WASI P2. TypeScript authoring compiles ahead of time and does not imply a resident Node plugin process. Declarative host-rendered UI replaces arbitrary plugin React execution.
+Portable, capability-limited packages use the checked-in `junban:plugin@0.1.0` Component Model WIT. `junban-plugin-sdk` is the pure authority for typed author and runtime manifests, bounded JBP1/JRI1 construction and Ed25519 verification, component import/export inspection, dependencies, capabilities, grants, generated WIT bodies, and the fenced parent/child protocol. The `junban-plugin-artifact` CLI derives and signs packages and indexes; the permanent Python wrapper publicly verifies the source manifests, retained components, signed offline registry, content-addressed packages, public keys, and generated server include table. The SDK constructs no process or Wasmtime object and owns no SQLite, HTTP server, profile path, or credential.
+
+`PluginRuntimeSupervisor` owns one adjacent, on-demand `junban-plugin-host` child for a bounded graph of at most 16 plugins. The parent authenticates the private protocol session, enforces compile/load and command deadlines by kill/reap, serializes lifecycle changes, and fences every generation, activation epoch, runtime session, invocation, callback, and contribution action. Server callback adapters are the capability authority: only manifest-declared and operator-granted task/query/effect, KV, settings, log, HTTPS, clock, and service calls can reach application validation. A lazy event worker starts only when runtime reconciliation leaves a non-dormant graph; ordinary startup with no enabled plugin starts neither worker nor child and does not initialize Wasmtime.
+
+Exact `wasmtime` and `wasmtime-wasi` 36.0.13 remain confined to the child. It re-inspects imports, selectively links only granted Junban interfaces and Rust's exact five frozen WASI 0.2.6 interfaces, and gives TypeScript zero WASI. One Engine owns limited per-plugin Stores; watchdog deadlines, fuel, memory/table/stack/output bounds, cancellation, and failed-Store replacement contain guest work. Wasmtime parallel compilation uses one lazily initialized Rayon pool bounded to two 1-MiB-stack workers. The server owns supervision and static SDK/registry authority but links no Wasmtime.
+
+Operator-only OpenAPI routes expose package inspection/install, local publisher trust, Restricted Mode, dependencies, grants, typed settings, lifecycle, the bundled signed registry, and declarative contributions. The bundled Pomodoro, automation, and TypeScript references execute without runtime Node. The React Extensions UI renders only server-confirmed declarative trees; arbitrary plugin React, HTML, and JavaScript are excluded. Restore drains the supervisor, leaves the runtime dormant, disables every restored plugin, requires package re-verification/resync, and requires explicit permission review before re-enable. Product, operator, author, signing, cleanup, and restore details: [`plugins.md`](plugins.md).
 
 ## Dependency policy
 

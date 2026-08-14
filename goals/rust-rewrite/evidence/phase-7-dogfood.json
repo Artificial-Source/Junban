@@ -1,0 +1,677 @@
+{
+  "artifacts": {
+    "dogfood_harness": {
+      "name": "scripts/run-phase7-plugin-dogfood.py",
+      "sha256": "98cf1e04eef293019edc04f3d4c76bed6b5c5470bc260686060dd07e06befbdc",
+      "size_bytes": 152467
+    },
+    "production_web": {
+      "file_count": 87,
+      "total_bytes": 91383070,
+      "tree_sha256": "9c60d238b0d9403b7a4dcaf12529e6a4255c6be66ad866f8d8a187b587095537"
+    },
+    "public_check_passed": true,
+    "public_checker": {
+      "name": "scripts/check-phase7-plugin-artifacts.py",
+      "sha256": "145601e9e95416642a16a003679ef50a8ba229fb808d785cfeb01978d3db76dd",
+      "size_bytes": 9347
+    },
+    "public_files": [
+      {
+        "name": "plugins/reference/automation-rust/plugin-source.json",
+        "sha256": "daadb7eb13fa29c9bf6d94839a57b498686a918ca116e5cc30d6e5182771d062",
+        "size_bytes": 813
+      },
+      {
+        "name": "plugins/reference/automation-rust/reference-authority.json",
+        "sha256": "e5bf3e341ca3b2ef9a943cb15fb557812322a75fdb5012a131b22d8bf5988acf",
+        "size_bytes": 634
+      },
+      {
+        "name": "plugins/reference/automation-rust/artifacts/automation.wasm",
+        "sha256": "32bfa3ef8887ac19a3a311dcfcc4bb2ea7675dacd4cd7e7c289bd2c68cc55fb0",
+        "size_bytes": 119173
+      },
+      {
+        "name": "plugins/reference/import-typescript/plugin-source.json",
+        "sha256": "eee4f152ce530bb30835cbd87bbb75a2933a291aa916088a5a5ba63f829be207",
+        "size_bytes": 1160
+      },
+      {
+        "name": "plugins/reference/import-typescript/component-provenance.json",
+        "sha256": "5c109dbb3465bd32d597698cafd4cfca8f780a9893b1f06b03ab15f01a8ab12b",
+        "size_bytes": 630
+      },
+      {
+        "name": "plugins/reference/import-typescript/artifacts/import-typescript.wasm",
+        "sha256": "9cc84add66d2f6371af013724bee0bbc93ef0c2958b37bc81471b8835ac3f132",
+        "size_bytes": 14975434
+      },
+      {
+        "name": "plugins/reference/pomodoro-rust/plugin-source.json",
+        "sha256": "c06671b6e2eb43fd32a1546eae81e4b4e63a65e1e338131c3de63454b96ab164",
+        "size_bytes": 3102
+      },
+      {
+        "name": "plugins/reference/pomodoro-rust/reference-authority.json",
+        "sha256": "0a8d67c0cefc3b21d99b3eefc438383253aad9cd98edf32a64201b9a479c591c",
+        "size_bytes": 751
+      },
+      {
+        "name": "plugins/reference/pomodoro-rust/artifacts/pomodoro.wasm",
+        "sha256": "24d498d3b2551547a506d94c46fca3a7ff68235a1d9709e86d77a8d006f07faf",
+        "size_bytes": 145056
+      },
+      {
+        "name": "plugins/registry/registry-source.json",
+        "sha256": "00f538094b4be9307c86b2f107ee36907bba76568e0019bee955037c3a0936ea",
+        "size_bytes": 448
+      },
+      {
+        "name": "plugins/registry/root-public-key.bin",
+        "sha256": "ffa42596706c10a8489ba0c92582eedc12ca6e2caca323e81f5c1020c71f641f",
+        "size_bytes": 32
+      },
+      {
+        "name": "plugins/registry/publisher-public-key.bin",
+        "sha256": "35ab9815a29650c2985186daa06eef9362ff0312b89df0b080517ddcf18b8595",
+        "size_bytes": 32
+      },
+      {
+        "name": "plugins/registry/index.jri",
+        "sha256": "f85f2663f105206bd858c3e863f538efdf8edef17dcf81792130e65a01914040",
+        "size_bytes": 2168
+      },
+      {
+        "name": "crates/junban-server/src/bundled_registry_include.rs",
+        "sha256": "af0e44bdcb65b911e1eff8d44ce3161ae275a7c4d26216e77ae7c281f1f4ca4d",
+        "size_bytes": 833
+      },
+      {
+        "name": "plugins/registry/sha256/14457dc76c42c23178ec56fa5e4fcb9fa27dd1996a795db70cf64adf07e48ee1.jbp",
+        "sha256": "14457dc76c42c23178ec56fa5e4fcb9fa27dd1996a795db70cf64adf07e48ee1",
+        "size_bytes": 120086
+      },
+      {
+        "name": "plugins/registry/sha256/69daf8a5346a7d9e213f8d4e49aaa11f12014ebfa1252082750e1597d1805085.jbp",
+        "sha256": "69daf8a5346a7d9e213f8d4e49aaa11f12014ebfa1252082750e1597d1805085",
+        "size_bytes": 14976573
+      },
+      {
+        "name": "plugins/registry/sha256/829723f49e2ec911f93d40dfcc2664ee08f495f9e710d227434f07456e0d103b.jbp",
+        "sha256": "829723f49e2ec911f93d40dfcc2664ee08f495f9e710d227434f07456e0d103b",
+        "size_bytes": 147472
+      }
+    ]
+  },
+  "authoritative": true,
+  "binaries": {
+    "junban-plugin-artifact": {
+      "name": "junban-plugin-artifact",
+      "sha256": "079db02d43f07a2a1648528574f5f6ec7c8cc4c335eb7c28ede298ddc1ec56d4",
+      "size_bytes": 3850064
+    },
+    "junban-plugin-host": {
+      "name": "junban-plugin-host",
+      "sha256": "8ee63613d93a5e277ccf998c8cebf86ef5d396600a978023e8b450d69ca270b6",
+      "size_bytes": 16473152
+    },
+    "junban-server": {
+      "name": "junban-server",
+      "sha256": "2be5cfa42e22dee073846281317488a6d4e21cadeeb896356cb842249cca9be9",
+      "size_bytes": 40817272
+    }
+  },
+  "build_attestation": {
+    "commands": [
+      "cargo clean --release",
+      "cargo build --locked --release --workspace --all-features",
+      "pnpm build"
+    ],
+    "mode": "clean_in_place_rebuild",
+    "source_after": {
+      "commit": "7ac35e3588a0521671de19ac16bfa4ffc4ddd9f7",
+      "commit_tree": "ce3ffb84c77ce597101c646b485f1f7d9709dd0d",
+      "dirty": false,
+      "index_tree": "ce3ffb84c77ce597101c646b485f1f7d9709dd0d",
+      "working_state_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    },
+    "source_before": {
+      "commit": "7ac35e3588a0521671de19ac16bfa4ffc4ddd9f7",
+      "commit_tree": "ce3ffb84c77ce597101c646b485f1f7d9709dd0d",
+      "dirty": false,
+      "index_tree": "ce3ffb84c77ce597101c646b485f1f7d9709dd0d",
+      "working_state_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    }
+  },
+  "candidate": {
+    "end": {
+      "commit": "7ac35e3588a0521671de19ac16bfa4ffc4ddd9f7",
+      "commit_tree": "ce3ffb84c77ce597101c646b485f1f7d9709dd0d",
+      "dirty": false,
+      "index_tree": "ce3ffb84c77ce597101c646b485f1f7d9709dd0d",
+      "working_state_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    },
+    "identity_stable": true,
+    "start": {
+      "commit": "7ac35e3588a0521671de19ac16bfa4ffc4ddd9f7",
+      "commit_tree": "ce3ffb84c77ce597101c646b485f1f7d9709dd0d",
+      "dirty": false,
+      "index_tree": "ce3ffb84c77ce597101c646b485f1f7d9709dd0d",
+      "working_state_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    }
+  },
+  "cleanup": {
+    "backup_artifact_removed": true,
+    "descendants_gone": true,
+    "generated_fixture_root_removed": true,
+    "no_host_orphan": true,
+    "profile_lock_reacquired": true,
+    "restore_owner_start_passed": true,
+    "runtime_removed": true,
+    "second_owner_start_passed": true,
+    "seed_memory_cleared": true,
+    "seed_removed": true,
+    "temporary_root_removed": true
+  },
+  "corpus": {
+    "altered_authority": {
+      "altered_external_registry_rejected": true,
+      "altered_package_upload_rejected": true,
+      "external_registry_entry_count": 6,
+      "external_registry_index_sha256": "bf96d264f9502d4781f673a236f7fa1dc911fd69967778f981a440555ec31fd6",
+      "external_registry_root_key_id": "b3e3497afffcb9c33535cb8ea65da398dd2eed3a74f722bbc7550a4f7919a509",
+      "passed": true,
+      "tracked_registry_mutated": false,
+      "wrong_bundled_registry_digest_rejected": true
+    },
+    "automation": {
+      "cursor_observation": {
+        "installed_progress_fields": {},
+        "mode": "api_observable_no_duplicate_effect",
+        "technical_limitation": "raw delivery cursor is not exposed by the product HTTP DTO"
+      },
+      "duplicate_effects": 0,
+      "hostile_runtime_authority": {
+        "commit": "651cf7530c951302be0e135143360706a42a9eac",
+        "id": "P7-W2-HOSTILE-RUNTIME-651cf753",
+        "review": "goals/rust-rewrite/evidence/phase-7-review-ledger.md",
+        "review_sha256": "6db4547ebd6872ebe1d7fd7a54d2edc742ba403d46cf500bab0cbc978a5fb942",
+        "runtime_tests_sha256": "a31748ccd327eb01785de6c5b3225703e1d178afd5e86a6557b18c1a913c0973",
+        "tests": [
+          "hostile_guest_limits_are_stable_and_do_not_leak_guest_diagnostics",
+          "eof_and_malformed_input_abort_active_callbacks_without_orphans",
+          "multi_entry_eof_and_malformed_input_join_every_worker",
+          "timeout_epoch_and_trap_replacement_are_isolated_per_plugin"
+        ]
+      },
+      "live": [
+        {
+          "created_revision": 65,
+          "effect_revision": 67,
+          "source_response": {
+            "sha256": "45b83d9a5d4f3dd4ed2c7b023be7d8c660695f1fb4e0e972f4816992dc3818be",
+            "size_bytes": 672
+          },
+          "task_id": "019ffeac-1877-75c2-b2df-8074689a56bf"
+        },
+        {
+          "created_revision": 66,
+          "effect_revision": 68,
+          "source_response": {
+            "sha256": "d93b36df3d147da9734ac1d8cf8f4c6d638002305fff91fde892c3c625502961",
+            "size_bytes": 672
+          },
+          "task_id": "019ffeac-1878-7aa1-b43d-e3ac3f0bfb8e"
+        }
+      ],
+      "passed": true,
+      "retained": {
+        "created_revision": 63,
+        "effect_revision": 64,
+        "host_execution_paused_before_commit": true,
+        "pending_before_resume": true,
+        "source_response": {
+          "sha256": "1f69785656bad747cefc63435f62bf14d60ce7f3895b481e890b663397abe64b",
+          "size_bytes": 674
+        },
+        "task_id": "019ffeac-1857-7722-9a02-99e9795e9ef7"
+      },
+      "source_create_replays": 1,
+      "unrelated_plugin_survival": {
+        "plugin_id": "pomodoro",
+        "render": {
+          "sha256": "fb8bcc3f9334584561a987e6ac63742e735b9ab8b25bf2f74fe23330fd6d20e5",
+          "size_bytes": 1328
+        }
+      }
+    },
+    "backup_restore_restart": {
+      "current_event_behavior_restored": true,
+      "current_tasks_completed": 1,
+      "disabled_after_restart": true,
+      "divergence_created_after_backup": {
+        "response": {
+          "sha256": "be4749dbc7769ce96d1d94f75e3d09d68bd9e58325a0f9cb10eed31e4b1cf473",
+          "size_bytes": 672
+        },
+        "revision": 73,
+        "task_id": "019ffeac-1bbc-7fa2-bc48-e9c64a8e1ad7"
+      },
+      "divergence_removed": true,
+      "event_automation_exercised_before_backup": true,
+      "exact_bundled_plugin_enabled_at_backup": true,
+      "exact_package_hash_preserved": true,
+      "fresh_activation_epoch": true,
+      "grants_preserved": true,
+      "health_remained_available": true,
+      "normal_traffic_drained": true,
+      "original_state_restored": true,
+      "original_state_sha256": "c0ba950d8a6aeb9469f93d94ab4c92bf56319fa45873521f54b7d943339f744d",
+      "package_generation_preserved": true,
+      "passed": true,
+      "pre_restore_hook_replays": 0,
+      "private_backup_bounded": true,
+      "private_backup_bytes_reported": false,
+      "raw_resync_flag_exposed_by_http": false,
+      "raw_reverify_required_state_exposed_by_http": false,
+      "restore_restart_required": true,
+      "restored_runtime_state": "disabled",
+      "resync_before_fresh_activation": true,
+      "reverification_fence_observed": true,
+      "same_profile_restart": true,
+      "startup_package_reverification_outcome_observed": true
+    },
+    "cleanup_corpus": {
+      "bundled_plugins_uninstalled": 3,
+      "content_addressed_objects_removed": {
+        "automation": "14457dc76c42c23178ec56fa5e4fcb9fa27dd1996a795db70cf64adf07e48ee1.jbp",
+        "import-typescript": "69daf8a5346a7d9e213f8d4e49aaa11f12014ebfa1252082750e1597d1805085.jbp",
+        "pomodoro": "829723f49e2ec911f93d40dfcc2664ee08f495f9e710d227434f07456e0d103b.jbp"
+      },
+      "contributions_remaining": 0,
+      "installed_remaining": 0,
+      "passed": true,
+      "registry_unchanged": true
+    },
+    "community_policy": {
+      "default_disabled": true,
+      "disabled_readback": true,
+      "enable_exact_replay": true,
+      "enabled_readback": true,
+      "explicit_inspection_confirmation_required": true,
+      "final_publisher_revoked": true,
+      "network_registry_route_claimed": false,
+      "passed": true,
+      "restricted_exact_install_rejected": true,
+      "unknown_publisher_install_rejected": true
+    },
+    "counts": {
+      "bundled_components_executed": 3,
+      "bundled_plugins_uninstalled": 3,
+      "external_components_activated": 3,
+      "external_plugins_uninstalled": 3,
+      "plugin_invocation_replays": 2,
+      "plugins_uninstalled_total": 6,
+      "post_backup_divergence_tasks": 1,
+      "post_restore_current_tasks": 1,
+      "revoked_authority_rejections": 1,
+      "stale_fences_rejected": 2,
+      "tasks_in_backup": 7,
+      "tasks_restored_plus_current_total": 8
+    },
+    "dependencies": {
+      "cycle_replacement_rejected": true,
+      "dependency_first_activation": true,
+      "dependent_aware_disable_rejected": true,
+      "dependent_aware_uninstall_rejected": true,
+      "dependent_before_provider_rejected": true,
+      "external_signed_packages": 5,
+      "incompatible_install_rejected": true,
+      "installed_graph_remaining": 0,
+      "missing_install_rejected": true,
+      "passed": true,
+      "provider_installed_first": true
+    },
+    "dormant": {
+      "passed": true,
+      "registry_entry_count": 3,
+      "task_count": 1
+    },
+    "local_signer": {
+      "artifact_tool_release_binary": true,
+      "changed_confirmation_rejected": true,
+      "component_sha256": "9cc84add66d2f6371af013724bee0bbc93ef0c2958b37bc81471b8835ac3f132",
+      "dependency_count": 0,
+      "exact_package_installed": true,
+      "external_os_rng_seed": true,
+      "grant_and_enable_passed": true,
+      "in_process_seed_memory_cleared": true,
+      "owner_private_seed_file": true,
+      "package_sha256": "acf80dc8e9a207857b3126dd6850bbc202dc08943c9a876bd527313674b2b0ef",
+      "passed": true,
+      "permission_count": 2,
+      "permission_hash": "fde9baad1816641262233194f6099549eb502277320325f393a1a3269ad044e4",
+      "publisher_key_id": "b3e3497afffcb9c33535cb8ea65da398dd2eed3a74f722bbc7550a4f7919a509",
+      "publisher_revoke_drained_and_disabled": true,
+      "raw_key_argument_or_environment": false,
+      "reported_command_template": "junban-plugin-artifact package sign <private-inputs>",
+      "retrust_fresh_authority": true,
+      "revoked_enable_rejected": true,
+      "revoked_fence_rejected": true,
+      "tasks_completed": 1,
+      "tasks_created": 1,
+      "trust_without_install_or_enable": true,
+      "unknown_preview_exact": true
+    },
+    "owner_isolation": {
+      "competing_owner_rejected": true,
+      "contender_runtime_children": 0,
+      "passed": true,
+      "primary_remained_healthy": true,
+      "primary_runtime_authority_unchanged": true
+    },
+    "pomodoro": {
+      "invocation_replay": {
+        "first": {
+          "sha256": "b8d2671006aadb1ff4b86fa3d96bfbb2fb6e214f28c3fbe3e8f7a9ce8875823c",
+          "size_bytes": 76
+        },
+        "replay": {
+          "sha256": "b8d2671006aadb1ff4b86fa3d96bfbb2fb6e214f28c3fbe3e8f7a9ce8875823c",
+          "size_bytes": 76
+        }
+      },
+      "kv_observations": {
+        "initial_work": {
+          "metric": "30:00",
+          "render": {
+            "sha256": "f92f199f0a66684aef5eff266478dbb2caed44a64f5f17812fd390ff613eedac",
+            "size_bytes": 1327
+          }
+        },
+        "paused": {
+          "command": {
+            "sha256": "b8d2671006aadb1ff4b86fa3d96bfbb2fb6e214f28c3fbe3e8f7a9ce8875823c",
+            "size_bytes": 76
+          },
+          "render": {
+            "sha256": "16677351b248627beb7f196001f39173db715cfdd047a7a2b9c922879112bfee",
+            "size_bytes": 703
+          },
+          "tone": "neutral"
+        },
+        "reenabled_readback": {
+          "metric": "07:00",
+          "render": {
+            "sha256": "4800640ccd3802b028bb6ffae5860307ec49e99ba5f4bf5196628a86ca4bdd45",
+            "size_bytes": 1327
+          }
+        },
+        "skipped_break": {
+          "action": {
+            "sha256": "b8d2671006aadb1ff4b86fa3d96bfbb2fb6e214f28c3fbe3e8f7a9ce8875823c",
+            "size_bytes": 76
+          },
+          "metric": "07:00",
+          "render": {
+            "sha256": "0a89a776398b7dc320ead50841a2c580038f853351cfb09636193c23ba081b87",
+            "size_bytes": 1327
+          }
+        },
+        "started": {
+          "action": {
+            "sha256": "b8d2671006aadb1ff4b86fa3d96bfbb2fb6e214f28c3fbe3e8f7a9ce8875823c",
+            "size_bytes": 76
+          },
+          "render": {
+            "sha256": "1d692c4622ae080fe7eb1bcd8cde6df6a1dd5e1fe42d094194825d406d5a5afa",
+            "size_bytes": 702
+          },
+          "tone": "accent"
+        }
+      },
+      "passed": true,
+      "setting_receipts": {
+        "break-minutes": {
+          "sha256": "40de4f809e7af81097ad6d0ca180323771ed0187f1fd2558c9d0d65543fe6a04",
+          "size_bytes": 768
+        },
+        "long-break-minutes": {
+          "sha256": "597755e7a94d76053dbfd9a3beafa53810c17bba3e522503fe9c99e71b207cbc",
+          "size_bytes": 768
+        },
+        "sessions-before-long-break": {
+          "sha256": "e9326d6060d81f1b4ae77e525521e9ef2380a0edfb3025060d554743595b56ab",
+          "size_bytes": 768
+        },
+        "work-minutes": {
+          "sha256": "d0c7dcfd733fbac8e0703b8a0c942ca5a6d7e514ce86fe1e34a624cac69cd208",
+          "size_bytes": 767
+        }
+      },
+      "settings_disabled_readback": {
+        "sha256": "071200c935fd22aff918a785f294d266f3f3c3307cbb008c01b4495ffc8e3e00",
+        "size_bytes": 352
+      },
+      "settings_readback": {
+        "sha256": "071200c935fd22aff918a785f294d266f3f3c3307cbb008c01b4495ffc8e3e00",
+        "size_bytes": 352
+      },
+      "stale_fences_rejected": 1,
+      "typed_settings": {
+        "break-minutes": 7,
+        "long-break-minutes": 20,
+        "sessions-before-long-break": 3,
+        "work-minutes": 30
+      }
+    },
+    "typescript": {
+      "command_replays": 1,
+      "passed": true,
+      "stale_fences_rejected": 1,
+      "tasks_completed": 3,
+      "tasks_created": 3,
+      "typed_task_ids": 3
+    }
+  },
+  "duration_seconds": 181.264,
+  "finished_at": "2026-08-14T05:08:40Z",
+  "pass": true,
+  "process_observations": [
+    {
+      "descendant_count": 0,
+      "descendant_names": [],
+      "label": "primary-after-owner-isolation",
+      "server_count": 1
+    },
+    {
+      "descendant_count": 0,
+      "descendant_names": [],
+      "label": "dormant",
+      "server_count": 1
+    },
+    {
+      "descendant_count": 1,
+      "descendant_names": [
+        "junban-plugin-host"
+      ],
+      "label": "typescript-active",
+      "server_count": 1
+    },
+    {
+      "descendant_count": 0,
+      "descendant_names": [],
+      "label": "typescript-disabled",
+      "server_count": 1
+    },
+    {
+      "descendant_count": 0,
+      "descendant_names": [],
+      "label": "typescript-final-disabled",
+      "server_count": 1
+    },
+    {
+      "descendant_count": 1,
+      "descendant_names": [
+        "junban-plugin-host"
+      ],
+      "label": "pomodoro-active",
+      "server_count": 1
+    },
+    {
+      "descendant_count": 0,
+      "descendant_names": [],
+      "label": "pomodoro-disabled",
+      "server_count": 1
+    },
+    {
+      "descendant_count": 0,
+      "descendant_names": [],
+      "label": "pomodoro-final-disabled",
+      "server_count": 1
+    },
+    {
+      "descendant_count": 0,
+      "descendant_names": [],
+      "label": "local-publisher-trusted-no-runtime",
+      "server_count": 1
+    },
+    {
+      "descendant_count": 1,
+      "descendant_names": [
+        "junban-plugin-host"
+      ],
+      "label": "local-package-active",
+      "server_count": 1
+    },
+    {
+      "descendant_count": 0,
+      "descendant_names": [],
+      "label": "local-publisher-revoked",
+      "server_count": 1
+    },
+    {
+      "descendant_count": 0,
+      "descendant_names": [],
+      "label": "local-package-uninstalled",
+      "server_count": 1
+    },
+    {
+      "descendant_count": 1,
+      "descendant_names": [
+        "junban-plugin-host"
+      ],
+      "label": "dependency-pair-active",
+      "server_count": 1
+    },
+    {
+      "descendant_count": 0,
+      "descendant_names": [],
+      "label": "dependency-pair-disabled",
+      "server_count": 1
+    },
+    {
+      "descendant_count": 1,
+      "descendant_names": [
+        "junban-plugin-host"
+      ],
+      "label": "automation-active",
+      "server_count": 1
+    },
+    {
+      "descendant_count": 0,
+      "descendant_names": [],
+      "label": "restore-restart-required",
+      "server_count": 1
+    },
+    {
+      "descendant_count": 0,
+      "descendant_names": [],
+      "label": "post-restore-disabled",
+      "server_count": 1
+    },
+    {
+      "descendant_count": 1,
+      "descendant_names": [
+        "junban-plugin-host"
+      ],
+      "label": "post-restore-automation-active",
+      "server_count": 1
+    },
+    {
+      "descendant_count": 0,
+      "descendant_names": [],
+      "label": "post-restore-automation-disabled",
+      "server_count": 1
+    },
+    {
+      "descendant_count": 0,
+      "descendant_names": [],
+      "label": "all-uninstalled",
+      "server_count": 1
+    },
+    {
+      "descendant_count": 0,
+      "descendant_names": [],
+      "label": "second-owner-dormant",
+      "server_count": 1
+    }
+  ],
+  "protocol": "junban-phase7-plugin-dogfood-v3",
+  "protocol_version": 3,
+  "registry": {
+    "entries": [
+      {
+        "package_sha256": "14457dc76c42c23178ec56fa5e4fcb9fa27dd1996a795db70cf64adf07e48ee1",
+        "plugin_id": "automation",
+        "publisher_key_id": "35ab9815a29650c2985186daa06eef9362ff0312b89df0b080517ddcf18b8595",
+        "runtime_profile": "rust",
+        "version": "0.1.0"
+      },
+      {
+        "package_sha256": "69daf8a5346a7d9e213f8d4e49aaa11f12014ebfa1252082750e1597d1805085",
+        "plugin_id": "import-typescript",
+        "publisher_key_id": "35ab9815a29650c2985186daa06eef9362ff0312b89df0b080517ddcf18b8595",
+        "runtime_profile": "typescript",
+        "version": "0.1.0"
+      },
+      {
+        "package_sha256": "829723f49e2ec911f93d40dfcc2664ee08f495f9e710d227434f07456e0d103b",
+        "plugin_id": "pomodoro",
+        "publisher_key_id": "35ab9815a29650c2985186daa06eef9362ff0312b89df0b080517ddcf18b8595",
+        "runtime_profile": "rust",
+        "version": "0.1.0"
+      }
+    ],
+    "index_payload_sha256": "41d2218b830bf5d547049053d40a925a3431a7e5d364acc31754ea02f9fd413c"
+  },
+  "schema_version": 3,
+  "scope": {
+    "browser_ui": {
+      "authority": "tests/e2e/visual-phase-7.spec.ts",
+      "overall_acceptance": "required_separate_authority",
+      "status": "outside_http_harness"
+    },
+    "excluded": [],
+    "included": "optimized server, adjacent plugin host, authenticated production HTTP, signed bundled and disposable external packages, dependency policy, backup/restore/restart"
+  },
+  "started_at": "2026-08-14T05:05:39Z",
+  "technical_limitations": [
+    {
+      "available": false,
+      "contract": "external_registry_artifact_or_network_community_registry_ingestion",
+      "covered_product_authority": "community-policy-gated signed local packages, altered disposable registry rejection, and exact bundled digest mismatch rejection"
+    },
+    {
+      "available": false,
+      "contract": "raw_restore_reverify_or_resync_flags_over_http",
+      "covered_product_authority": "post-startup disabled state, advanced fence, zero historical replay, fresh current behavior"
+    },
+    {
+      "available": false,
+      "contract": "raw_plugin_event_cursor_over_http",
+      "covered_product_authority": "retained and already-open live SSE source/effect revisions with exact no-duplicate task effects"
+    }
+  ]
+}

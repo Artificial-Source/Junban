@@ -30,7 +30,7 @@ function makeEvent(
     operation_id: "op-test-1",
     revision,
     affected: task ? { task_ids: [task.id] } : {},
-    resync: { tasks: false, catalog: false },
+    resync: { tasks: false, catalog: false, settings: false },
     primary: task ? { resource_type: "task", id: task.id } : null,
     snapshot: task ? { resource_type: "task", task } : null,
     ...overrides,
@@ -71,7 +71,7 @@ describe("applyTaskEventToList", () => {
       event_type: "task.deleted",
       occurred_at: "2026-07-28T00:00:00Z",
       affected: { task_ids: ["a"] },
-      resync: { tasks: false, catalog: false },
+      resync: { tasks: false, catalog: false, settings: false },
       snapshot: null,
       primary: { resource_type: "task", id: "a" },
     });
@@ -88,7 +88,7 @@ describe("applyTaskEventToList", () => {
       event_type: "task.completed",
       occurred_at: "2026-07-28T00:00:00Z",
       affected: { task_ids: ["a", "child"] },
-      resync: { tasks: true, catalog: false },
+      resync: { tasks: true, catalog: false, settings: false },
       snapshot: null,
       primary: { resource_type: "task", id: "a" },
     });

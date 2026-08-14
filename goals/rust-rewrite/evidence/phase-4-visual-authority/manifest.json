@@ -1,0 +1,80 @@
+{
+  "version": 1,
+  "source": {
+    "repository": "Artificial-Source/Junban-legacy",
+    "commit": "5e2b2b5adc865f401843c5030285293c5fabccc5",
+    "captured_at": "2026-08-02"
+  },
+  "scenes": [
+    {
+      "name": "essentials-desktop-light",
+      "file": "essentials-desktop-light-legacy.png",
+      "width": 1280,
+      "height": 900,
+      "sha256": "7863771c13c7920b6f9ad507463ae943bde59f982613f7d8b0c3c744ebbef25c"
+    },
+    {
+      "name": "appearance-desktop-dark",
+      "file": "appearance-desktop-dark-legacy.png",
+      "width": 1280,
+      "height": 900,
+      "sha256": "ae779f67023843ee10b534390719b947e1ca1112d1a843a53c68fe31148f2c94"
+    },
+    {
+      "name": "features-desktop-light",
+      "file": "features-desktop-light-legacy.png",
+      "width": 1280,
+      "height": 900,
+      "sha256": "1f5c933dd0039331b1e3afb0dce15f781e8f0a38e7abab456a19ba727409550e"
+    },
+    {
+      "name": "keyboard-desktop-dark",
+      "file": "keyboard-desktop-dark-legacy.png",
+      "width": 1280,
+      "height": 900,
+      "sha256": "4c789bcc5f426eebee3ef2a70178e7bd94575d665629308341168ce586300565"
+    },
+    {
+      "name": "templates-desktop-light",
+      "file": "templates-desktop-light-legacy.png",
+      "width": 1280,
+      "height": 900,
+      "sha256": "0d50e63975d99c96b1ecd4b519cf12ccde6f36b3607e2f4683205b3eae2c385c"
+    },
+    {
+      "name": "data-desktop-light",
+      "file": "data-desktop-light-legacy.png",
+      "width": 1280,
+      "height": 900,
+      "sha256": "d77836db3b040c93b7b3b2711cca27e514baed7abbbdceda212b747801b82435"
+    },
+    {
+      "name": "hosted-desktop-dark",
+      "file": "hosted-desktop-dark-nearest-legacy-data.png",
+      "width": 1280,
+      "height": 900,
+      "sha256": "1b69e8d2a96418e77f0db25ee49cb6f7e87bf308e43e28ee0ab0c204e358e89f"
+    },
+    {
+      "name": "diagnostics-desktop-light",
+      "file": "diagnostics-desktop-light-nearest-legacy-about.png",
+      "width": 1280,
+      "height": 900,
+      "sha256": "fdb7316c44f52fc7f803b3bd9c0d6d348e290d66c927a232710845ae24b4004b"
+    },
+    {
+      "name": "data-mobile-light",
+      "file": "data-mobile-light-legacy.png",
+      "width": 390,
+      "height": 844,
+      "sha256": "b415226fb42639026f02519c1e7ca32e41fc5959ac3c3953ad032bd7e58c1adf"
+    },
+    {
+      "name": "appearance-mobile-dark",
+      "file": "appearance-mobile-dark-legacy.png",
+      "width": 390,
+      "height": 844,
+      "sha256": "ce321bbaee5591b31963e01b1ad3ec68719571ebe336740271a4e8db7cbcd6d9"
+    }
+  ]
+}

@@ -1,0 +1,347 @@
+{
+  "version": 1,
+  "kind": "phase-7-legacy-visual-baseline",
+  "source": {
+    "repository": "Artificial-Source/Junban-legacy",
+    "commit": "5e2b2b5adc865f401843c5030285293c5fabccc5",
+    "captured_at": "2026-08-04",
+    "capture_host_font": "NotoSans-Regular.ttf: \"Noto Sans\" \"Regular\""
+  },
+  "environment": {
+    "node": "v24.13.1",
+    "platform": "linux",
+    "arch": "x64",
+    "browser": "playwright-chromium",
+    "deviceScaleFactor": 1,
+    "reducedMotion": "reduce",
+    "network": "blocked-non-local",
+    "marketplace": "none",
+    "registry": "offline-fixture",
+    "clock": "2026-08-04T15:00:00.000Z",
+    "typography": "Noto Sans via system-ui fallback (Outfit network font blocked)"
+  },
+  "capture": {
+    "command": "node scripts/capture-phase-7-legacy-visual-baseline.mjs",
+    "harness": "scripts/phase-7-legacy-visual-baseline/harness/** (ephemeral overlay)",
+    "worktree_policy": "git worktree add --detach at pinned commit; removed after capture"
+  },
+  "hashes": {
+    "capture_script_sha256": "29a6a7ad7665d98395f77855c5b2c26b529959d20a41ffcfe9759364dd9302ea",
+    "capture_spec_sha256": "1c3fc9dcaafac40394384932d7cae3e579cf40af46dba5b504b99eb581e6297f",
+    "harness_tree_sha256": "d9d175475b966570c11ba5624ac3ba6c199d4e12c933e5ca2f584830f1bfe696",
+    "harness_files": [
+      "fixture-state.ts",
+      "index.html",
+      "main.tsx",
+      "mocks/PluginBrowser.tsx",
+      "mocks/PluginContext.tsx",
+      "mocks/PluginsTab.tsx",
+      "mocks/SettingsContext.tsx",
+      "mocks/api-helpers.ts",
+      "mocks/api-index.ts",
+      "mocks/read-fixture.ts",
+      "mocks/useIsMobile.ts",
+      "scenes.tsx",
+      "vite.config.ts"
+    ],
+    "legacy_sources_sha256": {
+      "src/ui/views/settings/PluginsTab.tsx": "b654c7fc5b83b9f6ab59fcd8d30d7583621841bda3e5c39d52dd6e3926f9aacd",
+      "src/ui/views/Settings.tsx": "cb85a6d1f4e2f5ba5c68e99e78db7f22a9a696bc779ffb5bc2f81360be7c9056",
+      "src/ui/components/PermissionDialog.tsx": "658c4f5b9b367b4b35f55cee7f73c84bfe785f6774749eccfd35f3961023925f",
+      "src/ui/components/PluginBrowser.tsx": "024284ee6fbfc0368a31b2e6eb016bc7cea53fc422acfdb402ebc93b0426f460",
+      "src/ui/components/plugin-browser/PluginDetail.tsx": "e956b091fc8f8f586d68c8b45ad66c275760bc26205fa7aeef320ae224c0045c",
+      "src/ui/components/plugin-browser/PluginListItem.tsx": "b8d60b52782237d3b230bbc3d73b99ffdb39fe61d4323d52d0054949abb72830",
+      "src/ui/components/plugin-browser/PluginSettingsPanel.tsx": "1cf7afde0c8883438f8942f2b3dbdb42f3baebb8212916a44934f5e7f31c4502",
+      "src/ui/components/plugin-browser/SettingsPluginCard.tsx": "0e2ca6806827a5ac7b73125f8ba68fdc2a3b1d4d4036b6056dacc6e47dc62a83",
+      "src/ui/components/PluginPanel.tsx": "47004d4f6dbf690840a10c8a2fa174cdf8554b9288143e058cad9690a3305dab",
+      "src/ui/components/PluginCard.tsx": "70e1915ba0d0926f00ac01991f309ce33370851cb2ddb09136a5ed51f1cbff6a",
+      "src/ui/components/StatusBar.tsx": "275a1defce401eb876e7843236a3e7a7f2d745098ce49f7051755c01b5c0a306",
+      "src/ui/components/StructuredContentRenderer.tsx": "6d8a53ea5fa4d8eda51e020de8e338edc649811851468559c1d7c37a85795d9a",
+      "src/plugins/builtin/pomodoro/index.ts": "c254c789bf834665d7eb885f564db0076d5e7b4b4c09ab05921f1b2dead045eb",
+      "src/plugins/builtin/pomodoro/manifest.json": "1a9fe42e6e12474104b0fb166e629d8e61e630fee45b116e3d102a3b7c30e31b",
+      "src/ui/index.css": "75a6da7a632e6b4b56d9f00235f984205ec4be4eddfe560d6cec093b12a6f231",
+      "src/ui/themes/light.css": "ff1304cc3c1cb520404b566012ce5b5739e44500581b9d51f0a4758762c0c91a",
+      "src/ui/themes/dark.css": "4c08fe8ea3332ad8fd2a97f7e39a35ceaeb0b5aa70a7e58eed64bde911eca1dd"
+    }
+  },
+  "policy": {
+    "maxDiffPixelRatio": 0.01,
+    "immutable": true,
+    "rewrite_may_not_regenerate": true,
+    "rejects_node_vm_require_arbitrary_react": "Behavioral/visual authority only. Do not copy Node vm, require, archive extraction, or arbitrary guest React architecture from legacy plugins."
+  },
+  "authority_gaps": [
+    {
+      "id": "legacy-react-content-type",
+      "disposition": "behavior-only",
+      "note": "Legacy contentType:\"react\" guest components are deliberately rejected by Phase 7. Nearest visual authority is StructuredContentRenderer + PluginPanel declarative actions."
+    },
+    {
+      "id": "first-party-views-not-plugins",
+      "disposition": "out-of-scope-for-plugin-rewrite",
+      "note": "Calendar, Matrix, Stats, Timeblocking, Someday, Completed, Cancelled, and Quick Wins remain first-party Phase 2/3 surfaces and are not rewrapped as plugins."
+    }
+  ],
+  "scenes": [
+    {
+      "id": "settings-extensions-main-desktop-light",
+      "file": "settings-extensions-main-desktop-light.png",
+      "width": 1280,
+      "height": 900,
+      "bytes": 134010,
+      "sha256": "d339a1b5c7ad0270b63598a33dffa7b80f90df5c8fe95ba8a68b7e2554fef5a8",
+      "theme": "light",
+      "viewport": {
+        "width": 1280,
+        "height": 900,
+        "deviceScaleFactor": 1
+      },
+      "maxDiffPixelRatio": 0.01,
+      "componentAuthority": "src/ui/views/settings/PluginsTab.tsx + src/ui/views/Settings.tsx",
+      "testAuthority": "tests/ui/settings/PluginsTab.test.tsx",
+      "clock": "2026-08-04T15:00:00.000Z",
+      "reducedMotion": true,
+      "animations": "disabled"
+    },
+    {
+      "id": "settings-extensions-safety-desktop-light",
+      "file": "settings-extensions-safety-desktop-light.png",
+      "width": 1280,
+      "height": 900,
+      "bytes": 124369,
+      "sha256": "2c6f8e3a3b94922599b76a7750490c949c97a754152a57a3ac6667d262edab92",
+      "theme": "light",
+      "viewport": {
+        "width": 1280,
+        "height": 900,
+        "deviceScaleFactor": 1
+      },
+      "maxDiffPixelRatio": 0.01,
+      "componentAuthority": "src/ui/views/settings/PluginsTab.tsx (community safety confirmation)",
+      "testAuthority": "tests/ui/settings/PluginsTab.test.tsx",
+      "clock": "2026-08-04T15:00:00.000Z",
+      "reducedMotion": true,
+      "animations": "disabled"
+    },
+    {
+      "id": "settings-extensions-permission-desktop-light",
+      "file": "settings-extensions-permission-desktop-light.png",
+      "width": 1280,
+      "height": 900,
+      "bytes": 115659,
+      "sha256": "056524eac30c8cc6f6b20f821d1e5291bb5eda4aaca71ead32c1cc0facb167af",
+      "theme": "light",
+      "viewport": {
+        "width": 1280,
+        "height": 900,
+        "deviceScaleFactor": 1
+      },
+      "maxDiffPixelRatio": 0.01,
+      "componentAuthority": "src/ui/components/PermissionDialog.tsx",
+      "testAuthority": "tests/ui/components/PermissionDialog.test.tsx",
+      "clock": "2026-08-04T15:00:00.000Z",
+      "reducedMotion": true,
+      "animations": "disabled"
+    },
+    {
+      "id": "registry-browser-list-detail-desktop-light",
+      "file": "registry-browser-list-detail-desktop-light.png",
+      "width": 1280,
+      "height": 900,
+      "bytes": 117571,
+      "sha256": "1043d9437604bcceba6a96cc183db166256ff4c0f53b2f9ebeff5d2e606722c7",
+      "theme": "light",
+      "viewport": {
+        "width": 1280,
+        "height": 900,
+        "deviceScaleFactor": 1
+      },
+      "maxDiffPixelRatio": 0.01,
+      "componentAuthority": "src/ui/components/PluginBrowser.tsx + plugin-browser/PluginDetail.tsx",
+      "testAuthority": "tests/ui/settings/PluginsTab.test.tsx",
+      "clock": "2026-08-04T15:00:00.000Z",
+      "reducedMotion": true,
+      "animations": "disabled"
+    },
+    {
+      "id": "registry-browser-empty-desktop-light",
+      "file": "registry-browser-empty-desktop-light.png",
+      "width": 1280,
+      "height": 900,
+      "bytes": 21569,
+      "sha256": "419ca71123428e7a49c0251abbdc739d3cfb12d35dad90f84826e2a2b60ecc90",
+      "theme": "light",
+      "viewport": {
+        "width": 1280,
+        "height": 900,
+        "deviceScaleFactor": 1
+      },
+      "maxDiffPixelRatio": 0.01,
+      "componentAuthority": "src/ui/components/PluginBrowser.tsx",
+      "testAuthority": "tests/ui/settings/PluginsTab.test.tsx",
+      "clock": "2026-08-04T15:00:00.000Z",
+      "reducedMotion": true,
+      "animations": "disabled"
+    },
+    {
+      "id": "registry-browser-loading-desktop-light",
+      "file": "registry-browser-loading-desktop-light.png",
+      "width": 1280,
+      "height": 900,
+      "bytes": 20078,
+      "sha256": "c2e8d2adfc3d220ed89770210f1b301667487f4f89825238c92ab4f5e7b1ad1f",
+      "theme": "light",
+      "viewport": {
+        "width": 1280,
+        "height": 900,
+        "deviceScaleFactor": 1
+      },
+      "maxDiffPixelRatio": 0.01,
+      "componentAuthority": "src/ui/components/PluginBrowser.tsx",
+      "testAuthority": "tests/ui/settings/PluginsTab.test.tsx",
+      "clock": "2026-08-04T15:00:00.000Z",
+      "reducedMotion": true,
+      "animations": "disabled"
+    },
+    {
+      "id": "registry-browser-error-desktop-light",
+      "file": "registry-browser-error-desktop-light.png",
+      "width": 1280,
+      "height": 900,
+      "bytes": 122250,
+      "sha256": "f1e2a12b6e85d96972f80511cb3596e334d114f997b220b98bbd977da0db20b0",
+      "theme": "light",
+      "viewport": {
+        "width": 1280,
+        "height": 900,
+        "deviceScaleFactor": 1
+      },
+      "maxDiffPixelRatio": 0.01,
+      "componentAuthority": "src/ui/components/PluginBrowser.tsx",
+      "testAuthority": "tests/ui/settings/PluginsTab.test.tsx",
+      "clock": "2026-08-04T15:00:00.000Z",
+      "reducedMotion": true,
+      "animations": "disabled"
+    },
+    {
+      "id": "plugin-settings-pomodoro-desktop-light",
+      "file": "plugin-settings-pomodoro-desktop-light.png",
+      "width": 1280,
+      "height": 900,
+      "bytes": 102582,
+      "sha256": "c8cf859386ad8d9f5399dc7f839f97b764f40f4c018c3ca9c1f061fbe88f5061",
+      "theme": "light",
+      "viewport": {
+        "width": 1280,
+        "height": 900,
+        "deviceScaleFactor": 1
+      },
+      "maxDiffPixelRatio": 0.01,
+      "componentAuthority": "src/ui/components/plugin-browser/PluginSettingsPanel.tsx + SettingsPluginCard.tsx",
+      "testAuthority": "tests/ui/settings/PluginsTab.test.tsx",
+      "clock": "2026-08-04T15:00:00.000Z",
+      "reducedMotion": true,
+      "animations": "disabled"
+    },
+    {
+      "id": "pomodoro-view-status-desktop-light",
+      "file": "pomodoro-view-status-desktop-light.png",
+      "width": 1440,
+      "height": 900,
+      "bytes": 23421,
+      "sha256": "805840d6de4b1350ac107a6067f36e242a3a22bc4af49614ef53e77f7370612b",
+      "theme": "light",
+      "viewport": {
+        "width": 1440,
+        "height": 900,
+        "deviceScaleFactor": 1
+      },
+      "maxDiffPixelRatio": 0.01,
+      "componentAuthority": "src/plugins/builtin/pomodoro (structured view) + src/ui/components/StructuredContentRenderer.tsx + StatusBar.tsx",
+      "testAuthority": "tests/plugins/pomodoro.test.ts",
+      "clock": "2026-08-04T15:00:00.000Z",
+      "reducedMotion": true,
+      "animations": "disabled"
+    },
+    {
+      "id": "declarative-panel-action-desktop-light",
+      "file": "declarative-panel-action-desktop-light.png",
+      "width": 1280,
+      "height": 900,
+      "bytes": 25737,
+      "sha256": "6e0d0b7381be21e964af58da89812c4b252426c15a52c6c40ea40904617af656",
+      "theme": "light",
+      "viewport": {
+        "width": 1280,
+        "height": 900,
+        "deviceScaleFactor": 1
+      },
+      "maxDiffPixelRatio": 0.01,
+      "componentAuthority": "src/ui/components/PluginPanel.tsx + StructuredContentRenderer.tsx",
+      "testAuthority": "tests/plugins/pomodoro.test.ts",
+      "clock": "2026-08-04T15:00:00.000Z",
+      "reducedMotion": true,
+      "animations": "disabled"
+    },
+    {
+      "id": "settings-extensions-mobile-category-light",
+      "file": "settings-extensions-mobile-category-light.png",
+      "width": 390,
+      "height": 844,
+      "bytes": 46284,
+      "sha256": "58436df74bffdfb9af3c529867893b74621a5ff57bed3583921621a5d5dd5ce1",
+      "theme": "light",
+      "viewport": {
+        "width": 390,
+        "height": 844,
+        "deviceScaleFactor": 1
+      },
+      "maxDiffPixelRatio": 0.01,
+      "componentAuthority": "src/ui/views/Settings.tsx (mobile category index)",
+      "testAuthority": "tests/ui/settings/Settings.test.tsx",
+      "clock": "2026-08-04T15:00:00.000Z",
+      "reducedMotion": true,
+      "animations": "disabled"
+    },
+    {
+      "id": "settings-extensions-mobile-detail-light",
+      "file": "settings-extensions-mobile-detail-light.png",
+      "width": 390,
+      "height": 844,
+      "bytes": 66025,
+      "sha256": "6990a2a9afde014a05afca1af246456c597180e88d2ab85f29356592df9f11f0",
+      "theme": "light",
+      "viewport": {
+        "width": 390,
+        "height": 844,
+        "deviceScaleFactor": 1
+      },
+      "maxDiffPixelRatio": 0.01,
+      "componentAuthority": "src/ui/views/Settings.tsx + PluginsTab.tsx (mobile detail)",
+      "testAuthority": "tests/ui/settings/PluginsTab.test.tsx",
+      "clock": "2026-08-04T15:00:00.000Z",
+      "reducedMotion": true,
+      "animations": "disabled"
+    },
+    {
+      "id": "pomodoro-view-status-desktop-dark",
+      "file": "pomodoro-view-status-desktop-dark.png",
+      "width": 1440,
+      "height": 900,
+      "bytes": 24042,
+      "sha256": "17f0a5f6a1e7f4ad7f7ba2dd22bc53eb4e4a513b64dcbb2f27f00846645ec870",
+      "theme": "dark",
+      "viewport": {
+        "width": 1440,
+        "height": 900,
+        "deviceScaleFactor": 1
+      },
+      "maxDiffPixelRatio": 0.01,
+      "componentAuthority": "src/plugins/builtin/pomodoro + StructuredContentRenderer.tsx + StatusBar.tsx (dark)",
+      "testAuthority": "tests/plugins/pomodoro.test.ts",
+      "clock": "2026-08-04T15:00:00.000Z",
+      "reducedMotion": true,
+      "animations": "disabled"
+    }
+  ]
+}

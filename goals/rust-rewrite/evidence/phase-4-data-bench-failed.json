@@ -1,0 +1,919 @@
+{
+  "binary": {
+    "path": "/home/xn3/Projects/Personal/ASF/Junban/target/release/junban-server",
+    "sha256": "c53acc102ed36f25e8eaaf94dcf782c23ff37195aee241799dcd22b8a307789f",
+    "size_bytes": 10634776
+  },
+  "command": {
+    "argv": [
+      "bench-hosted-server.py",
+      "--mode",
+      "phase4",
+      "--server",
+      "target/release/junban-server",
+      "--seeder",
+      "target/release/junban-scale-seed",
+      "--web-dir",
+      "dist",
+      "--output",
+      "goals/rust-rewrite/evidence/phase-4-data-bench.json"
+    ],
+    "cwd": "/home/xn3/Projects/Personal/ASF/Junban"
+  },
+  "evidence_status": "authoritative_failed",
+  "host": {
+    "cpu_count": 20,
+    "cpu_model": "Intel(R) Core(TM) i9-10850K CPU @ 3.60GHz",
+    "git_commit": "4952ad6310d3b23bcbcbb2342480b6c8baed03a7",
+    "git_dirty": true,
+    "hostname": "xn3-main-desktop",
+    "kernel": "7.0.0-28-generic",
+    "machine": "x86_64",
+    "os": "Linux 7.0.0-28-generic x86_64",
+    "rustc_version": "rustc 1.93.0 (254b59607 2026-01-19)"
+  },
+  "protocol": {
+    "authoritative": true,
+    "bind": "127.0.0.1:0",
+    "budget_basis": "task-count/integrity checks plus frozen 24 MiB post-restore warm / 32 MiB peak; throughput is recorded without a separate invented latency budget",
+    "cgroup": "transient systemd --user service with MemoryAccounting=yes",
+    "driver_outside_cgroup": true,
+    "http_timeout_seconds": 180.0,
+    "mode": "phase4",
+    "name": "junban-phase4-data-v1",
+    "notes": [
+      "Seeder writes the fixture before server start; seed duration is outside the cgroup.",
+      "Each sample restarts the release server on the restored profile in a fresh cgroup.",
+      "Operation peak memory is the max cgroup current sampled while the request runs.",
+      "Quick mode (500 tasks / 1 sample) validates the harness only."
+    ],
+    "operations": [
+      "export_json_stream",
+      "backup_stream",
+      "restore_stream",
+      "post_restore_warm"
+    ],
+    "peak_memory_ceiling_mib": 32.0,
+    "profile_mode": "0700",
+    "quick": false,
+    "regression_rule": "a per-phase warm-median increase above the larger of 20% or 2 MiB requires measured explanation and explicit acceptance; final 24/32 MiB ceilings cannot be waived",
+    "samples": 3,
+    "seeder": "junban-scale-seed --task-count N (scale-bench feature; outside measured cgroup)",
+    "seeder_outside_cgroup": true,
+    "settle_seconds": 2.0,
+    "streaming": {
+      "backup": "GET /api/v1/backup \u2192 driver temp file via copyfileobj",
+      "export": "GET /api/v1/exports/tasks?format=json \u2192 driver temp file via copyfileobj",
+      "restore": "POST /api/v1/backup/restore from on-disk backup file handle (no payload materialization)"
+    },
+    "task_count": 10000,
+    "token": "deterministic per sample, pre-written owner-only access-token",
+    "variance_rule": "same-commit warm median must remain within the larger of 15% or 1 MiB; otherwise repeat on an idle host and retain both reports",
+    "version": 1,
+    "warm_memory_ceiling_mib": 24.0
+  },
+  "run_id": "ad981c2ae9c4",
+  "samples": [
+    {
+      "backup": {
+        "bytes": 7106863,
+        "cgroup_absolute_peak_bytes": 24141824,
+        "cgroup_absolute_peak_mib": 23.0234,
+        "cgroup_current_bytes": 8830976,
+        "cgroup_current_mib": 8.4219,
+        "cgroup_peak_bytes": 18583552,
+        "cgroup_peak_mib": 17.7227,
+        "content_disposition": "attachment; filename=\"junban-2026-08-01T23-29-40.31288101Z.junban-backup\"",
+        "content_type": "application/octet-stream",
+        "elapsed_ms": 205.67893399856985,
+        "http_status": 200,
+        "memory_sample_count": 7,
+        "throughput_mib_s": 32.9525,
+        "validation": {
+          "magic": "JNBK",
+          "manifest_len": 253,
+          "payload_len": 7106560,
+          "size_bytes": 7106863,
+          "version": 1
+        }
+      },
+      "cleanup_success": true,
+      "export_json": {
+        "bytes": 982503,
+        "cgroup_absolute_peak_bytes": 9932800,
+        "cgroup_absolute_peak_mib": 9.4727,
+        "cgroup_current_bytes": 8916992,
+        "cgroup_current_mib": 8.5039,
+        "cgroup_peak_bytes": 8916992,
+        "cgroup_peak_mib": 8.5039,
+        "content_disposition": "attachment; filename=\"junban-tasks.json\"",
+        "content_type": "application/json; charset=utf-8",
+        "elapsed_ms": 527.5304159986263,
+        "http_status": 200,
+        "memory_sample_count": 18,
+        "throughput_mib_s": 1.7762,
+        "validation": {
+          "format": "junban_tasks",
+          "project_count": 10,
+          "tag_count": 20,
+          "task_count": 10000,
+          "version": 1
+        }
+      },
+      "idle": {
+        "cgroup_current_bytes": 2764800,
+        "cgroup_current_mib": 2.6367,
+        "cgroup_peak_bytes": 4190208,
+        "cgroup_peak_mib": 3.9961,
+        "cmdline": "/home/xn3/Projects/Personal/ASF/Junban/target/release/junban-server --bind 127.0.0.1:0 --data-dir /tmp/junban-phase4-ad981c2ae9c4-o30xcq27/profile-00 --web-dir /home/xn3/Projects/Personal/ASF/Junban/dist",
+        "exe": "junban-server",
+        "label": "idle",
+        "pid": 784867,
+        "process_count": 1,
+        "pss_bytes": 8081408,
+        "pss_mib": 7.707,
+        "rss_bytes": 10432512,
+        "rss_mib": 9.9492
+      },
+      "integrity": {
+        "backup_payload_len": 7106560,
+        "expected_task_count": 10000,
+        "export_task_count": 10000,
+        "passed": true,
+        "restart_required": true,
+        "restored_task_count": 10000
+      },
+      "post_restore": {
+        "profile_revision": 1,
+        "sqlite": {
+          "junban.sqlite3": 7106560,
+          "junban.sqlite3-shm": 32768,
+          "junban.sqlite3-wal": 0,
+          "total_bytes": 7139328
+        },
+        "startup_to_health_ms": 47.48174199994537,
+        "task_count": 10000,
+        "warm": {
+          "cgroup_current_bytes": 6664192,
+          "cgroup_current_mib": 6.3555,
+          "cgroup_peak_bytes": 7221248,
+          "cgroup_peak_mib": 6.8867,
+          "cmdline": "/home/xn3/Projects/Personal/ASF/Junban/target/release/junban-server --bind 127.0.0.1:0 --data-dir /tmp/junban-phase4-ad981c2ae9c4-o30xcq27/profile-00 --web-dir /home/xn3/Projects/Personal/ASF/Junban/dist",
+          "exe": "junban-server",
+          "label": "post_restore_warm",
+          "pid": 785071,
+          "process_count": 1,
+          "pss_bytes": 11650048,
+          "pss_mib": 11.1104,
+          "rss_bytes": 14041088,
+          "rss_mib": 13.3906
+        }
+      },
+      "restore": {
+        "bytes": 7106863,
+        "cgroup_absolute_peak_bytes": 33804288,
+        "cgroup_absolute_peak_mib": 32.2383,
+        "cgroup_current_bytes": 11468800,
+        "cgroup_current_mib": 10.9375,
+        "cgroup_peak_bytes": 33542144,
+        "cgroup_peak_mib": 31.9883,
+        "elapsed_ms": 1128.5965770002804,
+        "http_status": 200,
+        "memory_sample_count": 39,
+        "response": {
+          "restart_required": true
+        },
+        "restart_required": true,
+        "throughput_mib_s": 6.0054
+      },
+      "restore_unit": "junban-phase4-ad981c2ae9c4-s00-r.service",
+      "sample_index": 0,
+      "sample_peak_mib": 32.2383,
+      "seed": {
+        "as_of_date": "2026-08-01",
+        "duration_ms": 291.361319,
+        "task_count": 10000,
+        "wall_ms": 293.97899499963387
+      },
+      "settle_seconds": 2.0,
+      "sqlite": {
+        "junban.sqlite3": 7106560,
+        "junban.sqlite3-shm": 32768,
+        "junban.sqlite3-wal": 0,
+        "total_bytes": 7139328
+      },
+      "startup_to_health_ms": 67.7659639986814,
+      "unit": "junban-phase4-ad981c2ae9c4-s00.service",
+      "warm": {
+        "cgroup_current_bytes": 6664192,
+        "cgroup_current_mib": 6.3555,
+        "cgroup_peak_bytes": 7221248,
+        "cgroup_peak_mib": 6.8867,
+        "cmdline": "/home/xn3/Projects/Personal/ASF/Junban/target/release/junban-server --bind 127.0.0.1:0 --data-dir /tmp/junban-phase4-ad981c2ae9c4-o30xcq27/profile-00 --web-dir /home/xn3/Projects/Personal/ASF/Junban/dist",
+        "exe": "junban-server",
+        "label": "post_restore_warm",
+        "pid": 785071,
+        "process_count": 1,
+        "pss_bytes": 11650048,
+        "pss_mib": 11.1104,
+        "rss_bytes": 14041088,
+        "rss_mib": 13.3906
+      }
+    },
+    {
+      "backup": {
+        "bytes": 7106863,
+        "cgroup_absolute_peak_bytes": 23937024,
+        "cgroup_absolute_peak_mib": 22.8281,
+        "cgroup_current_bytes": 9867264,
+        "cgroup_current_mib": 9.4102,
+        "cgroup_peak_bytes": 18628608,
+        "cgroup_peak_mib": 17.7656,
+        "content_disposition": "attachment; filename=\"junban-2026-08-01T23-29-46.996434988Z.junban-backup\"",
+        "content_type": "application/octet-stream",
+        "elapsed_ms": 201.50618800107623,
+        "http_status": 200,
+        "memory_sample_count": 7,
+        "throughput_mib_s": 33.6349,
+        "validation": {
+          "magic": "JNBK",
+          "manifest_len": 253,
+          "payload_len": 7106560,
+          "size_bytes": 7106863,
+          "version": 1
+        }
+      },
+      "cleanup_success": true,
+      "export_json": {
+        "bytes": 982503,
+        "cgroup_absolute_peak_bytes": 10612736,
+        "cgroup_absolute_peak_mib": 10.1211,
+        "cgroup_current_bytes": 9076736,
+        "cgroup_current_mib": 8.6562,
+        "cgroup_peak_bytes": 9859072,
+        "cgroup_peak_mib": 9.4023,
+        "content_disposition": "attachment; filename=\"junban-tasks.json\"",
+        "content_type": "application/json; charset=utf-8",
+        "elapsed_ms": 517.9819180011691,
+        "http_status": 200,
+        "memory_sample_count": 18,
+        "throughput_mib_s": 1.8089,
+        "validation": {
+          "format": "junban_tasks",
+          "project_count": 10,
+          "tag_count": 20,
+          "task_count": 10000,
+          "version": 1
+        }
+      },
+      "idle": {
+        "cgroup_current_bytes": 3260416,
+        "cgroup_current_mib": 3.1094,
+        "cgroup_peak_bytes": 4968448,
+        "cgroup_peak_mib": 4.7383,
+        "cmdline": "/home/xn3/Projects/Personal/ASF/Junban/target/release/junban-server --bind 127.0.0.1:0 --data-dir /tmp/junban-phase4-ad981c2ae9c4-o30xcq27/profile-01 --web-dir /home/xn3/Projects/Personal/ASF/Junban/dist",
+        "exe": "junban-server",
+        "label": "idle",
+        "pid": 785342,
+        "process_count": 1,
+        "pss_bytes": 8034304,
+        "pss_mib": 7.6621,
+        "rss_bytes": 10530816,
+        "rss_mib": 10.043
+      },
+      "integrity": {
+        "backup_payload_len": 7106560,
+        "expected_task_count": 10000,
+        "export_task_count": 10000,
+        "passed": true,
+        "restart_required": true,
+        "restored_task_count": 10000
+      },
+      "post_restore": {
+        "profile_revision": 1,
+        "sqlite": {
+          "junban.sqlite3": 7106560,
+          "junban.sqlite3-shm": 32768,
+          "junban.sqlite3-wal": 0,
+          "total_bytes": 7139328
+        },
+        "startup_to_health_ms": 51.610638001875486,
+        "task_count": 10000,
+        "warm": {
+          "cgroup_current_bytes": 6311936,
+          "cgroup_current_mib": 6.0195,
+          "cgroup_peak_bytes": 7180288,
+          "cgroup_peak_mib": 6.8477,
+          "cmdline": "/home/xn3/Projects/Personal/ASF/Junban/target/release/junban-server --bind 127.0.0.1:0 --data-dir /tmp/junban-phase4-ad981c2ae9c4-o30xcq27/profile-01 --web-dir /home/xn3/Projects/Personal/ASF/Junban/dist",
+          "exe": "junban-server",
+          "label": "post_restore_warm",
+          "pid": 785561,
+          "process_count": 1,
+          "pss_bytes": 11596800,
+          "pss_mib": 11.0596,
+          "rss_bytes": 13983744,
+          "rss_mib": 13.3359
+        }
+      },
+      "restore": {
+        "bytes": 7106863,
+        "cgroup_absolute_peak_bytes": 34402304,
+        "cgroup_absolute_peak_mib": 32.8086,
+        "cgroup_current_bytes": 11886592,
+        "cgroup_current_mib": 11.3359,
+        "cgroup_peak_bytes": 33943552,
+        "cgroup_peak_mib": 32.3711,
+        "elapsed_ms": 1102.12148500068,
+        "http_status": 200,
+        "memory_sample_count": 38,
+        "response": {
+          "restart_required": true
+        },
+        "restart_required": true,
+        "throughput_mib_s": 6.1496
+      },
+      "restore_unit": "junban-phase4-ad981c2ae9c4-s01-r.service",
+      "sample_index": 1,
+      "sample_peak_mib": 32.8086,
+      "seed": {
+        "as_of_date": "2026-08-01",
+        "duration_ms": 288.728713,
+        "task_count": 10000,
+        "wall_ms": 291.2295650021406
+      },
+      "settle_seconds": 2.0,
+      "sqlite": {
+        "junban.sqlite3": 7106560,
+        "junban.sqlite3-shm": 32768,
+        "junban.sqlite3-wal": 0,
+        "total_bytes": 7139328
+      },
+      "startup_to_health_ms": 45.953732002089964,
+      "unit": "junban-phase4-ad981c2ae9c4-s01.service",
+      "warm": {
+        "cgroup_current_bytes": 6311936,
+        "cgroup_current_mib": 6.0195,
+        "cgroup_peak_bytes": 7180288,
+        "cgroup_peak_mib": 6.8477,
+        "cmdline": "/home/xn3/Projects/Personal/ASF/Junban/target/release/junban-server --bind 127.0.0.1:0 --data-dir /tmp/junban-phase4-ad981c2ae9c4-o30xcq27/profile-01 --web-dir /home/xn3/Projects/Personal/ASF/Junban/dist",
+        "exe": "junban-server",
+        "label": "post_restore_warm",
+        "pid": 785561,
+        "process_count": 1,
+        "pss_bytes": 11596800,
+        "pss_mib": 11.0596,
+        "rss_bytes": 13983744,
+        "rss_mib": 13.3359
+      }
+    },
+    {
+      "backup": {
+        "bytes": 7106863,
+        "cgroup_absolute_peak_bytes": 23429120,
+        "cgroup_absolute_peak_mib": 22.3438,
+        "cgroup_current_bytes": 8867840,
+        "cgroup_current_mib": 8.457,
+        "cgroup_peak_bytes": 23429120,
+        "cgroup_peak_mib": 22.3438,
+        "content_disposition": "attachment; filename=\"junban-2026-08-01T23-29-53.598688803Z.junban-backup\"",
+        "content_type": "application/octet-stream",
+        "elapsed_ms": 200.01791100003175,
+        "http_status": 200,
+        "memory_sample_count": 7,
+        "throughput_mib_s": 33.8851,
+        "validation": {
+          "magic": "JNBK",
+          "manifest_len": 253,
+          "payload_len": 7106560,
+          "size_bytes": 7106863,
+          "version": 1
+        }
+      },
+      "cleanup_success": true,
+      "export_json": {
+        "bytes": 982503,
+        "cgroup_absolute_peak_bytes": 10264576,
+        "cgroup_absolute_peak_mib": 9.7891,
+        "cgroup_current_bytes": 8519680,
+        "cgroup_current_mib": 8.125,
+        "cgroup_peak_bytes": 10248192,
+        "cgroup_peak_mib": 9.7734,
+        "content_disposition": "attachment; filename=\"junban-tasks.json\"",
+        "content_type": "application/json; charset=utf-8",
+        "elapsed_ms": 504.5401060015138,
+        "http_status": 200,
+        "memory_sample_count": 18,
+        "throughput_mib_s": 1.8571,
+        "validation": {
+          "format": "junban_tasks",
+          "project_count": 10,
+          "tag_count": 20,
+          "task_count": 10000,
+          "version": 1
+        }
+      },
+      "idle": {
+        "cgroup_current_bytes": 3510272,
+        "cgroup_current_mib": 3.3477,
+        "cgroup_peak_bytes": 4710400,
+        "cgroup_peak_mib": 4.4922,
+        "cmdline": "/home/xn3/Projects/Personal/ASF/Junban/target/release/junban-server --bind 127.0.0.1:0 --data-dir /tmp/junban-phase4-ad981c2ae9c4-o30xcq27/profile-02 --web-dir /home/xn3/Projects/Personal/ASF/Junban/dist",
+        "exe": "junban-server",
+        "label": "idle",
+        "pid": 785593,
+        "process_count": 1,
+        "pss_bytes": 7996416,
+        "pss_mib": 7.626,
+        "rss_bytes": 10436608,
+        "rss_mib": 9.9531
+      },
+      "integrity": {
+        "backup_payload_len": 7106560,
+        "expected_task_count": 10000,
+        "export_task_count": 10000,
+        "passed": true,
+        "restart_required": true,
+        "restored_task_count": 10000
+      },
+      "post_restore": {
+        "profile_revision": 1,
+        "sqlite": {
+          "junban.sqlite3": 7106560,
+          "junban.sqlite3-shm": 32768,
+          "junban.sqlite3-wal": 0,
+          "total_bytes": 7139328
+        },
+        "startup_to_health_ms": 42.76223499982734,
+        "task_count": 10000,
+        "warm": {
+          "cgroup_current_bytes": 6594560,
+          "cgroup_current_mib": 6.2891,
+          "cgroup_peak_bytes": 6885376,
+          "cgroup_peak_mib": 6.5664,
+          "cmdline": "/home/xn3/Projects/Personal/ASF/Junban/target/release/junban-server --bind 127.0.0.1:0 --data-dir /tmp/junban-phase4-ad981c2ae9c4-o30xcq27/profile-02 --web-dir /home/xn3/Projects/Personal/ASF/Junban/dist",
+          "exe": "junban-server",
+          "label": "post_restore_warm",
+          "pid": 785949,
+          "process_count": 1,
+          "pss_bytes": 11670528,
+          "pss_mib": 11.1299,
+          "rss_bytes": 14057472,
+          "rss_mib": 13.4062
+        }
+      },
+      "restore": {
+        "bytes": 7106863,
+        "cgroup_absolute_peak_bytes": 33714176,
+        "cgroup_absolute_peak_mib": 32.1523,
+        "cgroup_current_bytes": 11640832,
+        "cgroup_current_mib": 11.1016,
+        "cgroup_peak_bytes": 33452032,
+        "cgroup_peak_mib": 31.9023,
+        "elapsed_ms": 1128.2552800003032,
+        "http_status": 200,
+        "memory_sample_count": 39,
+        "response": {
+          "restart_required": true
+        },
+        "restart_required": true,
+        "throughput_mib_s": 6.0072
+      },
+      "restore_unit": "junban-phase4-ad981c2ae9c4-s02-r.service",
+      "sample_index": 2,
+      "sample_peak_mib": 32.1523,
+      "seed": {
+        "as_of_date": "2026-08-01",
+        "duration_ms": 265.20309,
+        "task_count": 10000,
+        "wall_ms": 267.6373469985265
+      },
+      "settle_seconds": 2.0,
+      "sqlite": {
+        "junban.sqlite3": 7106560,
+        "junban.sqlite3-shm": 32768,
+        "junban.sqlite3-wal": 0,
+        "total_bytes": 7139328
+      },
+      "startup_to_health_ms": 47.87827100153663,
+      "unit": "junban-phase4-ad981c2ae9c4-s02.service",
+      "warm": {
+        "cgroup_current_bytes": 6594560,
+        "cgroup_current_mib": 6.2891,
+        "cgroup_peak_bytes": 6885376,
+        "cgroup_peak_mib": 6.5664,
+        "cmdline": "/home/xn3/Projects/Personal/ASF/Junban/target/release/junban-server --bind 127.0.0.1:0 --data-dir /tmp/junban-phase4-ad981c2ae9c4-o30xcq27/profile-02 --web-dir /home/xn3/Projects/Personal/ASF/Junban/dist",
+        "exe": "junban-server",
+        "label": "post_restore_warm",
+        "pid": 785949,
+        "process_count": 1,
+        "pss_bytes": 11670528,
+        "pss_mib": 11.1299,
+        "rss_bytes": 14057472,
+        "rss_mib": 13.4062
+      }
+    }
+  ],
+  "seeder": {
+    "path": "/home/xn3/Projects/Personal/ASF/Junban/target/release/junban-scale-seed",
+    "sha256": "a349d79cee63b728b9fcea25f3aa44596d9fb70d8c96d9d0a9fd5e8826a4b791",
+    "size_bytes": 3523832
+  },
+  "summary": {
+    "backup": {
+      "bytes": {
+        "count": 3,
+        "max": 7106863.0,
+        "median": 7106863.0,
+        "min": 7106863.0,
+        "p50": 7106863.0,
+        "p95": 7106863.0,
+        "values": [
+          7106863.0,
+          7106863.0,
+          7106863.0
+        ]
+      },
+      "cgroup_current_mib": {
+        "count": 3,
+        "max": 9.4102,
+        "median": 8.457,
+        "min": 8.4219,
+        "p50": 8.457,
+        "p95": 9.31488,
+        "values": [
+          8.4219,
+          9.4102,
+          8.457
+        ]
+      },
+      "cgroup_peak_mib": {
+        "count": 3,
+        "max": 22.3438,
+        "median": 17.7656,
+        "min": 17.7227,
+        "p50": 17.7656,
+        "p95": 21.88598,
+        "values": [
+          17.7227,
+          17.7656,
+          22.3438
+        ]
+      },
+      "elapsed_ms": {
+        "count": 3,
+        "max": 205.67893399856985,
+        "max_ms": 205.67893399856985,
+        "median": 201.50618800107623,
+        "min": 200.01791100003175,
+        "min_ms": 200.01791100003175,
+        "p50_ms": 201.50618800107623,
+        "p95_ms": 205.26165939882048,
+        "values": [
+          205.67893399856985,
+          201.50618800107623,
+          200.01791100003175
+        ],
+        "values_ms": [
+          205.67893399856985,
+          201.50618800107623,
+          200.01791100003175
+        ]
+      },
+      "throughput_mib_s": {
+        "count": 3,
+        "max": 33.8851,
+        "median": 33.6349,
+        "min": 32.9525,
+        "p50": 33.6349,
+        "p95": 33.86008,
+        "values": [
+          32.9525,
+          33.6349,
+          33.8851
+        ]
+      }
+    },
+    "budget_passed": false,
+    "cleanup_passed": true,
+    "export_json": {
+      "bytes": {
+        "count": 3,
+        "max": 982503.0,
+        "median": 982503.0,
+        "min": 982503.0,
+        "p50": 982503.0,
+        "p95": 982503.0,
+        "values": [
+          982503.0,
+          982503.0,
+          982503.0
+        ]
+      },
+      "cgroup_current_mib": {
+        "count": 3,
+        "max": 8.6562,
+        "median": 8.5039,
+        "min": 8.125,
+        "p50": 8.5039,
+        "p95": 8.64097,
+        "values": [
+          8.5039,
+          8.6562,
+          8.125
+        ]
+      },
+      "cgroup_peak_mib": {
+        "count": 3,
+        "max": 9.7734,
+        "median": 9.4023,
+        "min": 8.5039,
+        "p50": 9.4023,
+        "p95": 9.73629,
+        "values": [
+          8.5039,
+          9.4023,
+          9.7734
+        ]
+      },
+      "elapsed_ms": {
+        "count": 3,
+        "max": 527.5304159986263,
+        "max_ms": 527.5304159986263,
+        "median": 517.9819180011691,
+        "min": 504.5401060015138,
+        "min_ms": 504.5401060015138,
+        "p50_ms": 517.9819180011691,
+        "p95_ms": 526.5755661988806,
+        "values": [
+          527.5304159986263,
+          517.9819180011691,
+          504.5401060015138
+        ],
+        "values_ms": [
+          527.5304159986263,
+          517.9819180011691,
+          504.5401060015138
+        ]
+      },
+      "throughput_mib_s": {
+        "count": 3,
+        "max": 1.8571,
+        "median": 1.8089,
+        "min": 1.7762,
+        "p50": 1.8089,
+        "p95": 1.85228,
+        "values": [
+          1.7762,
+          1.8089,
+          1.8571
+        ]
+      }
+    },
+    "idle_cgroup_mib": {
+      "count": 3,
+      "max": 3.3477,
+      "median": 3.1094,
+      "min": 2.6367,
+      "p50": 3.1094,
+      "p95": 3.3238700000000003,
+      "values": [
+        2.6367,
+        3.1094,
+        3.3477
+      ]
+    },
+    "idle_cgroup_peak_mib": {
+      "count": 3,
+      "max": 4.7383,
+      "median": 4.4922,
+      "min": 3.9961,
+      "p50": 4.4922,
+      "p95": 4.71369,
+      "values": [
+        3.9961,
+        4.7383,
+        4.4922
+      ]
+    },
+    "integrity_passed": true,
+    "memory_budget_passed": false,
+    "peak_memory_ceiling_mib": 32.0,
+    "post_restore_startup_to_health_ms": {
+      "count": 3,
+      "max": 51.610638001875486,
+      "max_ms": 51.610638001875486,
+      "median": 47.48174199994537,
+      "min": 42.76223499982734,
+      "min_ms": 42.76223499982734,
+      "p50_ms": 47.48174199994537,
+      "p95_ms": 51.197748401682475,
+      "values": [
+        47.48174199994537,
+        51.610638001875486,
+        42.76223499982734
+      ],
+      "values_ms": [
+        47.48174199994537,
+        51.610638001875486,
+        42.76223499982734
+      ]
+    },
+    "post_restore_warm_cgroup_mib": {
+      "count": 3,
+      "max": 6.3555,
+      "median": 6.2891,
+      "min": 6.0195,
+      "p50": 6.2891,
+      "p95": 6.34886,
+      "values": [
+        6.3555,
+        6.0195,
+        6.2891
+      ]
+    },
+    "post_restore_warm_cgroup_peak_mib": {
+      "count": 3,
+      "max": 6.8867,
+      "median": 6.8477,
+      "min": 6.5664,
+      "p50": 6.8477,
+      "p95": 6.8828,
+      "values": [
+        6.8867,
+        6.8477,
+        6.5664
+      ]
+    },
+    "regression_rule": "a per-phase warm-median increase above the larger of 20% or 2 MiB requires measured explanation and explicit acceptance; final 24/32 MiB ceilings cannot be waived",
+    "restore": {
+      "bytes": {
+        "count": 3,
+        "max": 7106863.0,
+        "median": 7106863.0,
+        "min": 7106863.0,
+        "p50": 7106863.0,
+        "p95": 7106863.0,
+        "values": [
+          7106863.0,
+          7106863.0,
+          7106863.0
+        ]
+      },
+      "cgroup_current_mib": {
+        "count": 3,
+        "max": 11.3359,
+        "median": 11.1016,
+        "min": 10.9375,
+        "p50": 11.1016,
+        "p95": 11.31247,
+        "values": [
+          10.9375,
+          11.3359,
+          11.1016
+        ]
+      },
+      "cgroup_peak_mib": {
+        "count": 3,
+        "max": 32.3711,
+        "median": 31.9883,
+        "min": 31.9023,
+        "p50": 31.9883,
+        "p95": 32.33282,
+        "values": [
+          31.9883,
+          32.3711,
+          31.9023
+        ]
+      },
+      "elapsed_ms": {
+        "count": 3,
+        "max": 1128.5965770002804,
+        "max_ms": 1128.5965770002804,
+        "median": 1128.2552800003032,
+        "min": 1102.12148500068,
+        "min_ms": 1102.12148500068,
+        "p50_ms": 1128.2552800003032,
+        "p95_ms": 1128.5624473002827,
+        "values": [
+          1128.5965770002804,
+          1102.12148500068,
+          1128.2552800003032
+        ],
+        "values_ms": [
+          1128.5965770002804,
+          1102.12148500068,
+          1128.2552800003032
+        ]
+      },
+      "throughput_mib_s": {
+        "count": 3,
+        "max": 6.1496,
+        "median": 6.0072,
+        "min": 6.0054,
+        "p50": 6.0072,
+        "p95": 6.13536,
+        "values": [
+          6.0054,
+          6.1496,
+          6.0072
+        ]
+      }
+    },
+    "sample_count": 3,
+    "sample_peak_mib": {
+      "count": 3,
+      "max": 32.8086,
+      "median": 32.2383,
+      "min": 32.1523,
+      "p50": 32.2383,
+      "p95": 32.75157,
+      "values": [
+        32.2383,
+        32.8086,
+        32.1523
+      ]
+    },
+    "seed_duration_ms": {
+      "count": 3,
+      "max": 291.361319,
+      "max_ms": 291.361319,
+      "median": 288.728713,
+      "min": 265.20309,
+      "min_ms": 265.20309,
+      "p50_ms": 288.728713,
+      "p95_ms": 291.0980584,
+      "values": [
+        291.361319,
+        288.728713,
+        265.20309
+      ],
+      "values_ms": [
+        291.361319,
+        288.728713,
+        265.20309
+      ]
+    },
+    "sqlite_total_bytes": {
+      "count": 3,
+      "max": 7139328.0,
+      "median": 7139328.0,
+      "min": 7139328.0,
+      "p50": 7139328.0,
+      "p95": 7139328.0,
+      "values": [
+        7139328.0,
+        7139328.0,
+        7139328.0
+      ]
+    },
+    "startup_to_health_ms": {
+      "count": 3,
+      "max": 67.7659639986814,
+      "max_ms": 67.7659639986814,
+      "median": 47.87827100153663,
+      "min": 45.953732002089964,
+      "min_ms": 45.953732002089964,
+      "p50_ms": 47.87827100153663,
+      "p95_ms": 65.77719469896692,
+      "values": [
+        67.7659639986814,
+        45.953732002089964,
+        47.87827100153663
+      ],
+      "values_ms": [
+        67.7659639986814,
+        45.953732002089964,
+        47.87827100153663
+      ]
+    },
+    "variance_rule": "same-commit warm median must remain within the larger of 15% or 1 MiB; otherwise repeat on an idle host and retain both reports",
+    "warm_cgroup_mib": {
+      "count": 3,
+      "max": 6.3555,
+      "median": 6.2891,
+      "min": 6.0195,
+      "p50": 6.2891,
+      "p95": 6.34886,
+      "values": [
+        6.3555,
+        6.0195,
+        6.2891
+      ]
+    },
+    "warm_cgroup_peak_mib": {
+      "count": 3,
+      "max": 32.8086,
+      "median": 32.2383,
+      "min": 32.1523,
+      "p50": 32.2383,
+      "p95": 32.75157,
+      "values": [
+        32.2383,
+        32.8086,
+        32.1523
+      ]
+    },
+    "warm_memory_ceiling_mib": 24.0
+  },
+  "web_dir": "/home/xn3/Projects/Personal/ASF/Junban/dist"
+}

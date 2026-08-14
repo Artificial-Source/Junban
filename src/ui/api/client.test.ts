@@ -22,6 +22,18 @@ import {
   getWeeklyReview,
   getStoredToken,
   getTemporalSettings,
+  getSettings,
+  patchSettings,
+  previewImport,
+  applyImport,
+  exportTasks,
+  createBackup,
+  restoreBackup,
+  getHosts,
+  putHosts,
+  rotateToken,
+  getDiagnostics,
+  clearDiagnostics,
   hasStoredToken,
   listCalendarTasks,
   listTaskReminders,
@@ -55,6 +67,10 @@ function jsonResponse(status: number, body: unknown): Response {
   });
 }
 
+function syncStateResponse(revision = 0, eventEpoch = "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa") {
+  return jsonResponse(200, { event_epoch: eventEpoch, revision });
+}
+
 function mutationEvent(overrides: Record<string, unknown> = {}) {
   return {
     event: {
@@ -63,7 +79,7 @@ function mutationEvent(overrides: Record<string, unknown> = {}) {
       event_type: "task.created",
       occurred_at: "2026-07-28T00:00:00Z",
       affected: { task_ids: ["aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa"] },
-      resync: { tasks: false, catalog: false },
+      resync: { tasks: false, catalog: false, settings: false },
       primary: {
         resource_type: "task",
         id: "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa",
@@ -337,7 +353,8 @@ describe("mutation transport retries", () => {
   it("leaves the authenticated event stream unbounded by the ordinary request timeout", async () => {
     vi.useFakeTimers();
     let signal: AbortSignal | undefined;
-    const fetchMock = vi.fn((_url: string, init?: RequestInit) => {
+    const fetchMock = vi.fn((url: string, init?: RequestInit) => {
+      if (url === "/api/v1/sync-state") return Promise.resolve(syncStateResponse());
       signal = init?.signal ?? undefined;
       return new Promise<Response>(() => {
         /* intentionally never settles */
@@ -346,8 +363,7 @@ describe("mutation transport retries", () => {
     vi.stubGlobal("fetch", fetchMock);
 
     const cleanup = subscribeToEvents(vi.fn(), vi.fn(), vi.fn());
-    await Promise.resolve();
-    expect(fetchMock).toHaveBeenCalled();
+    await vi.waitFor(() => expect(signal).toBeDefined());
     expect(signal?.aborted).toBe(false);
 
     // Far beyond DEFAULT_REQUEST_TIMEOUT_MS — stream must stay open.
@@ -568,7 +584,10 @@ describe("event stream lifecycle", () => {
     const onTerminal = vi.fn();
     vi.stubGlobal(
       "fetch",
-      vi.fn().mockResolvedValue(jsonResponse(401, { error: "not used by stream parsing" })),
+      vi
+        .fn()
+        .mockResolvedValueOnce(syncStateResponse())
+        .mockResolvedValueOnce(jsonResponse(401, { error: "not used by stream parsing" })),
     );
 
     const cleanup = subscribeToEvents(vi.fn(), onReconnect, onTerminal);
@@ -590,7 +609,8 @@ describe("event stream lifecycle", () => {
       "fetch",
       vi
         .fn()
-        .mockResolvedValue(
+        .mockResolvedValueOnce(syncStateResponse())
+        .mockResolvedValueOnce(
           new Response("not an event stream", { headers: { "content-type": "application/json" } }),
         ),
     );
@@ -611,7 +631,8 @@ describe("event stream lifecycle", () => {
     let signal: AbortSignal | undefined;
     vi.stubGlobal(
       "fetch",
-      vi.fn((_url: string, init: RequestInit) => {
+      vi.fn((url: string, init: RequestInit) => {
+        if (url === "/api/v1/sync-state") return Promise.resolve(syncStateResponse());
         signal = init.signal as AbortSignal;
         return new Promise<Response>((_resolve, reject) => {
           signal?.addEventListener("abort", () =>
@@ -638,13 +659,14 @@ describe("event stream lifecycle", () => {
       event_type: "task.updated",
       occurred_at: "2026-07-28T00:00:00Z",
       affected: { task_ids: ["aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa"] },
-      resync: { tasks: false, catalog: false },
+      resync: { tasks: false, catalog: false, settings: false },
       primary: { resource_type: "task", id: "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa" },
       snapshot: null,
     };
     const duplicate = { ...eventPayload };
     const fetchMock = vi
       .fn()
+      .mockResolvedValueOnce(syncStateResponse())
       .mockResolvedValueOnce(
         streamResponse([
           `id: 3\nevent: revision\ndata: ${JSON.stringify(eventPayload)}\n\n`,
@@ -662,16 +684,87 @@ describe("event stream lifecycle", () => {
 
     await vi.waitFor(() => expect(onReconnect).toHaveBeenCalled());
     await vi.advanceTimersByTimeAsync(1000);
-    await vi.waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(2));
+    await vi.waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(3));
 
-    const secondCall = fetchMock.mock.calls[1];
+    const secondCall = fetchMock.mock.calls[2];
     expect(secondCall).toBeDefined();
     const secondInit = secondCall![1] as RequestInit;
     const secondHeaders = secondInit.headers as Record<string, string>;
     expect(secondHeaders["Last-Event-ID"]).toBe("3");
     expect(String(secondCall![0])).toContain("since=3");
+    expect(String(secondCall![0])).toContain("event_epoch=aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa");
     cleanup();
     vi.useRealTimers();
+  });
+
+  it("handles one 409 with authoritative resync and reconnects using the new epoch", async () => {
+    const secondStream = new ReadableStream<Uint8Array>({
+      start() {
+        // Keep the reconnected stream open until cleanup.
+      },
+    });
+    const fetchMock = vi
+      .fn()
+      .mockResolvedValueOnce(syncStateResponse(8, "11111111-1111-4111-8111-111111111111"))
+      .mockResolvedValueOnce(
+        new Response(JSON.stringify({ error: { code: "event_reset_required" } }), {
+          status: 409,
+          headers: { "content-type": "application/json" },
+        }),
+      )
+      .mockResolvedValueOnce(syncStateResponse(3, "22222222-2222-4222-8222-222222222222"))
+      .mockResolvedValueOnce(
+        new Response(secondStream, {
+          status: 200,
+          headers: { "content-type": "text/event-stream" },
+        }),
+      );
+    vi.stubGlobal("fetch", fetchMock);
+    const onReconnect = vi.fn();
+    const onResync = vi.fn(async () => undefined);
+
+    const cleanup = subscribeToEvents(vi.fn(), onReconnect, vi.fn(), 8, onResync);
+    await vi.waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(4));
+
+    expect(onResync).toHaveBeenCalledTimes(1);
+    expect(onResync).toHaveBeenCalledWith(
+      { tasks: true, catalog: true, settings: true },
+      "event_reset_required",
+    );
+    expect(onReconnect).not.toHaveBeenCalled();
+    const reconnectCall = fetchMock.mock.calls[3];
+    expect(reconnectCall).toBeDefined();
+    expect(String(reconnectCall![0])).toContain("event_epoch=22222222-2222-4222-8222-222222222222");
+    expect(String(reconnectCall![0])).toContain("since=3");
+    const reconnectInit = reconnectCall![1] as RequestInit;
+    expect((reconnectInit.headers as Record<string, string>)["Last-Event-ID"]).toBe("3");
+    cleanup();
+  });
+
+  it("fails closed without advancing when the 409 authoritative resync fails", async () => {
+    const fetchMock = vi
+      .fn()
+      .mockResolvedValueOnce(syncStateResponse(8, "11111111-1111-4111-8111-111111111111"))
+      .mockResolvedValueOnce(new Response(null, { status: 409 }))
+      .mockResolvedValueOnce(syncStateResponse(3, "22222222-2222-4222-8222-222222222222"));
+    vi.stubGlobal("fetch", fetchMock);
+    const onReconnect = vi.fn();
+    const onTerminal = vi.fn();
+    const onResync = vi.fn(async () => {
+      throw new Error("snapshot failed");
+    });
+
+    const cleanup = subscribeToEvents(vi.fn(), onReconnect, onTerminal, 8, onResync);
+    await vi.waitFor(() =>
+      expect(onTerminal).toHaveBeenCalledWith({
+        kind: "protocol",
+        message: "Event stream reset could not converge.",
+      }),
+    );
+    expect(fetchMock).toHaveBeenCalledTimes(3);
+    expect(onResync).toHaveBeenCalledTimes(1);
+    expect(onReconnect).not.toHaveBeenCalled();
+    cleanup();
   });
 
   it("treats sync.resync_required and unknown event types as resync, not fatal", async () => {
@@ -684,7 +777,7 @@ describe("event stream lifecycle", () => {
       event_type: "sync.resync_required",
       occurred_at: "2026-07-28T00:00:00Z",
       affected: {},
-      resync: { tasks: true, catalog: true },
+      resync: { tasks: true, catalog: true, settings: false },
     };
     const unknownEvent = {
       revision: 5,
@@ -692,13 +785,14 @@ describe("event stream lifecycle", () => {
       event_type: "future.capability",
       occurred_at: "2026-07-28T00:00:01Z",
       affected: {},
-      resync: { tasks: true, catalog: false },
+      resync: { tasks: true, catalog: false, settings: false },
     };
     vi.stubGlobal(
       "fetch",
       vi
         .fn()
-        .mockResolvedValue(
+        .mockResolvedValueOnce(syncStateResponse())
+        .mockResolvedValueOnce(
           streamResponse([
             `id: 4\ndata: ${JSON.stringify(resyncEvent)}\n\n`,
             `id: 5\ndata: ${JSON.stringify(unknownEvent)}\n\n`,
@@ -711,12 +805,12 @@ describe("event stream lifecycle", () => {
     await vi.waitFor(() => expect(onResync).toHaveBeenCalledTimes(2));
     expect(onResync).toHaveBeenNthCalledWith(
       1,
-      { tasks: true, catalog: true },
+      { tasks: true, catalog: true, settings: true },
       "sync.resync_required",
     );
     expect(onResync).toHaveBeenNthCalledWith(
       2,
-      { tasks: true, catalog: false },
+      { tasks: true, catalog: false, settings: false },
       "unknown_event_type",
     );
     expect(onEvent).not.toHaveBeenCalled();
@@ -1018,5 +1112,197 @@ describe("Phase 3 endpoint request shapes", () => {
     const [settleUrl, settleInit] = fetchMock.mock.calls[3] as [string, RequestInit];
     expect(settleUrl).toBe("/api/v1/reminders/settle/delivered");
     expect(settleInit.headers).not.toHaveProperty("Idempotency-Key");
+  });
+});
+
+describe("Phase 4 endpoint request shapes", () => {
+  beforeEach(() => {
+    sessionStorage.clear();
+    storeToken("test-token");
+  });
+
+  afterEach(() => vi.unstubAllGlobals());
+
+  it("reads and patches settings", async () => {
+    const settingsBody = {
+      appearance: {
+        theme: "dark",
+        accent: "#3b82f6",
+        density: "comfortable",
+        font_size: "medium",
+        font_family: "outfit",
+        reduced_motion: false,
+      },
+      date_time: {
+        week_start: "sunday",
+        calendar_default: "week",
+        date_format: "iso",
+        time_format: "h24",
+      },
+      task_defaults: {
+        default_priority: null,
+        default_view: "today",
+        default_estimated_minutes: null,
+        confirm_before_delete: true,
+      },
+      notifications: {
+        channels: ["in_app"],
+        sound_enabled: true,
+        volume_percent: 70,
+        task_completed_sound: true,
+        task_created_sound: true,
+        task_deleted_sound: true,
+        reminder_sound: true,
+      },
+      features: {
+        nudges_enabled: true,
+        eat_the_frog_enabled: false,
+        task_jar_enabled: false,
+        focus_mode_enabled: true,
+        daily_planning_enabled: true,
+        weekly_review_enabled: true,
+      },
+      planning: {
+        capacity_minutes: 480,
+        work_hours: null,
+        nudge_rules: [],
+      },
+      keyboard_shortcuts: [{ action: "quick-add", chord: "cmd+k" }],
+    };
+    const fetchMock = vi
+      .fn()
+      .mockResolvedValueOnce(jsonResponse(200, settingsBody))
+      .mockResolvedValueOnce(jsonResponse(200, mutationEvent({ event_type: "settings.updated" })));
+    vi.stubGlobal("fetch", fetchMock);
+
+    await getSettings();
+    await patchSettings(
+      {
+        appearance: {
+          theme: "dark",
+          accent: "#3b82f6",
+          density: "comfortable",
+          font_size: "medium",
+          font_family: "outfit",
+          reduced_motion: false,
+        },
+      },
+      "11111111-1111-4111-8111-111111111111",
+    );
+
+    expect(fetchMock.mock.calls[0]![0]).toBe("/api/v1/settings");
+    const patchCall = fetchMock.mock.calls[1] as [string, RequestInit];
+    expect(patchCall[0]).toBe("/api/v1/settings");
+    expect(patchCall[1].method).toBe("PATCH");
+    expect(patchCall[1].headers).toMatchObject({
+      Authorization: "Bearer test-token",
+      "Idempotency-Key": "11111111-1111-4111-8111-111111111111",
+      "Content-Type": "application/json",
+    });
+  });
+
+  it("previews and applies imports", async () => {
+    const preview = {
+      format: "json",
+      content_fingerprint: "abc",
+      drafts: [],
+      project_names: [],
+      tag_names: [],
+      warnings: [],
+    };
+    const fetchMock = vi
+      .fn()
+      .mockResolvedValueOnce(jsonResponse(200, preview))
+      .mockResolvedValueOnce(jsonResponse(200, mutationEvent({ event_type: "import.applied" })));
+    vi.stubGlobal("fetch", fetchMock);
+
+    await previewImport({ format: "json", content: "[]" });
+    await applyImport(
+      { format: "json", content: "[]", fingerprint: "abc" },
+      "22222222-2222-4222-8222-222222222222",
+    );
+
+    expect(fetchMock.mock.calls[0]![0]).toBe("/api/v1/imports/preview");
+    expect((fetchMock.mock.calls[0]![1] as RequestInit).method).toBe("POST");
+    const applyCall = fetchMock.mock.calls[1] as [string, RequestInit];
+    expect(applyCall[0]).toBe("/api/v1/imports/apply");
+    expect(applyCall[1].headers).toMatchObject({
+      "Idempotency-Key": "22222222-2222-4222-8222-222222222222",
+    });
+  });
+
+  it("exports tasks and creates backups as download artifacts", async () => {
+    const exportResponse = new Response("title\nA", {
+      status: 200,
+      headers: {
+        "content-type": "text/csv",
+        "content-disposition": 'attachment; filename="tasks.csv"',
+      },
+    });
+    const backupBytes = new Uint8Array([1, 2, 3]);
+    const backupResponse = new Response(backupBytes, {
+      status: 200,
+      headers: {
+        "content-type": "application/octet-stream",
+        "content-disposition": 'attachment; filename="junban.junban-backup"',
+      },
+    });
+    const fetchMock = vi
+      .fn()
+      .mockResolvedValueOnce(exportResponse)
+      .mockResolvedValueOnce(backupResponse);
+    vi.stubGlobal("fetch", fetchMock);
+
+    const exported = await exportTasks({ format: "csv" });
+    expect(exported.filename).toBe("tasks.csv");
+    expect(exported.contentType).toContain("text/csv");
+    expect(await exported.blob.text()).toBe("title\nA");
+
+    const backup = await createBackup();
+    expect(backup.filename).toBe("junban.junban-backup");
+    expect(backup.blob.size).toBe(3);
+    expect(fetchMock.mock.calls[0]![0]).toBe("/api/v1/exports/tasks?format=csv");
+    expect(fetchMock.mock.calls[1]![0]).toBe("/api/v1/backup");
+  });
+
+  it("restores backups, manages hosts, rotates tokens, and clears diagnostics", async () => {
+    const fetchMock = vi
+      .fn()
+      .mockResolvedValueOnce(jsonResponse(200, { restart_required: true }))
+      .mockResolvedValueOnce(jsonResponse(200, { hosts: ["a.example"] }))
+      .mockResolvedValueOnce(jsonResponse(200, { hosts: ["a.example", "b.example"] }))
+      .mockResolvedValueOnce(jsonResponse(200, { token: "new-token-value" }))
+      .mockResolvedValueOnce(jsonResponse(200, { entries: [] }))
+      .mockResolvedValueOnce(new Response(null, { status: 204 }));
+    vi.stubGlobal("fetch", fetchMock);
+
+    const restore = await restoreBackup(new Blob([new Uint8Array([9])]));
+    expect(restore.restart_required).toBe(true);
+    const restoreCall = fetchMock.mock.calls[0] as [string, RequestInit];
+    expect(restoreCall[0]).toBe("/api/v1/backup/restore");
+    expect(restoreCall[1].method).toBe("POST");
+    expect(restoreCall[1].headers).toMatchObject({
+      Authorization: "Bearer test-token",
+      "Content-Type": "application/octet-stream",
+    });
+
+    await getHosts();
+    await putHosts({ hosts: ["a.example", "b.example"] });
+    const putCall = fetchMock.mock.calls[2] as [string, RequestInit];
+    expect(putCall[0]).toBe("/api/v1/hosts");
+    expect(putCall[1].method).toBe("PUT");
+
+    const rotated = await rotateToken("33333333-3333-4333-8333-333333333333");
+    expect(rotated.token).toBe("new-token-value");
+    const rotateCall = fetchMock.mock.calls[3] as [string, RequestInit];
+    expect(rotateCall[0]).toBe("/api/v1/auth/rotate");
+    expect(rotateCall[1].headers).toMatchObject({
+      "Idempotency-Key": "33333333-3333-4333-8333-333333333333",
+    });
+
+    await getDiagnostics();
+    await clearDiagnostics();
+    expect(fetchMock.mock.calls[4]![0]).toBe("/api/v1/diagnostics");
+    expect((fetchMock.mock.calls[5] as [string, RequestInit])[1].method).toBe("DELETE");
   });
 });

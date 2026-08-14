@@ -40,9 +40,7 @@ export function useViewTasks(params?: TaskListParams): {
 
   // Register resync handler.
   useEffect(() => {
-    const unregister = registerTaskResyncHandler(() => {
-      requestResyncRef.current();
-    });
+    const unregister = registerTaskResyncHandler(() => requestResyncRef.current());
     return unregister;
   }, [registerTaskResyncHandler]);
 

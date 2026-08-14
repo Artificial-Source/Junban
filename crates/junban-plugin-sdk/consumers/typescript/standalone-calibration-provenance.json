@@ -1,0 +1,17 @@
+{
+  "schemaVersion": 1,
+  "calibrationOnly": true,
+  "shipped": false,
+  "authority": "crates/junban-plugin-sdk/wit/plugin.wit",
+  "witSha256": "5705801973219a0e6981693653f2caefdf1090345b65494750c8d8a9bf4b15f4",
+  "source": "crates/junban-plugin-sdk/consumers/typescript/src/standalone-calibration.ts",
+  "artifact": "crates/junban-plugin-sdk/consumers/typescript/artifacts/typescript-standalone-calibration.wasm",
+  "jco": "1.26.1",
+  "componentizeJs": "0.22.0",
+  "wasi": "--disable all",
+  "byteReproducible": false,
+  "sizeBytes": 14988599,
+  "sha256": "8616e64e1152ad6f2915107745201ac1888c15124132c9c1fffba0cbd165d8e7",
+  "imports": ["junban:plugin/types@0.1.0"],
+  "exports": ["junban:plugin/guest@0.1.0"]
+}

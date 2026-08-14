@@ -1,0 +1,51 @@
+{
+  "schema_version": 1,
+  "id": "import-typescript",
+  "name": "Bulk Complete Import",
+  "description": "Completes a bounded list of existing Junban tasks through the typed TypeScript plugin contract.",
+  "version": "0.1.0",
+  "publisher": {
+    "id": "junban-reference",
+    "name": "Junban Reference Plugins"
+  },
+  "license": "MIT",
+  "junban_compatibility": "^0.1",
+  "wit": {
+    "package": "junban:plugin",
+    "world": "plugin",
+    "version": "0.1.0"
+  },
+  "runtime_profile": "typescript",
+  "permissions": [
+    {
+      "capability": "commands",
+      "scope": {}
+    },
+    {
+      "capability": "tasks:write",
+      "scope": {}
+    }
+  ],
+  "dependencies": [],
+  "commands": [
+    {
+      "id": "bulk-complete",
+      "title": "Bulk complete tasks",
+      "description": "Complete between 1 and 500 selected tasks.",
+      "icon": null,
+      "inputs": [
+        {
+          "id": "task-ids",
+          "label": "Tasks",
+          "description": "The unique tasks to complete.",
+          "kind": "task-id-list",
+          "required": true
+        }
+      ]
+    }
+  ],
+  "subscriptions": [],
+  "surfaces": [],
+  "settings": [],
+  "services": []
+}

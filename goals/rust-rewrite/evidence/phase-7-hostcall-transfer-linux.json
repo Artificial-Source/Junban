@@ -1,0 +1,50 @@
+{
+  "schema_version": 2,
+  "campaign": "phase-7-hostcall-transfer-linux",
+  "recorded_at_utc": "2026-08-05T18:30:28Z",
+  "source_head": "479b92b",
+  "source_tree_note": "Campaign executed on the uncommitted working tree at base 479b92b containing the oversized-import correction (retained TypeScript fixture moved from a slow oversized-result-string export to a bulk typed-array BigInt64Array import argument); executable and component SHA-256 values bind the exact measured artifacts, which are committed together with this evidence. No campaign script exists in this repository; this replacement records five direct serial optimized exact-test executions and their executable/artifact hashes.",
+  "platform": {
+    "system": "Linux",
+    "machine": "x86_64",
+    "metric_authority": "GNU time maximum resident set size reported for each exact release test process; the measured duration covers the ordinary load, compilation/instantiation, invocation, and shutdown sequence of the exact test, not a transfer-only microbenchmark."
+  },
+  "protocol": {
+    "warmups_per_profile": 0,
+    "measured_runs_per_profile": 5,
+    "serial": true,
+    "optimized": true,
+    "runner": "exact release integration-test executable",
+    "command": [
+      "target/release/deps/process_host-036852e18be7f984",
+      "retained_typescript_invokes_all_exports_and_contains_oversized_import",
+      "--exact",
+      "--test-threads=1"
+    ]
+  },
+  "campaigns": [
+    {
+      "name": "typescript-all-exports-and-oversized-import",
+      "test_executable_sha256": "f807b3154e60777692fc95f8e973440f0cef04a9d1875d1c66a60129955d231b",
+      "typescript_component_sha256": "78abc3d8e07de4a6e399f12da523c2e52b76236416171b82bd7fbbf26b66d6c4",
+      "fixture": {
+        "command_id": "hostcall-oversized-import",
+        "shape": "one named DataValue::IntegerList carried by a new BigInt64Array(558081) lowered through the generated bulk typed-array path",
+        "flat_list_bytes": 4464648,
+        "hostcall_transfer_fuel_bytes": 4464640,
+        "expected_failure": "resource-limit",
+        "callback_publication": "none",
+        "omission_sensitivity": "The equivalent compact canonical HostCallRequest::CallService body is below the 4-MiB HOST_CALLBACK_BODY_BYTES_MAX, so without the explicit Store hostcall-fuel setting canonical lifting can complete and the callback would be published."
+      },
+      "runs": [
+        { "duration_ms": 18170, "max_rss_kib": 537692 },
+        { "duration_ms": 18240, "max_rss_kib": 533684 },
+        { "duration_ms": 18280, "max_rss_kib": 499392 },
+        { "duration_ms": 18290, "max_rss_kib": 495416 },
+        { "duration_ms": 18190, "max_rss_kib": 510052 }
+      ],
+      "max_duration_ms": 18290,
+      "max_rss_kib": 537692
+    }
+  ]
+}

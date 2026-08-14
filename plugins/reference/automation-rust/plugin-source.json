@@ -1,0 +1,37 @@
+{
+  "schema_version": 1,
+  "id": "automation",
+  "name": "Complete New Tasks",
+  "description": "Completes each task-created event through Junban's existing task mutation authority.",
+  "version": "0.1.0",
+  "publisher": {
+    "id": "junban-reference",
+    "name": "Junban Reference Plugins"
+  },
+  "license": "MIT",
+  "junban_compatibility": "^0.1",
+  "wit": {
+    "package": "junban:plugin",
+    "world": "plugin",
+    "version": "0.1.0"
+  },
+  "runtime_profile": "rust",
+  "permissions": [
+    {
+      "capability": "events:subscribe",
+      "scope": {
+        "event_kinds": ["task-created"]
+      }
+    },
+    {
+      "capability": "tasks:write",
+      "scope": {}
+    }
+  ],
+  "dependencies": [],
+  "commands": [],
+  "subscriptions": ["task-created"],
+  "surfaces": [],
+  "settings": [],
+  "services": []
+}

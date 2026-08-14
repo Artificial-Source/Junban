@@ -41,3 +41,33 @@ Cite and re-read these pages; this document summarizes how they apply here:
 ## Review selection
 
 Use the dominant-risk checkpoint table in [`../PLANS.md`](../PLANS.md). Fix verified in-scope material findings before phase closure, or record an explicit accepted-risk decision. Do not block phases on speculative abstractions or unrelated cleanup.
+
+## Rust code health and DX
+
+Apply these when changing Rust modules. Prefer official sources over folklore or arbitrary size rules:
+
+- [Rust API Guidelines](https://rust-lang.github.io/api-guidelines/)
+- [The Rust Book — modules and privacy](https://doc.rust-lang.org/book/ch07-00-managing-growing-projects-with-packages-crates-and-modules.html) and the [Reference on visibility](https://doc.rust-lang.org/reference/visibility-and-privacy.html)
+- [Clippy lints](https://rust-lang.github.io/rust-clippy/master/index.html) and [Clippy configuration](https://doc.rust-lang.org/clippy/configuration.html)
+- [Tokio shared state](https://tokio.rs/tokio/tutorial/shared-state), [`select!`](https://tokio.rs/tokio/tutorial/select), and [graceful shutdown](https://tokio.rs/tokio/topics/shutdown)
+- [The rustdoc book](https://doc.rust-lang.org/rustdoc/)
+- [Cargo and CI](https://doc.rust-lang.org/cargo/guide/continuous-integration.html)
+- [rust-analyzer manual](https://rust-analyzer.github.io/manual.html)
+
+### Ownership over line counts
+
+There is **no arbitrary file or LoC ceiling**. A god module or type is one that mixes ownership or authority domains, or that creates demonstrated navigation, review, or compile pain—not a file that merely grew while staying cohesive.
+
+Split by coherent ownership. Keep items private by default and expose `pub(crate)` only at real crate boundaries. Do not invent speculative traits, facade layers, or micro-crates to chase size metrics. Exhaustive registries, executors, and domain authorities may stay large when they remain one ownership boundary.
+
+### Lint and review posture
+
+CI is the authority for format and lint: `cargo fmt` and Clippy with `--all-targets` and `-D warnings`. Treat pedantic lints and `too_many_lines` as review smoke alarms, not automatic split mandates. Do not treat `cognitive_complexity` as a trusted quality metric.
+
+### Async and shared state
+
+Do not hold synchronous locks across `.await`. Prefer cancellation-safe `select!`, RAII guards, and supervised tasks with explicit shutdown. Shared mutable state should stay short-lived and ownership-clear.
+
+### Docs and the contributor loop
+
+Document public and crate-boundary APIs (why and invariants, not narration). Contributors should run the nearest focused check first, then widen only when the risk or failure justifies it.

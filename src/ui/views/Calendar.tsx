@@ -4,15 +4,10 @@
  */
 import { useCallback, useEffect, useId, useMemo, useRef, useState } from "react";
 import { CalendarRange, ChevronLeft, ChevronRight } from "lucide-react";
-import {
-  ApiError,
-  getTemporalSettings,
-  listCalendarTasks,
-  type ProjectDto,
-  type TaskDto,
-} from "../api/client";
+import { ApiError, listCalendarTasks, type ProjectDto, type TaskDto } from "../api/client";
 import { useWorkspace } from "../context/WorkspaceContext";
 import { useTaskMutations } from "../hooks/useTaskMutations";
+import { isVisualFixture } from "../lib/visualFixture";
 import { SegmentedControl } from "../components/SegmentedControl";
 import { ViewSkeleton } from "../components/Skeleton";
 import { CalendarDayView } from "./calendar/CalendarDayView";
@@ -24,6 +19,7 @@ import {
   groupTasksByDueDate,
   toCivilDateKey,
   type CalendarMode,
+  weekStartToDayNumber,
 } from "./calendar/calendarRange";
 import { useCalendarNavigation } from "./calendar/useCalendarNavigation";
 
@@ -36,10 +32,20 @@ interface CalendarProps {
 }
 
 export function Calendar({ onSelectTask, onToggleTask, projectId = null }: CalendarProps) {
-  const { catalog } = useWorkspace();
+  const { catalog, settings } = useWorkspace();
   const { patchTask } = useTaskMutations();
-  const [weekStartDay, setWeekStartDay] = useState(0);
-  const nav = useCalendarNavigation({ initialMode: "week", weekStartDay });
+  const preservePhase3Calendar = isVisualFixture(window.location.search, "phase-3");
+  const weekStartDay = preservePhase3Calendar
+    ? 1
+    : weekStartToDayNumber(settings?.date_time.week_start ?? "sunday");
+  const authoritativeMode = preservePhase3Calendar
+    ? null
+    : ((settings?.date_time.calendar_default ?? null) as CalendarMode | null);
+  const nav = useCalendarNavigation({
+    initialMode: "week",
+    weekStartDay,
+    authoritativeMode,
+  });
   const [tasks, setTasks] = useState<TaskDto[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -57,20 +63,6 @@ export function Calendar({ onSelectTask, onToggleTask, projectId = null }: Calen
 
   const projects = catalog?.projects ?? [];
   const tags = catalog?.tags ?? [];
-
-  useEffect(() => {
-    let active = true;
-    void getTemporalSettings()
-      .then((settings) => {
-        if (active) setWeekStartDay(settings.week_start === "monday" ? 1 : 0);
-      })
-      .catch(() => {
-        // The server default is Sunday. Calendar data remains usable if settings fail.
-      });
-    return () => {
-      active = false;
-    };
-  }, []);
 
   const load = useCallback(async () => {
     const seq = ++requestSeq.current;

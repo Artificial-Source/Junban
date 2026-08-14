@@ -1,0 +1,7 @@
+**/node_modules/**
+**/target/**
+**/dist/**
+**/coverage/**
+**/playwright-report/**
+**/test-results/**
+crates/junban-plugin-sdk/consumers/typescript/generated/**

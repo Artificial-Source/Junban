@@ -1,0 +1,1431 @@
+{
+  "schema_version": 1,
+  "protocol": "junban-phase7-process-memory-calibration-v1",
+  "status": "single-machine/platform preliminary calibration only; no process cap or acceptance claim",
+  "git_commit": "9bb5941e42270d65798d86ec3b652bd1001b0744",
+  "git_tree_clean": true,
+  "os": "macos",
+  "architecture": "aarch64",
+  "metric_authority": "ps exact child: virtual address size/RSS",
+  "executable": {
+    "file_name": "junban-plugin-host",
+    "sha256": "35f2c92f13e0cb50fd92a9283185580e91a1be85b9fc90e8ca0a32b7badd1e82"
+  },
+  "engine": {
+    "wasmtime": "36.0.13",
+    "memory_reservation_bytes": 134217728,
+    "memory_guard_bytes": 0,
+    "memory_reservation_for_growth_bytes": 0,
+    "explicit_bounds_checks_below_wasm32_address_space": true
+  },
+  "profiles": [
+    {
+      "profile": "rust",
+      "component_sha256": "7b14a85ec91105cafd174e0cd65e3e2064512deefe1ba7fa981ece5683e24d62",
+      "guest_linear_memory_limit_bytes": 67108864,
+      "barrier_allocation_bytes": 50331648,
+      "warm_up": {
+        "sequence": 0,
+        "warm_up": true,
+        "duration_millis": 651,
+        "sample_count": 11,
+        "phase_maxima": [
+          {
+            "phase": "spawn",
+            "sample_count": 1,
+            "metrics": {
+              "virtual_address_bytes": 445758685184,
+              "rss_bytes": 4702208,
+              "peak_virtual_address_bytes": null,
+              "peak_rss_bytes": null,
+              "private_commit_bytes": null,
+              "pagefile_bytes": null,
+              "working_set_bytes": null,
+              "peak_private_commit_bytes": null,
+              "peak_pagefile_bytes": null,
+              "peak_working_set_bytes": null
+            }
+          },
+          {
+            "phase": "hello",
+            "sample_count": 1,
+            "metrics": {
+              "virtual_address_bytes": 445759111168,
+              "rss_bytes": 6406144,
+              "peak_virtual_address_bytes": null,
+              "peak_rss_bytes": null,
+              "private_commit_bytes": null,
+              "pagefile_bytes": null,
+              "working_set_bytes": null,
+              "peak_private_commit_bytes": null,
+              "peak_pagefile_bytes": null,
+              "peak_working_set_bytes": null
+            }
+          },
+          {
+            "phase": "compile_and_instantiate",
+            "sample_count": 5,
+            "metrics": {
+              "virtual_address_bytes": 445909549056,
+              "rss_bytes": 30294016,
+              "peak_virtual_address_bytes": null,
+              "peak_rss_bytes": null,
+              "private_commit_bytes": null,
+              "pagefile_bytes": null,
+              "working_set_bytes": null,
+              "peak_private_commit_bytes": null,
+              "peak_pagefile_bytes": null,
+              "peak_working_set_bytes": null
+            }
+          },
+          {
+            "phase": "valid_max_working_set_barrier",
+            "sample_count": 2,
+            "metrics": {
+              "virtual_address_bytes": 445909549056,
+              "rss_bytes": 80920576,
+              "peak_virtual_address_bytes": null,
+              "peak_rss_bytes": null,
+              "private_commit_bytes": null,
+              "pagefile_bytes": null,
+              "working_set_bytes": null,
+              "peak_private_commit_bytes": null,
+              "peak_pagefile_bytes": null,
+              "peak_working_set_bytes": null
+            }
+          },
+          {
+            "phase": "representative_invocation",
+            "sample_count": 1,
+            "metrics": {
+              "virtual_address_bytes": 445909549056,
+              "rss_bytes": 81018880,
+              "peak_virtual_address_bytes": null,
+              "peak_rss_bytes": null,
+              "private_commit_bytes": null,
+              "pagefile_bytes": null,
+              "working_set_bytes": null,
+              "peak_private_commit_bytes": null,
+              "peak_pagefile_bytes": null,
+              "peak_working_set_bytes": null
+            }
+          },
+          {
+            "phase": "shutdown",
+            "sample_count": 1,
+            "metrics": {
+              "virtual_address_bytes": 445909549056,
+              "rss_bytes": 81149952,
+              "peak_virtual_address_bytes": null,
+              "peak_rss_bytes": null,
+              "private_commit_bytes": null,
+              "pagefile_bytes": null,
+              "working_set_bytes": null,
+              "peak_private_commit_bytes": null,
+              "peak_pagefile_bytes": null,
+              "peak_working_set_bytes": null
+            }
+          }
+        ],
+        "whole_run_maximum": {
+          "virtual_address_bytes": 445909549056,
+          "rss_bytes": 81149952,
+          "peak_virtual_address_bytes": null,
+          "peak_rss_bytes": null,
+          "private_commit_bytes": null,
+          "pagefile_bytes": null,
+          "working_set_bytes": null,
+          "peak_private_commit_bytes": null,
+          "peak_pagefile_bytes": null,
+          "peak_working_set_bytes": null
+        }
+      },
+      "measured": [
+        {
+          "sequence": 1,
+          "warm_up": false,
+          "duration_millis": 791,
+          "sample_count": 12,
+          "phase_maxima": [
+            {
+              "phase": "spawn",
+              "sample_count": 1,
+              "metrics": {
+                "virtual_address_bytes": 445769629696,
+                "rss_bytes": 7028736,
+                "peak_virtual_address_bytes": null,
+                "peak_rss_bytes": null,
+                "private_commit_bytes": null,
+                "pagefile_bytes": null,
+                "working_set_bytes": null,
+                "peak_private_commit_bytes": null,
+                "peak_pagefile_bytes": null,
+                "peak_working_set_bytes": null
+              }
+            },
+            {
+              "phase": "hello",
+              "sample_count": 1,
+              "metrics": {
+                "virtual_address_bytes": 445769629696,
+                "rss_bytes": 7028736,
+                "peak_virtual_address_bytes": null,
+                "peak_rss_bytes": null,
+                "private_commit_bytes": null,
+                "pagefile_bytes": null,
+                "working_set_bytes": null,
+                "peak_private_commit_bytes": null,
+                "peak_pagefile_bytes": null,
+                "peak_working_set_bytes": null
+              }
+            },
+            {
+              "phase": "compile_and_instantiate",
+              "sample_count": 5,
+              "metrics": {
+                "virtual_address_bytes": 445908795392,
+                "rss_bytes": 30195712,
+                "peak_virtual_address_bytes": null,
+                "peak_rss_bytes": null,
+                "private_commit_bytes": null,
+                "pagefile_bytes": null,
+                "working_set_bytes": null,
+                "peak_private_commit_bytes": null,
+                "peak_pagefile_bytes": null,
+                "peak_working_set_bytes": null
+              }
+            },
+            {
+              "phase": "valid_max_working_set_barrier",
+              "sample_count": 3,
+              "metrics": {
+                "virtual_address_bytes": 445908795392,
+                "rss_bytes": 80822272,
+                "peak_virtual_address_bytes": null,
+                "peak_rss_bytes": null,
+                "private_commit_bytes": null,
+                "pagefile_bytes": null,
+                "working_set_bytes": null,
+                "peak_private_commit_bytes": null,
+                "peak_pagefile_bytes": null,
+                "peak_working_set_bytes": null
+              }
+            },
+            {
+              "phase": "representative_invocation",
+              "sample_count": 1,
+              "metrics": {
+                "virtual_address_bytes": 445908795392,
+                "rss_bytes": 80920576,
+                "peak_virtual_address_bytes": null,
+                "peak_rss_bytes": null,
+                "private_commit_bytes": null,
+                "pagefile_bytes": null,
+                "working_set_bytes": null,
+                "peak_private_commit_bytes": null,
+                "peak_pagefile_bytes": null,
+                "peak_working_set_bytes": null
+              }
+            },
+            {
+              "phase": "shutdown",
+              "sample_count": 1,
+              "metrics": {
+                "virtual_address_bytes": 445908795392,
+                "rss_bytes": 81051648,
+                "peak_virtual_address_bytes": null,
+                "peak_rss_bytes": null,
+                "private_commit_bytes": null,
+                "pagefile_bytes": null,
+                "working_set_bytes": null,
+                "peak_private_commit_bytes": null,
+                "peak_pagefile_bytes": null,
+                "peak_working_set_bytes": null
+              }
+            }
+          ],
+          "whole_run_maximum": {
+            "virtual_address_bytes": 445908795392,
+            "rss_bytes": 81051648,
+            "peak_virtual_address_bytes": null,
+            "peak_rss_bytes": null,
+            "private_commit_bytes": null,
+            "pagefile_bytes": null,
+            "working_set_bytes": null,
+            "peak_private_commit_bytes": null,
+            "peak_pagefile_bytes": null,
+            "peak_working_set_bytes": null
+          }
+        },
+        {
+          "sequence": 2,
+          "warm_up": false,
+          "duration_millis": 573,
+          "sample_count": 10,
+          "phase_maxima": [
+            {
+              "phase": "spawn",
+              "sample_count": 1,
+              "metrics": {
+                "virtual_address_bytes": 445769728000,
+                "rss_bytes": 7028736,
+                "peak_virtual_address_bytes": null,
+                "peak_rss_bytes": null,
+                "private_commit_bytes": null,
+                "pagefile_bytes": null,
+                "working_set_bytes": null,
+                "peak_private_commit_bytes": null,
+                "peak_pagefile_bytes": null,
+                "peak_working_set_bytes": null
+              }
+            },
+            {
+              "phase": "hello",
+              "sample_count": 1,
+              "metrics": {
+                "virtual_address_bytes": 445769728000,
+                "rss_bytes": 7028736,
+                "peak_virtual_address_bytes": null,
+                "peak_rss_bytes": null,
+                "private_commit_bytes": null,
+                "pagefile_bytes": null,
+                "working_set_bytes": null,
+                "peak_private_commit_bytes": null,
+                "peak_pagefile_bytes": null,
+                "peak_working_set_bytes": null
+              }
+            },
+            {
+              "phase": "compile_and_instantiate",
+              "sample_count": 4,
+              "metrics": {
+                "virtual_address_bytes": 445908893696,
+                "rss_bytes": 30343168,
+                "peak_virtual_address_bytes": null,
+                "peak_rss_bytes": null,
+                "private_commit_bytes": null,
+                "pagefile_bytes": null,
+                "working_set_bytes": null,
+                "peak_private_commit_bytes": null,
+                "peak_pagefile_bytes": null,
+                "peak_working_set_bytes": null
+              }
+            },
+            {
+              "phase": "valid_max_working_set_barrier",
+              "sample_count": 2,
+              "metrics": {
+                "virtual_address_bytes": 445908893696,
+                "rss_bytes": 80969728,
+                "peak_virtual_address_bytes": null,
+                "peak_rss_bytes": null,
+                "private_commit_bytes": null,
+                "pagefile_bytes": null,
+                "working_set_bytes": null,
+                "peak_private_commit_bytes": null,
+                "peak_pagefile_bytes": null,
+                "peak_working_set_bytes": null
+              }
+            },
+            {
+              "phase": "representative_invocation",
+              "sample_count": 1,
+              "metrics": {
+                "virtual_address_bytes": 445908893696,
+                "rss_bytes": 81068032,
+                "peak_virtual_address_bytes": null,
+                "peak_rss_bytes": null,
+                "private_commit_bytes": null,
+                "pagefile_bytes": null,
+                "working_set_bytes": null,
+                "peak_private_commit_bytes": null,
+                "peak_pagefile_bytes": null,
+                "peak_working_set_bytes": null
+              }
+            },
+            {
+              "phase": "shutdown",
+              "sample_count": 1,
+              "metrics": {
+                "virtual_address_bytes": 445908893696,
+                "rss_bytes": 81199104,
+                "peak_virtual_address_bytes": null,
+                "peak_rss_bytes": null,
+                "private_commit_bytes": null,
+                "pagefile_bytes": null,
+                "working_set_bytes": null,
+                "peak_private_commit_bytes": null,
+                "peak_pagefile_bytes": null,
+                "peak_working_set_bytes": null
+              }
+            }
+          ],
+          "whole_run_maximum": {
+            "virtual_address_bytes": 445908893696,
+            "rss_bytes": 81199104,
+            "peak_virtual_address_bytes": null,
+            "peak_rss_bytes": null,
+            "private_commit_bytes": null,
+            "pagefile_bytes": null,
+            "working_set_bytes": null,
+            "peak_private_commit_bytes": null,
+            "peak_pagefile_bytes": null,
+            "peak_working_set_bytes": null
+          }
+        },
+        {
+          "sequence": 3,
+          "warm_up": false,
+          "duration_millis": 493,
+          "sample_count": 10,
+          "phase_maxima": [
+            {
+              "phase": "spawn",
+              "sample_count": 1,
+              "metrics": {
+                "virtual_address_bytes": 445770661888,
+                "rss_bytes": 7028736,
+                "peak_virtual_address_bytes": null,
+                "peak_rss_bytes": null,
+                "private_commit_bytes": null,
+                "pagefile_bytes": null,
+                "working_set_bytes": null,
+                "peak_private_commit_bytes": null,
+                "peak_pagefile_bytes": null,
+                "peak_working_set_bytes": null
+              }
+            },
+            {
+              "phase": "hello",
+              "sample_count": 1,
+              "metrics": {
+                "virtual_address_bytes": 445770661888,
+                "rss_bytes": 7028736,
+                "peak_virtual_address_bytes": null,
+                "peak_rss_bytes": null,
+                "private_commit_bytes": null,
+                "pagefile_bytes": null,
+                "working_set_bytes": null,
+                "peak_private_commit_bytes": null,
+                "peak_pagefile_bytes": null,
+                "peak_working_set_bytes": null
+              }
+            },
+            {
+              "phase": "compile_and_instantiate",
+              "sample_count": 4,
+              "metrics": {
+                "virtual_address_bytes": 445770661888,
+                "rss_bytes": 28164096,
+                "peak_virtual_address_bytes": null,
+                "peak_rss_bytes": null,
+                "private_commit_bytes": null,
+                "pagefile_bytes": null,
+                "working_set_bytes": null,
+                "peak_private_commit_bytes": null,
+                "peak_pagefile_bytes": null,
+                "peak_working_set_bytes": null
+              }
+            },
+            {
+              "phase": "valid_max_working_set_barrier",
+              "sample_count": 2,
+              "metrics": {
+                "virtual_address_bytes": 445909827584,
+                "rss_bytes": 80789504,
+                "peak_virtual_address_bytes": null,
+                "peak_rss_bytes": null,
+                "private_commit_bytes": null,
+                "pagefile_bytes": null,
+                "working_set_bytes": null,
+                "peak_private_commit_bytes": null,
+                "peak_pagefile_bytes": null,
+                "peak_working_set_bytes": null
+              }
+            },
+            {
+              "phase": "representative_invocation",
+              "sample_count": 1,
+              "metrics": {
+                "virtual_address_bytes": 445909827584,
+                "rss_bytes": 80887808,
+                "peak_virtual_address_bytes": null,
+                "peak_rss_bytes": null,
+                "private_commit_bytes": null,
+                "pagefile_bytes": null,
+                "working_set_bytes": null,
+                "peak_private_commit_bytes": null,
+                "peak_pagefile_bytes": null,
+                "peak_working_set_bytes": null
+              }
+            },
+            {
+              "phase": "shutdown",
+              "sample_count": 1,
+              "metrics": {
+                "virtual_address_bytes": 445909827584,
+                "rss_bytes": 81018880,
+                "peak_virtual_address_bytes": null,
+                "peak_rss_bytes": null,
+                "private_commit_bytes": null,
+                "pagefile_bytes": null,
+                "working_set_bytes": null,
+                "peak_private_commit_bytes": null,
+                "peak_pagefile_bytes": null,
+                "peak_working_set_bytes": null
+              }
+            }
+          ],
+          "whole_run_maximum": {
+            "virtual_address_bytes": 445909827584,
+            "rss_bytes": 81018880,
+            "peak_virtual_address_bytes": null,
+            "peak_rss_bytes": null,
+            "private_commit_bytes": null,
+            "pagefile_bytes": null,
+            "working_set_bytes": null,
+            "peak_private_commit_bytes": null,
+            "peak_pagefile_bytes": null,
+            "peak_working_set_bytes": null
+          }
+        },
+        {
+          "sequence": 4,
+          "warm_up": false,
+          "duration_millis": 707,
+          "sample_count": 12,
+          "phase_maxima": [
+            {
+              "phase": "spawn",
+              "sample_count": 1,
+              "metrics": {
+                "virtual_address_bytes": 445770072064,
+                "rss_bytes": 7012352,
+                "peak_virtual_address_bytes": null,
+                "peak_rss_bytes": null,
+                "private_commit_bytes": null,
+                "pagefile_bytes": null,
+                "working_set_bytes": null,
+                "peak_private_commit_bytes": null,
+                "peak_pagefile_bytes": null,
+                "peak_working_set_bytes": null
+              }
+            },
+            {
+              "phase": "hello",
+              "sample_count": 1,
+              "metrics": {
+                "virtual_address_bytes": 445770072064,
+                "rss_bytes": 7012352,
+                "peak_virtual_address_bytes": null,
+                "peak_rss_bytes": null,
+                "private_commit_bytes": null,
+                "pagefile_bytes": null,
+                "working_set_bytes": null,
+                "peak_private_commit_bytes": null,
+                "peak_pagefile_bytes": null,
+                "peak_working_set_bytes": null
+              }
+            },
+            {
+              "phase": "compile_and_instantiate",
+              "sample_count": 5,
+              "metrics": {
+                "virtual_address_bytes": 445770072064,
+                "rss_bytes": 27557888,
+                "peak_virtual_address_bytes": null,
+                "peak_rss_bytes": null,
+                "private_commit_bytes": null,
+                "pagefile_bytes": null,
+                "working_set_bytes": null,
+                "peak_private_commit_bytes": null,
+                "peak_pagefile_bytes": null,
+                "peak_working_set_bytes": null
+              }
+            },
+            {
+              "phase": "valid_max_working_set_barrier",
+              "sample_count": 3,
+              "metrics": {
+                "virtual_address_bytes": 445909237760,
+                "rss_bytes": 80822272,
+                "peak_virtual_address_bytes": null,
+                "peak_rss_bytes": null,
+                "private_commit_bytes": null,
+                "pagefile_bytes": null,
+                "working_set_bytes": null,
+                "peak_private_commit_bytes": null,
+                "peak_pagefile_bytes": null,
+                "peak_working_set_bytes": null
+              }
+            },
+            {
+              "phase": "representative_invocation",
+              "sample_count": 1,
+              "metrics": {
+                "virtual_address_bytes": 445909237760,
+                "rss_bytes": 80920576,
+                "peak_virtual_address_bytes": null,
+                "peak_rss_bytes": null,
+                "private_commit_bytes": null,
+                "pagefile_bytes": null,
+                "working_set_bytes": null,
+                "peak_private_commit_bytes": null,
+                "peak_pagefile_bytes": null,
+                "peak_working_set_bytes": null
+              }
+            },
+            {
+              "phase": "shutdown",
+              "sample_count": 1,
+              "metrics": {
+                "virtual_address_bytes": 445909237760,
+                "rss_bytes": 81051648,
+                "peak_virtual_address_bytes": null,
+                "peak_rss_bytes": null,
+                "private_commit_bytes": null,
+                "pagefile_bytes": null,
+                "working_set_bytes": null,
+                "peak_private_commit_bytes": null,
+                "peak_pagefile_bytes": null,
+                "peak_working_set_bytes": null
+              }
+            }
+          ],
+          "whole_run_maximum": {
+            "virtual_address_bytes": 445909237760,
+            "rss_bytes": 81051648,
+            "peak_virtual_address_bytes": null,
+            "peak_rss_bytes": null,
+            "private_commit_bytes": null,
+            "pagefile_bytes": null,
+            "working_set_bytes": null,
+            "peak_private_commit_bytes": null,
+            "peak_pagefile_bytes": null,
+            "peak_working_set_bytes": null
+          }
+        },
+        {
+          "sequence": 5,
+          "warm_up": false,
+          "duration_millis": 768,
+          "sample_count": 11,
+          "phase_maxima": [
+            {
+              "phase": "spawn",
+              "sample_count": 1,
+              "metrics": {
+                "virtual_address_bytes": 445769646080,
+                "rss_bytes": 7012352,
+                "peak_virtual_address_bytes": null,
+                "peak_rss_bytes": null,
+                "private_commit_bytes": null,
+                "pagefile_bytes": null,
+                "working_set_bytes": null,
+                "peak_private_commit_bytes": null,
+                "peak_pagefile_bytes": null,
+                "peak_working_set_bytes": null
+              }
+            },
+            {
+              "phase": "hello",
+              "sample_count": 1,
+              "metrics": {
+                "virtual_address_bytes": 445769646080,
+                "rss_bytes": 7012352,
+                "peak_virtual_address_bytes": null,
+                "peak_rss_bytes": null,
+                "private_commit_bytes": null,
+                "pagefile_bytes": null,
+                "working_set_bytes": null,
+                "peak_private_commit_bytes": null,
+                "peak_pagefile_bytes": null,
+                "peak_working_set_bytes": null
+              }
+            },
+            {
+              "phase": "compile_and_instantiate",
+              "sample_count": 4,
+              "metrics": {
+                "virtual_address_bytes": 445769646080,
+                "rss_bytes": 28655616,
+                "peak_virtual_address_bytes": null,
+                "peak_rss_bytes": null,
+                "private_commit_bytes": null,
+                "pagefile_bytes": null,
+                "working_set_bytes": null,
+                "peak_private_commit_bytes": null,
+                "peak_pagefile_bytes": null,
+                "peak_working_set_bytes": null
+              }
+            },
+            {
+              "phase": "valid_max_working_set_barrier",
+              "sample_count": 3,
+              "metrics": {
+                "virtual_address_bytes": 445908811776,
+                "rss_bytes": 80855040,
+                "peak_virtual_address_bytes": null,
+                "peak_rss_bytes": null,
+                "private_commit_bytes": null,
+                "pagefile_bytes": null,
+                "working_set_bytes": null,
+                "peak_private_commit_bytes": null,
+                "peak_pagefile_bytes": null,
+                "peak_working_set_bytes": null
+              }
+            },
+            {
+              "phase": "representative_invocation",
+              "sample_count": 1,
+              "metrics": {
+                "virtual_address_bytes": 445908811776,
+                "rss_bytes": 80953344,
+                "peak_virtual_address_bytes": null,
+                "peak_rss_bytes": null,
+                "private_commit_bytes": null,
+                "pagefile_bytes": null,
+                "working_set_bytes": null,
+                "peak_private_commit_bytes": null,
+                "peak_pagefile_bytes": null,
+                "peak_working_set_bytes": null
+              }
+            },
+            {
+              "phase": "shutdown",
+              "sample_count": 1,
+              "metrics": {
+                "virtual_address_bytes": 445908811776,
+                "rss_bytes": 81084416,
+                "peak_virtual_address_bytes": null,
+                "peak_rss_bytes": null,
+                "private_commit_bytes": null,
+                "pagefile_bytes": null,
+                "working_set_bytes": null,
+                "peak_private_commit_bytes": null,
+                "peak_pagefile_bytes": null,
+                "peak_working_set_bytes": null
+              }
+            }
+          ],
+          "whole_run_maximum": {
+            "virtual_address_bytes": 445908811776,
+            "rss_bytes": 81084416,
+            "peak_virtual_address_bytes": null,
+            "peak_rss_bytes": null,
+            "private_commit_bytes": null,
+            "pagefile_bytes": null,
+            "working_set_bytes": null,
+            "peak_private_commit_bytes": null,
+            "peak_pagefile_bytes": null,
+            "peak_working_set_bytes": null
+          }
+        }
+      ]
+    },
+    {
+      "profile": "typescript",
+      "component_sha256": "95c6dc4b94af838453d2236b47c270b5e8ceaa2b36eb31729610a1d9777ab5ca",
+      "guest_linear_memory_limit_bytes": 134217728,
+      "barrier_allocation_bytes": 67108864,
+      "warm_up": {
+        "sequence": 0,
+        "warm_up": true,
+        "duration_millis": 29275,
+        "sample_count": 418,
+        "phase_maxima": [
+          {
+            "phase": "spawn",
+            "sample_count": 1,
+            "metrics": {
+              "virtual_address_bytes": 445770399744,
+              "rss_bytes": 7045120,
+              "peak_virtual_address_bytes": null,
+              "peak_rss_bytes": null,
+              "private_commit_bytes": null,
+              "pagefile_bytes": null,
+              "working_set_bytes": null,
+              "peak_private_commit_bytes": null,
+              "peak_pagefile_bytes": null,
+              "peak_working_set_bytes": null
+            }
+          },
+          {
+            "phase": "hello",
+            "sample_count": 1,
+            "metrics": {
+              "virtual_address_bytes": 445770399744,
+              "rss_bytes": 7045120,
+              "peak_virtual_address_bytes": null,
+              "peak_rss_bytes": null,
+              "private_commit_bytes": null,
+              "pagefile_bytes": null,
+              "working_set_bytes": null,
+              "peak_private_commit_bytes": null,
+              "peak_pagefile_bytes": null,
+              "peak_working_set_bytes": null
+            }
+          },
+          {
+            "phase": "compile_and_instantiate",
+            "sample_count": 409,
+            "metrics": {
+              "virtual_address_bytes": 446059675648,
+              "rss_bytes": 533233664,
+              "peak_virtual_address_bytes": null,
+              "peak_rss_bytes": null,
+              "private_commit_bytes": null,
+              "pagefile_bytes": null,
+              "working_set_bytes": null,
+              "peak_private_commit_bytes": null,
+              "peak_pagefile_bytes": null,
+              "peak_working_set_bytes": null
+            }
+          },
+          {
+            "phase": "valid_max_working_set_barrier",
+            "sample_count": 3,
+            "metrics": {
+              "virtual_address_bytes": 446150426624,
+              "rss_bytes": 620118016,
+              "peak_virtual_address_bytes": null,
+              "peak_rss_bytes": null,
+              "private_commit_bytes": null,
+              "pagefile_bytes": null,
+              "working_set_bytes": null,
+              "peak_private_commit_bytes": null,
+              "peak_pagefile_bytes": null,
+              "peak_working_set_bytes": null
+            }
+          },
+          {
+            "phase": "representative_invocation",
+            "sample_count": 1,
+            "metrics": {
+              "virtual_address_bytes": 446150426624,
+              "rss_bytes": 620216320,
+              "peak_virtual_address_bytes": null,
+              "peak_rss_bytes": null,
+              "private_commit_bytes": null,
+              "pagefile_bytes": null,
+              "working_set_bytes": null,
+              "peak_private_commit_bytes": null,
+              "peak_pagefile_bytes": null,
+              "peak_working_set_bytes": null
+            }
+          },
+          {
+            "phase": "shutdown",
+            "sample_count": 3,
+            "metrics": {
+              "virtual_address_bytes": 446150426624,
+              "rss_bytes": 620347392,
+              "peak_virtual_address_bytes": null,
+              "peak_rss_bytes": null,
+              "private_commit_bytes": null,
+              "pagefile_bytes": null,
+              "working_set_bytes": null,
+              "peak_private_commit_bytes": null,
+              "peak_pagefile_bytes": null,
+              "peak_working_set_bytes": null
+            }
+          }
+        ],
+        "whole_run_maximum": {
+          "virtual_address_bytes": 446150426624,
+          "rss_bytes": 620347392,
+          "peak_virtual_address_bytes": null,
+          "peak_rss_bytes": null,
+          "private_commit_bytes": null,
+          "pagefile_bytes": null,
+          "working_set_bytes": null,
+          "peak_private_commit_bytes": null,
+          "peak_pagefile_bytes": null,
+          "peak_working_set_bytes": null
+        }
+      },
+      "measured": [
+        {
+          "sequence": 1,
+          "warm_up": false,
+          "duration_millis": 28557,
+          "sample_count": 439,
+          "phase_maxima": [
+            {
+              "phase": "spawn",
+              "sample_count": 1,
+              "metrics": {
+                "virtual_address_bytes": 445757669376,
+                "rss_bytes": 2736128,
+                "peak_virtual_address_bytes": null,
+                "peak_rss_bytes": null,
+                "private_commit_bytes": null,
+                "pagefile_bytes": null,
+                "working_set_bytes": null,
+                "peak_private_commit_bytes": null,
+                "peak_pagefile_bytes": null,
+                "peak_working_set_bytes": null
+              }
+            },
+            {
+              "phase": "hello",
+              "sample_count": 1,
+              "metrics": {
+                "virtual_address_bytes": 445769891840,
+                "rss_bytes": 7045120,
+                "peak_virtual_address_bytes": null,
+                "peak_rss_bytes": null,
+                "private_commit_bytes": null,
+                "pagefile_bytes": null,
+                "working_set_bytes": null,
+                "peak_private_commit_bytes": null,
+                "peak_pagefile_bytes": null,
+                "peak_working_set_bytes": null
+              }
+            },
+            {
+              "phase": "compile_and_instantiate",
+              "sample_count": 430,
+              "metrics": {
+                "virtual_address_bytes": 446091853824,
+                "rss_bytes": 562675712,
+                "peak_virtual_address_bytes": null,
+                "peak_rss_bytes": null,
+                "private_commit_bytes": null,
+                "pagefile_bytes": null,
+                "working_set_bytes": null,
+                "peak_private_commit_bytes": null,
+                "peak_pagefile_bytes": null,
+                "peak_working_set_bytes": null
+              }
+            },
+            {
+              "phase": "valid_max_working_set_barrier",
+              "sample_count": 3,
+              "metrics": {
+                "virtual_address_bytes": 446149918720,
+                "rss_bytes": 622116864,
+                "peak_virtual_address_bytes": null,
+                "peak_rss_bytes": null,
+                "private_commit_bytes": null,
+                "pagefile_bytes": null,
+                "working_set_bytes": null,
+                "peak_private_commit_bytes": null,
+                "peak_pagefile_bytes": null,
+                "peak_working_set_bytes": null
+              }
+            },
+            {
+              "phase": "representative_invocation",
+              "sample_count": 1,
+              "metrics": {
+                "virtual_address_bytes": 446149918720,
+                "rss_bytes": 622215168,
+                "peak_virtual_address_bytes": null,
+                "peak_rss_bytes": null,
+                "private_commit_bytes": null,
+                "pagefile_bytes": null,
+                "working_set_bytes": null,
+                "peak_private_commit_bytes": null,
+                "peak_pagefile_bytes": null,
+                "peak_working_set_bytes": null
+              }
+            },
+            {
+              "phase": "shutdown",
+              "sample_count": 3,
+              "metrics": {
+                "virtual_address_bytes": 446149918720,
+                "rss_bytes": 622346240,
+                "peak_virtual_address_bytes": null,
+                "peak_rss_bytes": null,
+                "private_commit_bytes": null,
+                "pagefile_bytes": null,
+                "working_set_bytes": null,
+                "peak_private_commit_bytes": null,
+                "peak_pagefile_bytes": null,
+                "peak_working_set_bytes": null
+              }
+            }
+          ],
+          "whole_run_maximum": {
+            "virtual_address_bytes": 446149918720,
+            "rss_bytes": 622346240,
+            "peak_virtual_address_bytes": null,
+            "peak_rss_bytes": null,
+            "private_commit_bytes": null,
+            "pagefile_bytes": null,
+            "working_set_bytes": null,
+            "peak_private_commit_bytes": null,
+            "peak_pagefile_bytes": null,
+            "peak_working_set_bytes": null
+          }
+        },
+        {
+          "sequence": 2,
+          "warm_up": false,
+          "duration_millis": 29448,
+          "sample_count": 455,
+          "phase_maxima": [
+            {
+              "phase": "spawn",
+              "sample_count": 1,
+              "metrics": {
+                "virtual_address_bytes": 445770022912,
+                "rss_bytes": 7012352,
+                "peak_virtual_address_bytes": null,
+                "peak_rss_bytes": null,
+                "private_commit_bytes": null,
+                "pagefile_bytes": null,
+                "working_set_bytes": null,
+                "peak_private_commit_bytes": null,
+                "peak_pagefile_bytes": null,
+                "peak_working_set_bytes": null
+              }
+            },
+            {
+              "phase": "hello",
+              "sample_count": 1,
+              "metrics": {
+                "virtual_address_bytes": 445770022912,
+                "rss_bytes": 7012352,
+                "peak_virtual_address_bytes": null,
+                "peak_rss_bytes": null,
+                "private_commit_bytes": null,
+                "pagefile_bytes": null,
+                "working_set_bytes": null,
+                "peak_private_commit_bytes": null,
+                "peak_pagefile_bytes": null,
+                "peak_working_set_bytes": null
+              }
+            },
+            {
+              "phase": "compile_and_instantiate",
+              "sample_count": 448,
+              "metrics": {
+                "virtual_address_bytes": 446080253952,
+                "rss_bytes": 552288256,
+                "peak_virtual_address_bytes": null,
+                "peak_rss_bytes": null,
+                "private_commit_bytes": null,
+                "pagefile_bytes": null,
+                "working_set_bytes": null,
+                "peak_private_commit_bytes": null,
+                "peak_pagefile_bytes": null,
+                "peak_working_set_bytes": null
+              }
+            },
+            {
+              "phase": "valid_max_working_set_barrier",
+              "sample_count": 2,
+              "metrics": {
+                "virtual_address_bytes": 446144708608,
+                "rss_bytes": 614383616,
+                "peak_virtual_address_bytes": null,
+                "peak_rss_bytes": null,
+                "private_commit_bytes": null,
+                "pagefile_bytes": null,
+                "working_set_bytes": null,
+                "peak_private_commit_bytes": null,
+                "peak_pagefile_bytes": null,
+                "peak_working_set_bytes": null
+              }
+            },
+            {
+              "phase": "representative_invocation",
+              "sample_count": 1,
+              "metrics": {
+                "virtual_address_bytes": 446144708608,
+                "rss_bytes": 614481920,
+                "peak_virtual_address_bytes": null,
+                "peak_rss_bytes": null,
+                "private_commit_bytes": null,
+                "pagefile_bytes": null,
+                "working_set_bytes": null,
+                "peak_private_commit_bytes": null,
+                "peak_pagefile_bytes": null,
+                "peak_working_set_bytes": null
+              }
+            },
+            {
+              "phase": "shutdown",
+              "sample_count": 2,
+              "metrics": {
+                "virtual_address_bytes": 446144708608,
+                "rss_bytes": 614612992,
+                "peak_virtual_address_bytes": null,
+                "peak_rss_bytes": null,
+                "private_commit_bytes": null,
+                "pagefile_bytes": null,
+                "working_set_bytes": null,
+                "peak_private_commit_bytes": null,
+                "peak_pagefile_bytes": null,
+                "peak_working_set_bytes": null
+              }
+            }
+          ],
+          "whole_run_maximum": {
+            "virtual_address_bytes": 446144708608,
+            "rss_bytes": 614612992,
+            "peak_virtual_address_bytes": null,
+            "peak_rss_bytes": null,
+            "private_commit_bytes": null,
+            "pagefile_bytes": null,
+            "working_set_bytes": null,
+            "peak_private_commit_bytes": null,
+            "peak_pagefile_bytes": null,
+            "peak_working_set_bytes": null
+          }
+        },
+        {
+          "sequence": 3,
+          "warm_up": false,
+          "duration_millis": 25728,
+          "sample_count": 434,
+          "phase_maxima": [
+            {
+              "phase": "spawn",
+              "sample_count": 1,
+              "metrics": {
+                "virtual_address_bytes": 445770432512,
+                "rss_bytes": 7028736,
+                "peak_virtual_address_bytes": null,
+                "peak_rss_bytes": null,
+                "private_commit_bytes": null,
+                "pagefile_bytes": null,
+                "working_set_bytes": null,
+                "peak_private_commit_bytes": null,
+                "peak_pagefile_bytes": null,
+                "peak_working_set_bytes": null
+              }
+            },
+            {
+              "phase": "hello",
+              "sample_count": 1,
+              "metrics": {
+                "virtual_address_bytes": 445770432512,
+                "rss_bytes": 7028736,
+                "peak_virtual_address_bytes": null,
+                "peak_rss_bytes": null,
+                "private_commit_bytes": null,
+                "pagefile_bytes": null,
+                "working_set_bytes": null,
+                "peak_private_commit_bytes": null,
+                "peak_pagefile_bytes": null,
+                "peak_working_set_bytes": null
+              }
+            },
+            {
+              "phase": "compile_and_instantiate",
+              "sample_count": 424,
+              "metrics": {
+                "virtual_address_bytes": 446090870784,
+                "rss_bytes": 562561024,
+                "peak_virtual_address_bytes": null,
+                "peak_rss_bytes": null,
+                "private_commit_bytes": null,
+                "pagefile_bytes": null,
+                "working_set_bytes": null,
+                "peak_private_commit_bytes": null,
+                "peak_pagefile_bytes": null,
+                "peak_working_set_bytes": null
+              }
+            },
+            {
+              "phase": "valid_max_working_set_barrier",
+              "sample_count": 3,
+              "metrics": {
+                "virtual_address_bytes": 446150459392,
+                "rss_bytes": 622002176,
+                "peak_virtual_address_bytes": null,
+                "peak_rss_bytes": null,
+                "private_commit_bytes": null,
+                "pagefile_bytes": null,
+                "working_set_bytes": null,
+                "peak_private_commit_bytes": null,
+                "peak_pagefile_bytes": null,
+                "peak_working_set_bytes": null
+              }
+            },
+            {
+              "phase": "representative_invocation",
+              "sample_count": 1,
+              "metrics": {
+                "virtual_address_bytes": 446150459392,
+                "rss_bytes": 622100480,
+                "peak_virtual_address_bytes": null,
+                "peak_rss_bytes": null,
+                "private_commit_bytes": null,
+                "pagefile_bytes": null,
+                "working_set_bytes": null,
+                "peak_private_commit_bytes": null,
+                "peak_pagefile_bytes": null,
+                "peak_working_set_bytes": null
+              }
+            },
+            {
+              "phase": "shutdown",
+              "sample_count": 4,
+              "metrics": {
+                "virtual_address_bytes": 446150459392,
+                "rss_bytes": 622231552,
+                "peak_virtual_address_bytes": null,
+                "peak_rss_bytes": null,
+                "private_commit_bytes": null,
+                "pagefile_bytes": null,
+                "working_set_bytes": null,
+                "peak_private_commit_bytes": null,
+                "peak_pagefile_bytes": null,
+                "peak_working_set_bytes": null
+              }
+            }
+          ],
+          "whole_run_maximum": {
+            "virtual_address_bytes": 446150459392,
+            "rss_bytes": 622231552,
+            "peak_virtual_address_bytes": null,
+            "peak_rss_bytes": null,
+            "private_commit_bytes": null,
+            "pagefile_bytes": null,
+            "working_set_bytes": null,
+            "peak_private_commit_bytes": null,
+            "peak_pagefile_bytes": null,
+            "peak_working_set_bytes": null
+          }
+        },
+        {
+          "sequence": 4,
+          "warm_up": false,
+          "duration_millis": 24707,
+          "sample_count": 437,
+          "phase_maxima": [
+            {
+              "phase": "spawn",
+              "sample_count": 1,
+              "metrics": {
+                "virtual_address_bytes": 445758275584,
+                "rss_bytes": 4702208,
+                "peak_virtual_address_bytes": null,
+                "peak_rss_bytes": null,
+                "private_commit_bytes": null,
+                "pagefile_bytes": null,
+                "working_set_bytes": null,
+                "peak_private_commit_bytes": null,
+                "peak_pagefile_bytes": null,
+                "peak_working_set_bytes": null
+              }
+            },
+            {
+              "phase": "hello",
+              "sample_count": 1,
+              "metrics": {
+                "virtual_address_bytes": 445769957376,
+                "rss_bytes": 7028736,
+                "peak_virtual_address_bytes": null,
+                "peak_rss_bytes": null,
+                "private_commit_bytes": null,
+                "pagefile_bytes": null,
+                "working_set_bytes": null,
+                "peak_private_commit_bytes": null,
+                "peak_pagefile_bytes": null,
+                "peak_working_set_bytes": null
+              }
+            },
+            {
+              "phase": "compile_and_instantiate",
+              "sample_count": 429,
+              "metrics": {
+                "virtual_address_bytes": 446142873600,
+                "rss_bytes": 559890432,
+                "peak_virtual_address_bytes": null,
+                "peak_rss_bytes": null,
+                "private_commit_bytes": null,
+                "pagefile_bytes": null,
+                "working_set_bytes": null,
+                "peak_private_commit_bytes": null,
+                "peak_pagefile_bytes": null,
+                "peak_working_set_bytes": null
+              }
+            },
+            {
+              "phase": "valid_max_working_set_barrier",
+              "sample_count": 2,
+              "metrics": {
+                "virtual_address_bytes": 446142873600,
+                "rss_bytes": 614416384,
+                "peak_virtual_address_bytes": null,
+                "peak_rss_bytes": null,
+                "private_commit_bytes": null,
+                "pagefile_bytes": null,
+                "working_set_bytes": null,
+                "peak_private_commit_bytes": null,
+                "peak_pagefile_bytes": null,
+                "peak_working_set_bytes": null
+              }
+            },
+            {
+              "phase": "representative_invocation",
+              "sample_count": 1,
+              "metrics": {
+                "virtual_address_bytes": 446142873600,
+                "rss_bytes": 614514688,
+                "peak_virtual_address_bytes": null,
+                "peak_rss_bytes": null,
+                "private_commit_bytes": null,
+                "pagefile_bytes": null,
+                "working_set_bytes": null,
+                "peak_private_commit_bytes": null,
+                "peak_pagefile_bytes": null,
+                "peak_working_set_bytes": null
+              }
+            },
+            {
+              "phase": "shutdown",
+              "sample_count": 3,
+              "metrics": {
+                "virtual_address_bytes": 446142873600,
+                "rss_bytes": 614645760,
+                "peak_virtual_address_bytes": null,
+                "peak_rss_bytes": null,
+                "private_commit_bytes": null,
+                "pagefile_bytes": null,
+                "working_set_bytes": null,
+                "peak_private_commit_bytes": null,
+                "peak_pagefile_bytes": null,
+                "peak_working_set_bytes": null
+              }
+            }
+          ],
+          "whole_run_maximum": {
+            "virtual_address_bytes": 446142873600,
+            "rss_bytes": 614645760,
+            "peak_virtual_address_bytes": null,
+            "peak_rss_bytes": null,
+            "private_commit_bytes": null,
+            "pagefile_bytes": null,
+            "working_set_bytes": null,
+            "peak_private_commit_bytes": null,
+            "peak_pagefile_bytes": null,
+            "peak_working_set_bytes": null
+          }
+        },
+        {
+          "sequence": 5,
+          "warm_up": false,
+          "duration_millis": 23884,
+          "sample_count": 451,
+          "phase_maxima": [
+            {
+              "phase": "spawn",
+              "sample_count": 1,
+              "metrics": {
+                "virtual_address_bytes": 445758324736,
+                "rss_bytes": 3211264,
+                "peak_virtual_address_bytes": null,
+                "peak_rss_bytes": null,
+                "private_commit_bytes": null,
+                "pagefile_bytes": null,
+                "working_set_bytes": null,
+                "peak_private_commit_bytes": null,
+                "peak_pagefile_bytes": null,
+                "peak_working_set_bytes": null
+              }
+            },
+            {
+              "phase": "hello",
+              "sample_count": 1,
+              "metrics": {
+                "virtual_address_bytes": 445759127552,
+                "rss_bytes": 5652480,
+                "peak_virtual_address_bytes": null,
+                "peak_rss_bytes": null,
+                "private_commit_bytes": null,
+                "pagefile_bytes": null,
+                "working_set_bytes": null,
+                "peak_private_commit_bytes": null,
+                "peak_pagefile_bytes": null,
+                "peak_working_set_bytes": null
+              }
+            },
+            {
+              "phase": "compile_and_instantiate",
+              "sample_count": 439,
+              "metrics": {
+                "virtual_address_bytes": 446092509184,
+                "rss_bytes": 564396032,
+                "peak_virtual_address_bytes": null,
+                "peak_rss_bytes": null,
+                "private_commit_bytes": null,
+                "pagefile_bytes": null,
+                "working_set_bytes": null,
+                "peak_private_commit_bytes": null,
+                "peak_pagefile_bytes": null,
+                "peak_working_set_bytes": null
+              }
+            },
+            {
+              "phase": "valid_max_working_set_barrier",
+              "sample_count": 4,
+              "metrics": {
+                "virtual_address_bytes": 446150574080,
+                "rss_bytes": 621887488,
+                "peak_virtual_address_bytes": null,
+                "peak_rss_bytes": null,
+                "private_commit_bytes": null,
+                "pagefile_bytes": null,
+                "working_set_bytes": null,
+                "peak_private_commit_bytes": null,
+                "peak_pagefile_bytes": null,
+                "peak_working_set_bytes": null
+              }
+            },
+            {
+              "phase": "representative_invocation",
+              "sample_count": 1,
+              "metrics": {
+                "virtual_address_bytes": 446150574080,
+                "rss_bytes": 621985792,
+                "peak_virtual_address_bytes": null,
+                "peak_rss_bytes": null,
+                "private_commit_bytes": null,
+                "pagefile_bytes": null,
+                "working_set_bytes": null,
+                "peak_private_commit_bytes": null,
+                "peak_pagefile_bytes": null,
+                "peak_working_set_bytes": null
+              }
+            },
+            {
+              "phase": "shutdown",
+              "sample_count": 5,
+              "metrics": {
+                "virtual_address_bytes": 446150574080,
+                "rss_bytes": 622116864,
+                "peak_virtual_address_bytes": null,
+                "peak_rss_bytes": null,
+                "private_commit_bytes": null,
+                "pagefile_bytes": null,
+                "working_set_bytes": null,
+                "peak_private_commit_bytes": null,
+                "peak_pagefile_bytes": null,
+                "peak_working_set_bytes": null
+              }
+            }
+          ],
+          "whole_run_maximum": {
+            "virtual_address_bytes": 446150574080,
+            "rss_bytes": 622116864,
+            "peak_virtual_address_bytes": null,
+            "peak_rss_bytes": null,
+            "private_commit_bytes": null,
+            "pagefile_bytes": null,
+            "working_set_bytes": null,
+            "peak_private_commit_bytes": null,
+            "peak_pagefile_bytes": null,
+            "peak_working_set_bytes": null
+          }
+        }
+      ]
+    }
+  ]
+}

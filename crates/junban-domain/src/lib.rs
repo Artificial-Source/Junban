@@ -2,6 +2,7 @@
 //!
 //! This crate deliberately has no knowledge of HTTP, SQLite, or async runtimes.
 
+mod ai;
 mod catalog;
 mod ids;
 mod invariants;
@@ -10,11 +11,33 @@ mod query;
 mod quick_entry;
 mod recurrence;
 mod reminder;
+mod settings;
 mod task;
 mod text_import;
 mod timeblock;
+mod transfer;
 mod values;
 
+pub use ai::{
+    AI_APPROVAL_ACTION_HASH_DOMAIN, AI_APPROVAL_LIFETIME_SECS, AI_ASSISTANT_TEXT_BYTES_MAX,
+    AI_BASE_URL_BYTES_MAX, AI_CONTEXT_MEMORIES_MAX, AI_CUSTOM_INSTRUCTIONS_BYTES_MAX,
+    AI_DISPATCHING_APPROVAL_RECOVERY_MAX, AI_GRACE_PERIOD_MS_DEFAULT, AI_GRACE_PERIOD_MS_MAX,
+    AI_GRACE_PERIOD_MS_MIN, AI_MEMORIES_PER_PROFILE_MAX, AI_MEMORY_BYTES_MAX,
+    AI_MEMORY_CONTENT_BYTES_MAX, AI_MEMORY_PAGE_MAX, AI_MESSAGE_CONTENT_JSON_BYTES_MAX,
+    AI_MESSAGE_PAGE_MAX, AI_MESSAGES_PER_SESSION_MAX, AI_MODEL_ID_BYTES_MAX,
+    AI_PENDING_APPROVAL_CONTENT_BYTES_MAX, AI_PENDING_APPROVALS_MAX, AI_PROFILE_CONTENT_BYTES_MAX,
+    AI_PROVIDER_ID_BYTES_MAX, AI_SECRET_BYTES_MAX, AI_SECRETS_FILE, AI_SECRETS_FILE_VERSION,
+    AI_SECRETS_MAX, AI_SESSION_CONTENT_BYTES_MAX, AI_SESSION_PAGE_MAX, AI_SESSION_TITLE_BYTES_MAX,
+    AI_SESSIONS_PER_PROFILE_MAX, AI_TOOL_ARGUMENTS_BYTES_MAX, AI_TOOL_EVENT_TRANSCRIPT_BYTES_MAX,
+    AI_TOOL_RESULT_BYTES_MAX, AI_USER_INPUT_BYTES_MAX, AiApprovalId, AiApprovalStatus,
+    AiCredentialId, AiMemory, AiMemoryId, AiMessage, AiMessageContent, AiMessageId, AiMessageRole,
+    AiMessageStatus, AiModelId, AiProviderPreset, AiResponseRewriteKind, AiRunId, AiRunPhase,
+    AiRunState, AiSecretKind, AiSecretMetadata, AiSession, AiSessionId, AiSessionStatus,
+    AiSettings, AiToolApproval, AiToolEvent, AiToolEventType, AiTurnId, CustomInstructions,
+    GracePeriodMs, ProviderBaseUrl, SpeechProviderPreset, VoiceMode, VoiceSettings,
+    ai_approval_action_hash, referenced_ai_credential_ids, validate_ai_tool_name,
+    validate_base_url,
+};
 pub use catalog::{
     Comment, Project, SavedFilter, Section, Tag, TaskActivity, TaskActivityAction, TaskRelation,
     Template,
@@ -64,6 +87,14 @@ pub use reminder::{
     reminder_occurrence_key, validate_owner_lost_mark_limit, validate_reminder_claim_limit,
     validate_reminder_lease_secs,
 };
+pub use settings::{
+    AppSettings, AppearanceSettings, CalendarDefault, DateFormat, DateTimeSettings, Density,
+    FeatureSettings, FontFamily, FontSize, KEYBOARD_SHORTCUT_ACTIONS, KeyboardShortcut,
+    MAX_CAPACITY_MINUTES, MIN_CAPACITY_MINUTES, NotificationSettings, PlanningSettings,
+    RESERVED_BROWSER_CHORDS, SettingsPatch, TaskDefaults, Theme, TimeFormat, VolumePercent,
+    is_reserved_browser_chord, normalize_chord,
+};
+// AiSettings/VoiceSettings are re-exported from `ai` above.
 pub use task::{
     Task, TaskDraft, TaskStatus, UncompleteOutcome, recurrence_rule_uses_anchor,
     resolve_recurrence_anchor,
@@ -73,6 +104,16 @@ pub use timeblock::{
     CivilTimeRange, MAX_SLOT_MEMBERSHIP, MAX_TIMEBLOCK_RANGE_DAYS, MAX_TIMEBLOCK_RANGE_ITEMS,
     OrderedSlotMembership, REPLAN_LOOKBACK_DAYS, TimeBlock, TimeBlockDraft, TimeSlot,
     TimeSlotDraft, replan_window, validate_timeblock_date_range,
+};
+pub use transfer::{
+    BACKUP_HEADER_LEN, BACKUP_MAGIC, BACKUP_VERSION, BackupError, BackupHeader, BackupManifest,
+    ImportDraft, MAX_BACKUP_MANIFEST_BYTES, MAX_BACKUP_PAYLOAD_BYTES, MAX_TRANSFER_CONTENT_BYTES,
+    TransferApply, TransferError, TransferFormat, TransferPreview, TransferWarning,
+    content_fingerprint, decode_sha256_hex, draft_to_task_fields, export_tasks_csv,
+    export_tasks_csv_with_names, export_tasks_json, export_tasks_markdown, frame_backup_envelope,
+    parse_backup_envelope, parse_csv_transfer, parse_json_transfer, parse_markdown_transfer,
+    parse_todoist_json, preview_transfer, read_backup_header, sha256_bytes, sha256_hex,
+    validate_backup_header, validate_preview_matches_apply, write_backup_header,
 };
 pub use values::{
     ActualMinutes, CommentBody, DreadLevel, EntityName, EstimatedMinutes, FilterQuery, HexColor,

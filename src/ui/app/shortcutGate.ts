@@ -12,6 +12,7 @@ export function shouldEnableAppShortcuts(state: {
   endOfDayOpen?: boolean;
   weeklyReviewOpen?: boolean;
   focusModeOpen?: boolean;
+  settingsOpen?: boolean;
 }): boolean {
   return (
     !state.quickAddOpen &&
@@ -23,6 +24,7 @@ export function shouldEnableAppShortcuts(state: {
     !state.planMyDayOpen &&
     !state.endOfDayOpen &&
     !state.weeklyReviewOpen &&
-    !state.focusModeOpen
+    !state.focusModeOpen &&
+    !state.settingsOpen
   );
 }

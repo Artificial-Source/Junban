@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Junban hosted-server benchmark harness (Phase 1 memory + Phase 2 scale).
+"""Junban hosted-server benchmark harness (Phases 1–4).
 
 Optimized junban-server only, inside a transient systemd --user cgroup.
 
@@ -10,7 +10,14 @@ Phase 2 scale (--mode scale):
   Authoritative: 3 samples / 10_000 pre-seeded tasks. --quick: 1 / 500 (harness only).
   Seeder runs outside the measured cgroup via junban-scale-seed.
 
-CLI: --mode, --server, --web-dir, --seeder, --output, --quick.
+Phase 3 temporal (--mode temporal):
+  Authoritative: 5 samples / 10_000 temporal-fixture tasks. --quick: 1 / 500.
+
+Phase 4 data (--mode phase4):
+  Authoritative: 3 samples / 10_000 pre-seeded tasks. --quick: 1 / 500.
+  Measures streamed JSON export, complete backup, restore cutover, and post-restore memory.
+
+CLI: --mode, --server, --web-dir, --seeder, --output, --quick, --self-check.
 """
 
 from __future__ import annotations
@@ -77,6 +84,17 @@ TEMPORAL_BUDGETS_MS = {
     "nudges": 100.0,
     "reminder_lease_claim_20": 50.0,
 }
+
+# ── Phase 4 data protocol ───────────────────────────────────────────────────
+PHASE4_PROTOCOL_NAME = "junban-phase4-data-v1"
+PHASE4_PROTOCOL_VERSION = 1
+PHASE4_SAMPLES, PHASE4_TASK_COUNT = 3, 10_000
+PHASE4_QUICK_SAMPLES, PHASE4_QUICK_TASK_COUNT = 1, 500
+PHASE4_HTTP_TIMEOUT_SECONDS = 180.0
+PHASE4_MEMORY_SAMPLE_INTERVAL_SECONDS = 0.025
+BACKUP_MAGIC = b"JNBK"
+BACKUP_VERSION = 1
+BACKUP_HEADER_LEN = 4 + 2 + 4 + 32 + 8  # magic + version + manifest_len + hash + payload_len
 
 # Only intentional fixed sleep; readiness/shutdown are condition-polled.
 SETTLE_SECONDS = 2.0
@@ -1802,6 +1820,848 @@ def run_temporal_sample(
             shutil.rmtree(profile_dir, ignore_errors=True)
 
 
+def _bytes_to_mib(value: int | float) -> float:
+    return round(float(value) / (1024.0 * 1024.0), 4)
+
+
+def _throughput_mib_s(size_bytes: int, elapsed_ms: float) -> float:
+    if elapsed_ms <= 0.0:
+        raise BenchError("elapsed_ms must be positive for throughput")
+    return round((float(size_bytes) / (1024.0 * 1024.0)) / (elapsed_ms / 1000.0), 4)
+
+
+class CgroupMemoryMonitor:
+    """Samples cgroup memory.current while a long data operation runs."""
+
+    def __init__(self, unit_name: str, *, interval: float = PHASE4_MEMORY_SAMPLE_INTERVAL_SECONDS) -> None:
+        self._unit = f"{unit_name}.service"
+        self._interval = interval
+        self._stop = threading.Event()
+        self._thread: threading.Thread | None = None
+        self.max_current_bytes = 0
+        self.last_current_bytes = 0
+        self.sample_count = 0
+        self._error: str | None = None
+
+    def start(self) -> None:
+        self._thread = threading.Thread(target=self._run, daemon=True)
+        self._thread.start()
+
+    def _run(self) -> None:
+        while not self._stop.is_set():
+            try:
+                mem = read_cgroup_memory(self._unit)
+            except BenchError as error:
+                self._error = str(error)
+            else:
+                current = int(mem["current_bytes"])
+                self.last_current_bytes = current
+                if current > self.max_current_bytes:
+                    self.max_current_bytes = current
+                self.sample_count += 1
+            self._stop.wait(self._interval)
+
+    def stop(self) -> dict[str, Any]:
+        self._stop.set()
+        if self._thread is not None:
+            self._thread.join(timeout=2.0)
+            self._thread = None
+        if self._error and self.sample_count == 0:
+            raise BenchError(f"cgroup memory monitor failed: {self._error}")
+        final = read_cgroup_memory(self._unit)
+        current = int(final["current_bytes"])
+        absolute_peak = int(final["peak_bytes"])
+        if current > self.max_current_bytes:
+            self.max_current_bytes = current
+        self.last_current_bytes = current
+        # Prefer the max observed current during the operation so peak is attributable
+        # to this request even when the unit's cumulative memory.peak cannot be reset.
+        attributable_peak = max(self.max_current_bytes, current)
+        return {
+            "sample_count": self.sample_count,
+            "cgroup_current_bytes": current,
+            "cgroup_peak_bytes": attributable_peak,
+            "cgroup_absolute_peak_bytes": absolute_peak,
+            "cgroup_current_mib": _bytes_to_mib(current),
+            "cgroup_peak_mib": _bytes_to_mib(attributable_peak),
+            "cgroup_absolute_peak_mib": _bytes_to_mib(absolute_peak),
+        }
+
+
+def phase4_protocol_config(quick: bool) -> dict[str, Any]:
+    if quick:
+        samples, tasks = PHASE4_QUICK_SAMPLES, PHASE4_QUICK_TASK_COUNT
+    else:
+        samples, tasks = PHASE4_SAMPLES, PHASE4_TASK_COUNT
+    return {
+        "name": PHASE4_PROTOCOL_NAME,
+        "version": PHASE4_PROTOCOL_VERSION,
+        "mode": "phase4",
+        "authoritative": not quick,
+        "quick": quick,
+        "samples": samples,
+        "task_count": tasks,
+        "settle_seconds": SETTLE_SECONDS,
+        "bind": "127.0.0.1:0",
+        "profile_mode": "0700",
+        "token": "deterministic per sample, pre-written owner-only access-token",
+        "cgroup": "transient systemd --user service with MemoryAccounting=yes",
+        "driver_outside_cgroup": True,
+        "seeder_outside_cgroup": True,
+        "seeder": "junban-scale-seed --task-count N (scale-bench feature; outside measured cgroup)",
+        "operations": [
+            "export_json_stream",
+            "backup_stream",
+            "restore_stream",
+            "post_restore_warm",
+        ],
+        "streaming": {
+            "export": "GET /api/v1/exports/tasks?format=json → driver temp file via copyfileobj",
+            "backup": "GET /api/v1/backup → driver temp file via copyfileobj",
+            "restore": "POST /api/v1/backup/restore from on-disk backup file handle (no payload materialization)",
+        },
+        "http_timeout_seconds": PHASE4_HTTP_TIMEOUT_SECONDS,
+        "warm_memory_ceiling_mib": WARM_MEMORY_CEILING_MIB,
+        "peak_memory_ceiling_mib": PEAK_MEMORY_CEILING_MIB,
+        "variance_rule": VARIANCE_RULE,
+        "regression_rule": REGRESSION_RULE,
+        "budget_basis": (
+            "task-count/integrity checks plus frozen 24 MiB post-restore warm / 32 MiB peak; "
+            "throughput is recorded without a separate invented latency budget"
+        ),
+        "notes": [
+            "Seeder writes the fixture before server start; seed duration is outside the cgroup.",
+            "Each sample restarts the release server on the restored profile in a fresh cgroup.",
+            "Operation peak memory is the max cgroup current sampled while the request runs.",
+            "Quick mode (500 tasks / 1 sample) validates the harness only.",
+        ],
+    }
+
+
+def _response_header_map(response: Any) -> dict[str, str]:
+    headers: dict[str, str] = {}
+    for key, value in response.headers.items():
+        headers[str(key).lower()] = str(value)
+    return headers
+
+
+def stream_response_to_file(
+    method: str,
+    url: str,
+    dest: Path,
+    *,
+    headers: dict[str, str] | None = None,
+    expect_statuses: set[int],
+    timeout: float = PHASE4_HTTP_TIMEOUT_SECONDS,
+) -> tuple[int, dict[str, str], float, int]:
+    """Stream an HTTP response body straight to disk without buffering it in Python."""
+    request = urllib.request.Request(url, data=None, headers=dict(headers or {}), method=method)
+    started = time.perf_counter()
+    try:
+        with urllib.request.urlopen(request, timeout=timeout) as response:
+            status = int(response.getcode())
+            response_headers = _response_header_map(response)
+            if status not in expect_statuses:
+                snippet = response.read(300)
+                elapsed_ms = (time.perf_counter() - started) * 1000.0
+                text = snippet.decode("utf-8", errors="replace")
+                raise BenchError(
+                    f"HTTP {method} {url} returned {status} after {elapsed_ms:.1f}ms, body={text!r}"
+                )
+            dest.parent.mkdir(parents=True, exist_ok=True)
+            with dest.open("wb") as handle:
+                shutil.copyfileobj(response, handle, length=1024 * 1024)
+            elapsed_ms = (time.perf_counter() - started) * 1000.0
+    except urllib.error.HTTPError as error:
+        elapsed_ms = (time.perf_counter() - started) * 1000.0
+        raw = error.read(300)
+        snippet = raw.decode("utf-8", errors="replace")
+        raise BenchError(
+            f"HTTP {method} {url} returned {error.code} after {elapsed_ms:.1f}ms, body={snippet!r}"
+        ) from error
+    except urllib.error.URLError as error:
+        raise BenchError(f"HTTP {method} {url} failed: {error}") from error
+    size = dest.stat().st_size
+    if size <= 0:
+        raise BenchError(f"HTTP {method} {url} wrote empty body to {dest}")
+    return status, response_headers, elapsed_ms, size
+
+
+def stream_file_as_request_body(
+    method: str,
+    url: str,
+    source: Path,
+    *,
+    headers: dict[str, str],
+    expect_statuses: set[int],
+    timeout: float = PHASE4_HTTP_TIMEOUT_SECONDS,
+) -> tuple[Any, float, int]:
+    """POST/PUT a file as the request body without loading the payload into Python."""
+    if not source.is_file():
+        raise BenchError(f"request body file missing: {source}")
+    size = source.stat().st_size
+    if size <= 0:
+        raise BenchError(f"request body file is empty: {source}")
+    req_headers = dict(headers)
+    req_headers.setdefault("Content-Type", "application/octet-stream")
+    req_headers["Content-Length"] = str(size)
+    started = time.perf_counter()
+    try:
+        with source.open("rb") as body:
+            request = urllib.request.Request(url, data=body, headers=req_headers, method=method)
+            with urllib.request.urlopen(request, timeout=timeout) as response:
+                status = int(response.getcode())
+                raw = response.read()
+                elapsed_ms = (time.perf_counter() - started) * 1000.0
+    except urllib.error.HTTPError as error:
+        elapsed_ms = (time.perf_counter() - started) * 1000.0
+        raw = error.read()
+        status = int(error.code)
+        if status not in expect_statuses:
+            snippet = raw[:300].decode("utf-8", errors="replace")
+            raise BenchError(
+                f"HTTP {method} {url} returned {status} after {elapsed_ms:.1f}ms, body={snippet!r}"
+            ) from error
+    except urllib.error.URLError as error:
+        raise BenchError(f"HTTP {method} {url} failed: {error}") from error
+    if status not in expect_statuses:
+        snippet = raw[:300].decode("utf-8", errors="replace")
+        raise BenchError(
+            f"HTTP {method} {url} returned {status} after {elapsed_ms:.1f}ms, body={snippet!r}"
+        )
+    if not raw:
+        return None, elapsed_ms, size
+    try:
+        return json.loads(raw.decode("utf-8")), elapsed_ms, size
+    except json.JSONDecodeError as error:
+        raise BenchError(f"malformed JSON from {method} {url}: {error}") from error
+
+
+def validate_json_export_file(path: Path, *, expected_task_count: int) -> dict[str, Any]:
+    try:
+        with path.open("r", encoding="utf-8") as handle:
+            payload = json.load(handle)
+    except (OSError, UnicodeError, json.JSONDecodeError) as error:
+        raise BenchError(f"export JSON is not parseable: {error}") from error
+    if not isinstance(payload, dict):
+        raise BenchError(f"export JSON root must be an object, got {type(payload).__name__}")
+    if payload.get("format") not in {None, "junban_tasks"}:
+        raise BenchError(f"export JSON unexpected format field: {payload.get('format')!r}")
+    tasks = payload.get("tasks")
+    if not isinstance(tasks, list):
+        raise BenchError("export JSON missing tasks array")
+    if len(tasks) != expected_task_count:
+        raise BenchError(
+            f"export JSON task count {len(tasks)} != expected {expected_task_count}"
+        )
+    for index, task in enumerate(tasks):
+        if not isinstance(task, dict) or not task.get("title"):
+            raise BenchError(f"export JSON task[{index}] missing title")
+    return {
+        "format": payload.get("format"),
+        "version": payload.get("version"),
+        "task_count": len(tasks),
+        "project_count": len(payload["projects"]) if isinstance(payload.get("projects"), list) else None,
+        "tag_count": len(payload["tags"]) if isinstance(payload.get("tags"), list) else None,
+    }
+
+
+def validate_backup_artifact_file(path: Path) -> dict[str, Any]:
+    size = path.stat().st_size
+    if size < BACKUP_HEADER_LEN:
+        raise BenchError(f"backup artifact shorter than header: {size} bytes")
+    with path.open("rb") as handle:
+        magic = handle.read(4)
+        version = int.from_bytes(handle.read(2), "little")
+        manifest_len = int.from_bytes(handle.read(4), "little")
+        manifest_sha256 = handle.read(32)
+        payload_len = int.from_bytes(handle.read(8), "little")
+    if magic != BACKUP_MAGIC:
+        raise BenchError(f"backup magic {magic!r} != {BACKUP_MAGIC!r}")
+    if version != BACKUP_VERSION:
+        raise BenchError(f"backup version {version} != {BACKUP_VERSION}")
+    if manifest_len <= 0:
+        raise BenchError("backup manifest_len must be positive")
+    if payload_len <= 0:
+        raise BenchError("backup payload_len must be positive")
+    if len(manifest_sha256) != 32:
+        raise BenchError("backup manifest hash truncated")
+    expected = BACKUP_HEADER_LEN + manifest_len + payload_len
+    if size != expected:
+        raise BenchError(
+            f"backup size {size} != header+manifest+payload {expected}"
+        )
+    return {
+        "magic": magic.decode("ascii", errors="replace"),
+        "version": version,
+        "manifest_len": manifest_len,
+        "payload_len": payload_len,
+        "size_bytes": size,
+    }
+
+
+def count_tasks_via_api(
+    base_url: str, host: str, origin: str, token: str, *,
+    expected: int | None = None,
+) -> int:
+    total = 0
+    cursor: str | None = None
+    pages = 0
+    while True:
+        params: dict[str, Any] = {"limit": SCALE_PAGE_LIMIT}
+        if cursor:
+            params["cursor"] = cursor
+        qs = urllib.parse.urlencode(params)
+        payload, _ = http_request(
+            "GET", f"{base_url}/api/v1/tasks?{qs}",
+            headers=auth_headers(token, host, origin, mutation=False),
+            expect_statuses={200}, as_json=True,
+        )
+        tasks = _require_task_page(payload, op="post_restore_list", limit=SCALE_PAGE_LIMIT)
+        total += len(tasks)
+        pages += 1
+        if expected is not None and total > expected:
+            raise BenchError(f"task list exceeded expected count {expected}: got >= {total}")
+        cursor_value = payload.get("next_cursor") if isinstance(payload, dict) else None
+        if not cursor_value:
+            break
+        cursor = str(cursor_value)
+        if pages > 10_000:
+            raise BenchError("task list pagination exceeded safety page ceiling")
+    if expected is not None and total != expected:
+        raise BenchError(f"task list count {total} != expected {expected}")
+    return total
+
+
+def assert_no_staging_leaks(profile_dir: Path, *, when: str) -> None:
+    """Fail closed if private transfer/backup staging files remain."""
+    leftovers: list[str] = []
+    for subdir in ("transfers", "backups"):
+        root = profile_dir / subdir
+        if not root.exists():
+            continue
+        for path in sorted(root.rglob("*")):
+            if not path.is_file():
+                continue
+            name = path.name
+            # Live DB siblings never live here; only temp/staging names are leaks.
+            if name.startswith(".") or name.endswith(
+                (".junban-backup", ".sqlite3", ".json", ".csv", ".md")
+            ):
+                leftovers.append(str(path.relative_to(profile_dir)))
+    if leftovers:
+        raise BenchError(f"staging leak after {when}: {leftovers[:12]}")
+
+
+def _phase4_op_record(
+    *,
+    elapsed_ms: float,
+    size_bytes: int | None,
+    memory: dict[str, Any],
+    extra: dict[str, Any] | None = None,
+) -> dict[str, Any]:
+    record: dict[str, Any] = {
+        "elapsed_ms": elapsed_ms,
+        "cgroup_current_bytes": memory["cgroup_current_bytes"],
+        "cgroup_peak_bytes": memory["cgroup_peak_bytes"],
+        "cgroup_absolute_peak_bytes": memory["cgroup_absolute_peak_bytes"],
+        "cgroup_current_mib": memory["cgroup_current_mib"],
+        "cgroup_peak_mib": memory["cgroup_peak_mib"],
+        "cgroup_absolute_peak_mib": memory["cgroup_absolute_peak_mib"],
+        "memory_sample_count": memory["sample_count"],
+    }
+    if size_bytes is not None:
+        record["bytes"] = size_bytes
+        record["throughput_mib_s"] = _throughput_mib_s(size_bytes, elapsed_ms)
+    if extra:
+        record.update(extra)
+    return record
+
+
+def run_phase4_export_op(
+    unit_name: str,
+    base_url: str,
+    host: str,
+    origin: str,
+    token: str,
+    dest: Path,
+    *,
+    expected_task_count: int,
+) -> dict[str, Any]:
+    monitor = CgroupMemoryMonitor(unit_name)
+    monitor.start()
+    try:
+        status, headers, elapsed_ms, size = stream_response_to_file(
+            "GET",
+            f"{base_url}/api/v1/exports/tasks?format=json",
+            dest,
+            headers=auth_headers(token, host, origin, mutation=False),
+            expect_statuses={200},
+        )
+    finally:
+        memory = monitor.stop()
+    content_type = headers.get("content-type", "")
+    if "application/json" not in content_type.lower():
+        raise BenchError(f"export content-type unexpected: {content_type!r}")
+    disposition = headers.get("content-disposition", "")
+    if "junban-tasks.json" not in disposition and "attachment" not in disposition.lower():
+        raise BenchError(f"export content-disposition unexpected: {disposition!r}")
+    validation = validate_json_export_file(dest, expected_task_count=expected_task_count)
+    return _phase4_op_record(
+        elapsed_ms=elapsed_ms,
+        size_bytes=size,
+        memory=memory,
+        extra={
+            "http_status": status,
+            "content_type": content_type,
+            "content_disposition": disposition,
+            "validation": validation,
+        },
+    )
+
+
+def run_phase4_backup_op(
+    unit_name: str,
+    base_url: str,
+    host: str,
+    origin: str,
+    token: str,
+    dest: Path,
+) -> dict[str, Any]:
+    monitor = CgroupMemoryMonitor(unit_name)
+    monitor.start()
+    try:
+        status, headers, elapsed_ms, size = stream_response_to_file(
+            "GET",
+            f"{base_url}/api/v1/backup",
+            dest,
+            headers=auth_headers(token, host, origin, mutation=False),
+            expect_statuses={200},
+        )
+    finally:
+        memory = monitor.stop()
+    content_type = headers.get("content-type", "")
+    if "application/octet-stream" not in content_type.lower():
+        raise BenchError(f"backup content-type unexpected: {content_type!r}")
+    disposition = headers.get("content-disposition", "")
+    if "junban-backup" not in disposition and "attachment" not in disposition.lower():
+        raise BenchError(f"backup content-disposition unexpected: {disposition!r}")
+    validation = validate_backup_artifact_file(dest)
+    return _phase4_op_record(
+        elapsed_ms=elapsed_ms,
+        size_bytes=size,
+        memory=memory,
+        extra={
+            "http_status": status,
+            "content_type": content_type,
+            "content_disposition": disposition,
+            "validation": validation,
+        },
+    )
+
+
+def run_phase4_restore_op(
+    unit_name: str,
+    base_url: str,
+    host: str,
+    origin: str,
+    token: str,
+    backup_path: Path,
+) -> dict[str, Any]:
+    headers = auth_headers(token, host, origin, mutation=True)
+    headers["Content-Type"] = "application/octet-stream"
+    monitor = CgroupMemoryMonitor(unit_name)
+    monitor.start()
+    try:
+        payload, elapsed_ms, size = stream_file_as_request_body(
+            "POST",
+            f"{base_url}/api/v1/backup/restore",
+            backup_path,
+            headers=headers,
+            expect_statuses={200},
+        )
+    finally:
+        memory = monitor.stop()
+    if not isinstance(payload, dict) or payload.get("restart_required") is not True:
+        raise BenchError(f"restore response missing restart_required=true: {payload!r}")
+    return _phase4_op_record(
+        elapsed_ms=elapsed_ms,
+        size_bytes=size,
+        memory=memory,
+        extra={
+            "http_status": 200,
+            "restart_required": True,
+            "response": payload,
+        },
+    )
+
+
+def run_phase4_sample(
+    sample_index: int,
+    run_id: str,
+    repo_root: Path,
+    server: Path,
+    seeder: Path,
+    web_dir: Path,
+    work_root: Path,
+    protocol: dict[str, Any],
+) -> dict[str, Any]:
+    profile_dir = work_root / f"profile-{sample_index:02d}"
+    artifact_dir = work_root / f"artifacts-{sample_index:02d}"
+    export_path = artifact_dir / "export.json"
+    backup_path = artifact_dir / "backup.junban-backup"
+    digest = hashlib.sha256(
+        f"{PHASE4_PROTOCOL_NAME}:{run_id}:{sample_index}".encode()
+    ).hexdigest()
+    token = digest + hashlib.sha256(digest.encode()).hexdigest()[:16]
+    prepare_profile(profile_dir, token)
+    artifact_dir.mkdir(mode=0o700, parents=True)
+    os.chmod(artifact_dir, 0o700)
+    unit_name = f"junban-phase4-{run_id}-s{sample_index:02d}"[:180]
+    restore_unit_name = f"junban-phase4-{run_id}-s{sample_index:02d}-r"[:180]
+    started = started_restore = cleanup_ok = False
+    try:
+        seed = run_seeder(seeder, profile_dir, int(protocol["task_count"]))
+        task_count = int(seed["manifest"]["task_count"])
+        if task_count != int(protocol["task_count"]):
+            raise BenchError(
+                f"seed task_count {task_count} != protocol {protocol['task_count']}"
+            )
+
+        base_url, host, startup_ms = start_server(
+            unit_name, server, profile_dir, web_dir, repo_root,
+        )
+        started = True
+        origin = base_url
+        time.sleep(SETTLE_SECONDS)
+        idle = memory_snapshot(unit_name, server, "idle")
+
+        export_op = run_phase4_export_op(
+            unit_name, base_url, host, origin, token, export_path,
+            expected_task_count=task_count,
+        )
+        assert_no_staging_leaks(profile_dir, when="export")
+
+        backup_op = run_phase4_backup_op(
+            unit_name, base_url, host, origin, token, backup_path,
+        )
+        assert_no_staging_leaks(profile_dir, when="backup")
+
+        restore_op = run_phase4_restore_op(
+            unit_name, base_url, host, origin, token, backup_path,
+        )
+        # Restore leaves the process in restart_required; stop before reopening.
+        stop_server(unit_name, profile_dir)
+        started = False
+        assert_no_staging_leaks(profile_dir, when="restore_stop")
+
+        base_url2, host2, post_startup_ms = start_server(
+            restore_unit_name, server, profile_dir, web_dir, repo_root,
+        )
+        started_restore = True
+        time.sleep(SETTLE_SECONDS)
+        restored_count = count_tasks_via_api(
+            base_url2, host2, base_url2, token, expected=task_count,
+        )
+        # Authenticated health already verified by start_server; re-check profile auth.
+        profile_payload, _ = http_request(
+            "GET", f"{base_url2}/api/v1/profile",
+            headers=auth_headers(token, host2, base_url2, mutation=False),
+            expect_statuses={200}, as_json=True,
+        )
+        if not isinstance(profile_payload, dict) or "revision" not in profile_payload:
+            raise BenchError(f"post-restore profile malformed: {profile_payload!r}")
+        post_restore = memory_snapshot(restore_unit_name, server, "post_restore_warm")
+        post_sqlite = sqlite_size_bytes(profile_dir)
+        assert_no_staging_leaks(profile_dir, when="post_restore")
+
+        stop_server(restore_unit_name, profile_dir)
+        started_restore = False
+        shutil.rmtree(artifact_dir)
+        shutil.rmtree(profile_dir)
+        cleanup_ok = True
+
+        sample_peak_mib = max(
+            float(export_op["cgroup_peak_mib"]),
+            float(backup_op["cgroup_peak_mib"]),
+            float(restore_op["cgroup_peak_mib"]),
+            float(export_op["cgroup_absolute_peak_mib"]),
+            float(backup_op["cgroup_absolute_peak_mib"]),
+            float(restore_op["cgroup_absolute_peak_mib"]),
+            float(post_restore["cgroup_peak_mib"]),
+            float(idle["cgroup_peak_mib"]),
+        )
+        return {
+            "sample_index": sample_index,
+            "startup_to_health_ms": startup_ms,
+            "settle_seconds": SETTLE_SECONDS,
+            "seed": {
+                "duration_ms": seed["duration_ms"],
+                "wall_ms": seed["wall_ms"],
+                "task_count": task_count,
+                "as_of_date": seed["manifest"].get("as_of_date"),
+            },
+            "idle": idle,
+            "export_json": export_op,
+            "backup": backup_op,
+            "restore": restore_op,
+            "post_restore": {
+                "startup_to_health_ms": post_startup_ms,
+                "task_count": restored_count,
+                "profile_revision": profile_payload.get("revision"),
+                "warm": post_restore,
+                "sqlite": post_sqlite,
+            },
+            # Compatibility aliases used by shared summary path helpers.
+            "warm": post_restore,
+            "sqlite": post_sqlite,
+            "sample_peak_mib": sample_peak_mib,
+            "integrity": {
+                "export_task_count": export_op["validation"]["task_count"],
+                "restored_task_count": restored_count,
+                "expected_task_count": task_count,
+                "backup_payload_len": backup_op["validation"]["payload_len"],
+                "restart_required": True,
+                "passed": (
+                    export_op["validation"]["task_count"] == task_count
+                    and restored_count == task_count
+                    and backup_op["validation"]["payload_len"] > 0
+                ),
+            },
+            "cleanup_success": cleanup_ok,
+            "unit": f"{unit_name}.service",
+            "restore_unit": f"{restore_unit_name}.service",
+        }
+    except Exception:
+        if started_restore:
+            try:
+                stop_server(restore_unit_name, profile_dir)
+            except BenchError:
+                pass
+        if started:
+            try:
+                stop_server(unit_name, profile_dir)
+            except BenchError:
+                pass
+        raise
+    finally:
+        if artifact_dir.exists():
+            shutil.rmtree(artifact_dir, ignore_errors=True)
+        if not cleanup_ok and profile_dir.exists():
+            shutil.rmtree(profile_dir, ignore_errors=True)
+
+
+def build_phase4_summary(samples: list[dict[str, Any]]) -> dict[str, Any]:
+    def collect(path: tuple[str, ...]) -> list[float]:
+        values: list[float] = []
+        for sample in samples:
+            cursor: Any = sample
+            for key in path:
+                cursor = cursor[key]
+            values.append(float(cursor))
+        return values
+
+    def latency_series(path: tuple[str, ...]) -> dict[str, Any]:
+        values = collect(path)
+        ordered = sorted(values)
+        return {
+            "count": len(ordered),
+            "p50_ms": percentile(ordered, 50),
+            "p95_ms": percentile(ordered, 95),
+            "min_ms": ordered[0],
+            "max_ms": ordered[-1],
+            "values_ms": values,
+            **series_summary(values),
+        }
+
+    def float_series(path: tuple[str, ...]) -> dict[str, Any]:
+        values = collect(path)
+        ordered = sorted(values)
+        return {
+            "count": len(ordered),
+            "p50": percentile(ordered, 50),
+            "p95": percentile(ordered, 95),
+            "min": ordered[0],
+            "max": ordered[-1],
+            "median": statistics.median(ordered),
+            "values": values,
+        }
+
+    integrity_passed = all(bool(sample["integrity"]["passed"]) for sample in samples)
+    cleanup_passed = all(bool(sample["cleanup_success"]) for sample in samples)
+
+    summary: dict[str, Any] = {
+        "sample_count": len(samples),
+        "startup_to_health_ms": latency_series(("startup_to_health_ms",)),
+        "seed_duration_ms": latency_series(("seed", "duration_ms")),
+        "idle_cgroup_mib": float_series(("idle", "cgroup_current_mib")),
+        "idle_cgroup_peak_mib": float_series(("idle", "cgroup_peak_mib")),
+        "export_json": {
+            "elapsed_ms": latency_series(("export_json", "elapsed_ms")),
+            "bytes": float_series(("export_json", "bytes")),
+            "throughput_mib_s": float_series(("export_json", "throughput_mib_s")),
+            "cgroup_current_mib": float_series(("export_json", "cgroup_current_mib")),
+            "cgroup_peak_mib": float_series(("export_json", "cgroup_peak_mib")),
+        },
+        "backup": {
+            "elapsed_ms": latency_series(("backup", "elapsed_ms")),
+            "bytes": float_series(("backup", "bytes")),
+            "throughput_mib_s": float_series(("backup", "throughput_mib_s")),
+            "cgroup_current_mib": float_series(("backup", "cgroup_current_mib")),
+            "cgroup_peak_mib": float_series(("backup", "cgroup_peak_mib")),
+        },
+        "restore": {
+            "elapsed_ms": latency_series(("restore", "elapsed_ms")),
+            "bytes": float_series(("restore", "bytes")),
+            "throughput_mib_s": float_series(("restore", "throughput_mib_s")),
+            "cgroup_current_mib": float_series(("restore", "cgroup_current_mib")),
+            "cgroup_peak_mib": float_series(("restore", "cgroup_peak_mib")),
+        },
+        "post_restore_startup_to_health_ms": latency_series(
+            ("post_restore", "startup_to_health_ms")
+        ),
+        "post_restore_warm_cgroup_mib": float_series(
+            ("post_restore", "warm", "cgroup_current_mib")
+        ),
+        "post_restore_warm_cgroup_peak_mib": float_series(
+            ("post_restore", "warm", "cgroup_peak_mib")
+        ),
+        "sample_peak_mib": float_series(("sample_peak_mib",)),
+        "sqlite_total_bytes": float_series(("sqlite", "total_bytes")),
+        # Shared path names used by earlier modes / report consumers.
+        "warm_cgroup_mib": float_series(("post_restore", "warm", "cgroup_current_mib")),
+        "warm_cgroup_peak_mib": float_series(("sample_peak_mib",)),
+        "integrity_passed": integrity_passed,
+        "cleanup_passed": cleanup_passed,
+        "warm_memory_ceiling_mib": WARM_MEMORY_CEILING_MIB,
+        "peak_memory_ceiling_mib": PEAK_MEMORY_CEILING_MIB,
+        "variance_rule": VARIANCE_RULE,
+        "regression_rule": REGRESSION_RULE,
+    }
+    summary["memory_budget_passed"] = (
+        summary["post_restore_warm_cgroup_mib"]["max"] <= WARM_MEMORY_CEILING_MIB
+        and summary["sample_peak_mib"]["max"] <= PEAK_MEMORY_CEILING_MIB
+    )
+    summary["budget_passed"] = (
+        integrity_passed and cleanup_passed and summary["memory_budget_passed"]
+    )
+    return summary
+
+
+def _self_check_phase4_summary_logic() -> None:
+    """Deterministic synthetic samples for phase4 summary aggregation."""
+
+    def op(elapsed: float, size: int, current: float, peak: float) -> dict[str, Any]:
+        return {
+            "elapsed_ms": elapsed,
+            "bytes": size,
+            "throughput_mib_s": _throughput_mib_s(size, elapsed),
+            "cgroup_current_mib": current,
+            "cgroup_peak_mib": peak,
+            "cgroup_absolute_peak_mib": peak,
+            "validation": {"task_count": 500, "payload_len": size},
+        }
+
+    def sample(index: int, *, warm: float, peak: float, ok: bool = True) -> dict[str, Any]:
+        export = op(100.0 + index, 2_000_000, 8.0, 10.0)
+        backup = op(200.0 + index, 4_000_000, 9.0, 12.0)
+        restore = op(300.0 + index, 4_000_000, 11.0, peak)
+        return {
+            "sample_index": index,
+            "startup_to_health_ms": 40.0 + index,
+            "seed": {"duration_ms": 1000.0 + index},
+            "idle": {"cgroup_current_mib": 7.0, "cgroup_peak_mib": 7.5},
+            "export_json": export,
+            "backup": backup,
+            "restore": restore,
+            "post_restore": {
+                "startup_to_health_ms": 45.0 + index,
+                "warm": {"cgroup_current_mib": warm, "cgroup_peak_mib": warm + 0.5},
+            },
+            "sqlite": {"total_bytes": 5_000_000},
+            "sample_peak_mib": peak,
+            "integrity": {"passed": ok},
+            "cleanup_success": ok,
+        }
+
+    summary = build_phase4_summary([
+        sample(0, warm=10.0, peak=15.0),
+        sample(1, warm=11.0, peak=16.0),
+        sample(2, warm=12.0, peak=14.0),
+    ])
+    assert summary["sample_count"] == 3
+    assert summary["integrity_passed"] is True
+    assert summary["cleanup_passed"] is True
+    assert summary["export_json"]["elapsed_ms"]["count"] == 3
+    assert summary["export_json"]["elapsed_ms"]["min_ms"] == 100.0
+    assert summary["export_json"]["elapsed_ms"]["max_ms"] == 102.0
+    assert summary["backup"]["throughput_mib_s"]["min"] > 0.0
+    assert summary["post_restore_warm_cgroup_mib"]["median"] == 11.0
+    assert summary["sample_peak_mib"]["max"] == 16.0
+    assert summary["warm_cgroup_mib"]["max"] == 12.0
+    assert summary["memory_budget_passed"] is True
+    assert summary["budget_passed"] is True
+
+    failing = build_phase4_summary([
+        sample(0, warm=10.0, peak=15.0),
+        sample(1, warm=25.0, peak=16.0),  # warm above 24 MiB
+    ])
+    assert failing["memory_budget_passed"] is False
+    assert failing["budget_passed"] is False
+
+    peak_fail = build_phase4_summary([sample(0, warm=10.0, peak=40.0)])
+    assert peak_fail["memory_budget_passed"] is False
+    assert peak_fail["budget_passed"] is False
+
+    integrity_fail = build_phase4_summary([sample(0, warm=10.0, peak=15.0, ok=False)])
+    assert integrity_fail["integrity_passed"] is False
+    assert integrity_fail["budget_passed"] is False
+
+    # Header / export validators
+    with tempfile.TemporaryDirectory() as tmp:
+        root = Path(tmp)
+        export = root / "export.json"
+        export.write_text(
+            json.dumps({
+                "format": "junban_tasks",
+                "version": 1,
+                "projects": [],
+                "tags": [],
+                "tasks": [{"title": "a"}, {"title": "b"}],
+            }),
+            encoding="utf-8",
+        )
+        validated = validate_json_export_file(export, expected_task_count=2)
+        assert validated["task_count"] == 2
+        try:
+            validate_json_export_file(export, expected_task_count=3)
+            raise AssertionError("expected task-count mismatch")
+        except BenchError:
+            pass
+
+        backup = root / "backup.junban-backup"
+        manifest = b'{"ok":true}'
+        payload = b"SQLite-payload-bytes"
+        header = (
+            BACKUP_MAGIC
+            + (1).to_bytes(2, "little")
+            + len(manifest).to_bytes(4, "little")
+            + (b"\x11" * 32)
+            + len(payload).to_bytes(8, "little")
+        )
+        backup.write_bytes(header + manifest + payload)
+        backup_meta = validate_backup_artifact_file(backup)
+        assert backup_meta["payload_len"] == len(payload)
+        assert backup_meta["manifest_len"] == len(manifest)
+        try:
+            validate_backup_artifact_file(export)
+            raise AssertionError("expected invalid backup magic")
+        except BenchError:
+            pass
+
+    assert _throughput_mib_s(1_048_576, 1000.0) == 1.0
+
+
 def self_check_protocol() -> None:
     """Focused argument/protocol assertions for CI-friendly validation."""
     phase1 = protocol_config(False)
@@ -1839,28 +2699,46 @@ def self_check_protocol() -> None:
     assert temporal["budgets_p95_ms"]["stats_366_day"] == 150.0
     assert temporal["budgets_p95_ms"]["reminder_lease_claim_20"] == 50.0
 
+    phase4 = phase4_protocol_config(False)
+    phase4_q = phase4_protocol_config(True)
+    assert phase4["name"] == PHASE4_PROTOCOL_NAME
+    assert phase4["mode"] == "phase4"
+    assert phase4["samples"] == 3 and phase4["task_count"] == 10_000
+    assert phase4_q["samples"] == 1 and phase4_q["task_count"] == 500
+    assert phase4["authoritative"] is True and phase4_q["authoritative"] is False
+    assert phase4["seeder_outside_cgroup"] is True
+    assert phase4["driver_outside_cgroup"] is True
+    assert phase4["warm_memory_ceiling_mib"] == 24.0
+    assert phase4["peak_memory_ceiling_mib"] == 32.0
+    assert "export_json_stream" in phase4["operations"]
+    assert "budget_basis" in phase4
+    _self_check_phase4_summary_logic()
+
 
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(
-        description="Junban hosted-server benchmark harness (phase1 memory + scale)",
+        description="Junban hosted-server benchmark harness (phase1/scale/temporal/phase4)",
     )
     parser.add_argument(
         "--mode",
-        choices=("phase1", "scale", "temporal"),
+        choices=("phase1", "scale", "temporal", "phase4"),
         default="phase1",
-        help="phase1 = frozen 100-task memory; scale = Phase 2 10k; temporal = Phase 3 10k",
+        help=(
+            "phase1 = frozen 100-task memory; scale = Phase 2 10k; "
+            "temporal = Phase 3 10k; phase4 = Phase 4 data ops"
+        ),
     )
     parser.add_argument("--server", type=Path, default=Path("target/release/junban-server"))
     parser.add_argument(
         "--seeder",
         type=Path,
         default=Path("target/release/junban-scale-seed"),
-        help="Path to junban-scale-seed (scale and temporal modes)",
+        help="Path to junban-scale-seed (scale, temporal, and phase4 modes)",
     )
     parser.add_argument("--web-dir", type=Path, default=Path("dist"))
     parser.add_argument(
         "--quick", action="store_true",
-        help="Non-authoritative dry run (phase1: 10; scale/temporal: 500 tasks)",
+        help="Non-authoritative dry run (phase1: 10; scale/temporal/phase4: 500 tasks)",
     )
     parser.add_argument(
         "--self-check",
@@ -1883,33 +2761,35 @@ def main(argv: list[str] | None = None) -> int:
     server = (args.server if args.server.is_absolute() else repo_root / args.server).resolve()
     web_dir = (args.web_dir if args.web_dir.is_absolute() else repo_root / args.web_dir).resolve()
     seeder = (args.seeder if args.seeder.is_absolute() else repo_root / args.seeder).resolve()
+    seeded_modes = {"scale", "temporal", "phase4"}
     try:
         require_linux_cgroup_v2()
         if not server.is_file() or not os.access(server, os.X_OK):
             raise BenchError(f"server binary missing or not executable: {server}")
         if not web_dir.is_dir() or not (web_dir / "index.html").is_file():
             raise BenchError(f"web-dir missing or lacks index.html: {web_dir}")
-        if args.mode in {"scale", "temporal"}:
+        if args.mode in seeded_modes:
             if not seeder.is_file() or not os.access(seeder, os.X_OK):
                 raise BenchError(
                     f"seeder binary missing or not executable: {seeder} "
                     "(build with: cargo build --locked --release -p junban-storage "
                     "--features scale-bench --bin junban-scale-seed)"
                 )
-            protocol = (
-                scale_protocol_config(bool(args.quick))
-                if args.mode == "scale"
-                else temporal_protocol_config(bool(args.quick))
-            )
+            if args.mode == "scale":
+                protocol = scale_protocol_config(bool(args.quick))
+            elif args.mode == "temporal":
+                protocol = temporal_protocol_config(bool(args.quick))
+            else:
+                protocol = phase4_protocol_config(bool(args.quick))
         else:
             protocol = protocol_config(bool(args.quick))
 
         run_id = uuid.uuid4().hex[:12]
-        prefix = (
-            "junban-scale-" if args.mode == "scale"
-            else "junban-temporal-" if args.mode == "temporal"
-            else "junban-bench-"
-        )
+        prefix = {
+            "scale": "junban-scale-",
+            "temporal": "junban-temporal-",
+            "phase4": "junban-phase4-",
+        }.get(args.mode, "junban-bench-")
         work_root = Path(tempfile.mkdtemp(prefix=f"{prefix}{run_id}-", dir="/tmp"))
         os.chmod(work_root, 0o700)
         samples: list[dict[str, Any]] = []
@@ -1923,22 +2803,41 @@ def main(argv: list[str] | None = None) -> int:
                     sample = run_temporal_sample(
                         i, run_id, repo_root, server, seeder, web_dir, work_root, protocol,
                     )
+                elif args.mode == "phase4":
+                    sample = run_phase4_sample(
+                        i, run_id, repo_root, server, seeder, web_dir, work_root, protocol,
+                    )
                 else:
                     sample = run_sample(
                         i, run_id, repo_root, server, web_dir, work_root, protocol,
                     )
                 samples.append(sample)
                 seed_bit = ""
-                if args.mode in {"scale", "temporal"}:
+                if args.mode in seeded_modes:
                     seed_bit = f" seed={sample['seed']['duration_ms']:.1f}ms"
-                print(
-                    f"sample {i}: startup={sample['startup_to_health_ms']:.1f}ms"
-                    f"{seed_bit} "
-                    f"idle={sample['idle']['cgroup_current_mib']:.2f}MiB "
-                    f"warm={sample['warm']['cgroup_current_mib']:.2f}MiB "
-                    f"peak={sample['warm']['cgroup_peak_mib']:.2f}MiB",
-                    file=sys.stderr,
-                )
+                if args.mode == "phase4":
+                    print(
+                        f"sample {i}: startup={sample['startup_to_health_ms']:.1f}ms"
+                        f"{seed_bit} "
+                        f"idle={sample['idle']['cgroup_current_mib']:.2f}MiB "
+                        f"export={sample['export_json']['elapsed_ms']:.1f}ms/"
+                        f"{sample['export_json']['throughput_mib_s']:.2f}MiB/s "
+                        f"backup={sample['backup']['elapsed_ms']:.1f}ms/"
+                        f"{sample['backup']['throughput_mib_s']:.2f}MiB/s "
+                        f"restore={sample['restore']['elapsed_ms']:.1f}ms "
+                        f"post_warm={sample['post_restore']['warm']['cgroup_current_mib']:.2f}MiB "
+                        f"peak={sample['sample_peak_mib']:.2f}MiB",
+                        file=sys.stderr,
+                    )
+                else:
+                    print(
+                        f"sample {i}: startup={sample['startup_to_health_ms']:.1f}ms"
+                        f"{seed_bit} "
+                        f"idle={sample['idle']['cgroup_current_mib']:.2f}MiB "
+                        f"warm={sample['warm']['cgroup_current_mib']:.2f}MiB "
+                        f"peak={sample['warm']['cgroup_peak_mib']:.2f}MiB",
+                        file=sys.stderr,
+                    )
         finally:
             shutil.rmtree(work_root, ignore_errors=True)
 
@@ -1946,6 +2845,8 @@ def main(argv: list[str] | None = None) -> int:
             summary = build_scale_summary(samples)
         elif args.mode == "temporal":
             summary = build_temporal_summary(samples)
+        elif args.mode == "phase4":
+            summary = build_phase4_summary(samples)
         else:
             summary = build_summary(samples)
 
@@ -1963,7 +2864,7 @@ def main(argv: list[str] | None = None) -> int:
             "command": {"argv": [Path(__file__).name, *map(str, sys.argv[1:])], "cwd": str(Path.cwd())},
             "samples": samples, "summary": summary, "evidence_status": status,
         }
-        if args.mode in {"scale", "temporal"}:
+        if args.mode in seeded_modes:
             report["seeder"] = binary_metadata(seeder)
         text = json.dumps(report, indent=2, sort_keys=True) + "\n"
         if args.output:

@@ -17,6 +17,14 @@ pub enum RepositoryError {
     Validation(ValidationError),
     #[error("storage failed: {0}")]
     Storage(String),
+    #[error(
+        "restore apply failed ({apply}); rollback also failed ({rollback}); rollback snapshot retained at {rollback_path}"
+    )]
+    CatastrophicRestore {
+        apply: String,
+        rollback: String,
+        rollback_path: String,
+    },
 }
 
 #[derive(Debug, Error, Clone, PartialEq, Eq)]
@@ -35,6 +43,8 @@ pub enum AppError {
     ResultLimitExceeded,
     #[error("storage failed")]
     Storage,
+    #[error("restore failed and the live database could not be validated after rollback")]
+    CatastrophicRestore,
 }
 
 impl From<RepositoryError> for AppError {
@@ -46,6 +56,7 @@ impl From<RepositoryError> for AppError {
             RepositoryError::OperationTooLarge => Self::OperationTooLarge,
             RepositoryError::Validation(error) => Self::Validation(error),
             RepositoryError::Storage(_) => Self::Storage,
+            RepositoryError::CatastrophicRestore { .. } => Self::CatastrophicRestore,
         }
     }
 }

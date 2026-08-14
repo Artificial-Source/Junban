@@ -4,6 +4,24 @@
 
 import type { CommittedEventDto, ResourceSnapshotDto, TaskDto } from "./types";
 
+/** Plugin product events emitted by the backend. Keep guarded against the Rust authority in tests. */
+export const PLUGIN_EVENT_TYPES = [
+  "plugin.installed",
+  "plugin.replaced",
+  "plugin.uninstalled",
+  "plugin.enabled",
+  "plugin.disabled",
+  "plugin.retry_requested",
+  "plugin.publisher_trusted",
+  "plugin.publisher_revoked",
+  "plugin.community_policy_updated",
+  "plugin.grants_replaced",
+  "plugin.grants_revoked",
+  "plugin.setting_updated",
+  "plugin.setting_deleted",
+  "plugin.health_changed",
+] as const;
+
 /** Event types the Phase 2 server emits today. Unknown strings force a safe resync. */
 export const KNOWN_EVENT_TYPES = new Set<string>([
   "task.created",
@@ -39,7 +57,9 @@ export const KNOWN_EVENT_TYPES = new Set<string>([
   "relation.added",
   "relation.removed",
   "operation.undone",
+  "settings.updated",
   "sync.resync_required",
+  ...PLUGIN_EVENT_TYPES,
 ]);
 
 export const RESYNC_REQUIRED_TYPE = "sync.resync_required";
@@ -71,7 +91,11 @@ export function isCommittedEvent(data: unknown): data is CommittedEventDto {
     return false;
   }
   const resync = event.resync as Record<string, unknown>;
-  return typeof resync.tasks === "boolean" && typeof resync.catalog === "boolean";
+  return (
+    typeof resync.tasks === "boolean" &&
+    typeof resync.catalog === "boolean" &&
+    (resync.settings === undefined || typeof resync.settings === "boolean")
+  );
 }
 
 export function taskSnapshotFrom(snapshot: ResourceSnapshotDto | null | undefined): TaskDto | null {

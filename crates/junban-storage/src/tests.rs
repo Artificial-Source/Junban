@@ -14,11 +14,12 @@ use junban_app::{
     TemporalContext,
 };
 use junban_domain::{
-    CommentBody, CommentId, DEFAULT_REMINDER_LEASE_SECS, EntityName, HexColor,
+    CommentBody, CommentId, DEFAULT_REMINDER_LEASE_SECS, EntityName, EstimatedMinutes, HexColor,
     MAX_ANALYSIS_TASK_READ, MAX_BULK_IDS, MAX_REMINDER_CLAIM_LIMIT, MarkdownText, OperationId,
-    ProjectId, RelationKind, ReminderChannel, ReminderFailureCode, ReminderOccurrenceState,
-    SortOrder, TagId, TagName, TaskCursor, TaskDraft, TaskId, TaskQuery, TaskSort, TaskStatus,
-    TaskTitle, TaskViewPreset, TemplateId, WeekStart, weekly_review_summary,
+    Priority, ProjectId, RelationKind, ReminderChannel, ReminderFailureCode,
+    ReminderOccurrenceState, SortOrder, TagId, TagName, TaskCursor, TaskDraft, TaskId, TaskQuery,
+    TaskSort, TaskStatus, TaskTitle, TaskViewPreset, TemplateId, ValidationError, WeekStart,
+    weekly_review_summary,
 };
 use uuid::Uuid;
 
@@ -1472,6 +1473,85 @@ fn profile_files_are_owner_only() {
     }
 }
 
+#[test]
+fn advise_dont_need_pages_succeeds_on_private_synced_file() {
+    let directory = TestDir::new();
+    let path = directory.0.join("rollback-cache-drop");
+    write_private_file(&path, &vec![0x5a; 64 * 1024]).unwrap();
+    let file = fs::File::open(&path).unwrap();
+    file.sync_all().unwrap();
+    advise_dont_need_pages(&file).expect("posix_fadvise DONTNEED on a private synced file");
+    // File remains readable after the advice; only cache residency should change.
+    let bytes = fs::read(&path).unwrap();
+    assert_eq!(bytes.len(), 64 * 1024);
+    assert!(bytes.iter().all(|byte| *byte == 0x5a));
+}
+
+#[test]
+fn private_artifact_privacy_failure_happens_before_write() {
+    let directory = TestDir::new();
+    let path = directory.0.join("artifact");
+    let error = create_owner_private_file_with(&path, |file| {
+        assert_eq!(file.metadata().unwrap().len(), 0);
+        Err(io::Error::other("injected privacy failure"))
+    })
+    .unwrap_err();
+    assert_eq!(error.kind(), io::ErrorKind::Other);
+    assert!(!path.exists());
+}
+
+#[cfg(unix)]
+#[test]
+fn private_artifact_is_0600_and_no_replace_wins_race() {
+    use std::io::Write;
+    use std::os::unix::fs::PermissionsExt;
+
+    let directory = TestDir::new();
+    let destination = directory.0.join("artifact");
+    let (mut file, temp) = create_private_artifact_temp(&destination).unwrap();
+    file.write_all(b"new").unwrap();
+    file.sync_all().unwrap();
+    drop(file);
+    fs::write(&destination, b"racer").unwrap();
+
+    let error = publish_private_artifact(&temp, &destination, false).unwrap_err();
+    assert_eq!(error.kind(), io::ErrorKind::AlreadyExists);
+    assert_eq!(fs::read(&destination).unwrap(), b"racer");
+    assert_eq!(
+        fs::metadata(&temp).unwrap().permissions().mode() & 0o777,
+        0o600
+    );
+    fs::remove_file(temp).unwrap();
+}
+
+#[test]
+fn private_artifact_finalize_failure_preserves_old_destination_and_temp() {
+    use std::io::Write;
+
+    let directory = TestDir::new();
+    let destination = directory.0.join("artifact");
+    fs::write(&destination, b"old").unwrap();
+    let (mut file, temp) = create_private_artifact_temp(&destination).unwrap();
+    file.write_all(b"new").unwrap();
+    file.sync_all().unwrap();
+    drop(file);
+
+    let error = publish_private_artifact_with(
+        &temp,
+        &destination,
+        true,
+        |_source, _destination, replace| {
+            assert!(replace);
+            Err(io::Error::other("injected finalize failure"))
+        },
+    )
+    .unwrap_err();
+    assert_eq!(error.kind(), io::ErrorKind::Other);
+    assert_eq!(fs::read(&destination).unwrap(), b"old");
+    assert_eq!(fs::read(&temp).unwrap(), b"new");
+    fs::remove_file(temp).unwrap();
+}
+
 // --- Phase 2 core review regressions (DB-P2-001 .. DB-P2-011) ---
 
 fn project_draft(name: &str) -> ProjectDraft {
@@ -2557,8 +2637,7 @@ async fn db_p2_011_cursor_validation_covers_each_sort() {
 
 use jiff::civil::{Time, date};
 use junban_domain::{
-    DreadLevel, EstimatedMinutes, LocalDueTime, MonthlyAnchorDay, Priority, RecurrenceRule,
-    UncompleteOutcome,
+    DreadLevel, LocalDueTime, MonthlyAnchorDay, RecurrenceRule, UncompleteOutcome,
 };
 
 fn recurring_draft(title: &str, rule: &str, due: Option<&str>) -> TaskDraft {
@@ -4256,6 +4335,27 @@ async fn reminder_timestamps_use_canonical_sortable_text() {
     drop(repo);
     drop(owner);
 
+    // This variable-width representation is accepted only at the v6 migration
+    // boundary. Reframe the fixture to exact schema v6 so the first v6→v7 open
+    // performs normalization before its verified snapshot.
+    let connection = rusqlite::Connection::open(directory.0.join("junban.sqlite3")).unwrap();
+    connection
+        .execute_batch(
+            "DROP TABLE plugin_invocations;
+             DROP TABLE plugin_dependency_locks;
+             DROP TABLE plugin_event_cursors;
+             DROP TABLE plugin_kv;
+             DROP TABLE plugin_settings;
+             DROP TABLE plugin_grants;
+             DROP TABLE plugin_policy;
+             DROP TABLE plugin_publisher_trust;
+             DROP TABLE plugins;
+             DROP TABLE plugin_profile_state;
+             DELETE FROM schema_migrations WHERE version = 7;",
+        )
+        .unwrap();
+    drop(connection);
+
     let owner = ProfileOwner::open(&directory.0).unwrap();
     let repo = owner.repository();
     // Advance past any prior lease left released-at-t0 and any unexpired claims.
@@ -5780,4 +5880,536 @@ async fn p3_tb_004_invalid_civil_ranges_are_rejected_without_durable_rows() {
     assert_eq!(page.blocks[0].range.end.to_string(), "10:00:00");
     assert_eq!(page.slots[0].range.start.to_string(), "09:00:00");
     assert_eq!(page.slots[0].range.end.to_string(), "12:00:00");
+}
+
+#[tokio::test]
+async fn settings_defaults_round_trip_and_patch_emits_settings_resync() {
+    let directory = TestDir::new();
+    let owner = ProfileOwner::open(&directory.0).unwrap();
+    let repo = owner.repository();
+
+    let initial = repo.get_settings().await.unwrap();
+    assert_eq!(initial.date_time.week_start, WeekStart::Sunday);
+    assert_eq!(initial.planning.capacity_minutes, 480);
+    assert!(initial.features.nudges_enabled);
+    assert!(!initial.features.eat_the_frog_enabled);
+
+    let mut features = initial.features.clone();
+    features.eat_the_frog_enabled = true;
+    features.task_jar_enabled = true;
+    let mut planning = initial.planning.clone();
+    planning.capacity_minutes = 300;
+    planning.work_hours = Some(junban_domain::WorkHours::new(9 * 60, 17 * 60).unwrap());
+    let mut shortcuts = initial.keyboard_shortcuts.clone();
+    shortcuts
+        .iter_mut()
+        .find(|shortcut| shortcut.action == "quick-add")
+        .unwrap()
+        .chord = "cmd+j".into();
+
+    let mutation = repo
+        .patch_settings(
+            operation(),
+            junban_app::SettingsPatch {
+                features: Some(features),
+                planning: Some(planning),
+                keyboard_shortcuts: Some(shortcuts),
+                ..Default::default()
+            },
+            now(),
+        )
+        .await
+        .unwrap();
+
+    assert_eq!(mutation.event.event_type.as_str(), "settings.updated");
+    assert!(mutation.event.resync.settings);
+    assert!(!mutation.event.resync.tasks);
+    assert!(!mutation.event.resync.catalog);
+    assert_eq!(
+        mutation.event.primary.as_ref().map(|p| p.resource_type),
+        Some(junban_app::ResourceType::Settings)
+    );
+
+    let updated = repo.get_settings().await.unwrap();
+    assert!(updated.features.eat_the_frog_enabled);
+    assert!(updated.features.task_jar_enabled);
+    assert_eq!(updated.planning.capacity_minutes, 300);
+    assert_eq!(
+        updated
+            .planning
+            .work_hours
+            .map(|h| (h.start_minute, h.end_minute)),
+        Some((540, 1020))
+    );
+    assert_eq!(updated.appearance.theme, junban_domain::Theme::Light);
+    assert_eq!(updated.date_time.week_start, WeekStart::Sunday);
+    assert_eq!(
+        updated
+            .keyboard_shortcuts
+            .iter()
+            .find(|shortcut| shortcut.action == "quick-add")
+            .unwrap()
+            .chord,
+        "cmd+j"
+    );
+
+    drop(updated);
+    drop(repo);
+    drop(owner);
+    let reopened = ProfileOwner::open(&directory.0).unwrap();
+    let persisted = reopened.repository().get_settings().await.unwrap();
+    assert!(persisted.features.eat_the_frog_enabled);
+    assert_eq!(
+        persisted
+            .keyboard_shortcuts
+            .iter()
+            .find(|shortcut| shortcut.action == "quick-add")
+            .unwrap()
+            .chord,
+        "cmd+j"
+    );
+}
+
+#[tokio::test]
+async fn settings_patch_rejects_reserved_browser_chords() {
+    let directory = TestDir::new();
+    let owner = ProfileOwner::open(&directory.0).unwrap();
+    let repo = owner.repository();
+
+    let error = repo
+        .patch_settings(
+            operation(),
+            junban_app::SettingsPatch {
+                keyboard_shortcuts: Some(vec![junban_domain::KeyboardShortcut {
+                    action: "new-project".into(),
+                    chord: "cmd+shift+n".into(),
+                }]),
+                ..Default::default()
+            },
+            now(),
+        )
+        .await
+        .unwrap_err();
+    assert!(matches!(error, RepositoryError::Validation(_)));
+}
+
+#[tokio::test]
+async fn create_task_applies_task_defaults_and_exact_retry_ignores_later_settings() {
+    let directory = TestDir::new();
+    let owner = ProfileOwner::open(&directory.0).unwrap();
+    let repo = owner.repository();
+
+    let initial = repo.get_settings().await.unwrap();
+    let mut task_defaults = initial.task_defaults.clone();
+    task_defaults.default_priority = Some(Priority::new(2).unwrap());
+    task_defaults.default_estimated_minutes = Some(EstimatedMinutes::new(25).unwrap());
+    repo.patch_settings(
+        operation(),
+        junban_app::SettingsPatch {
+            task_defaults: Some(task_defaults),
+            ..Default::default()
+        },
+        now(),
+    )
+    .await
+    .unwrap();
+
+    let defaulted = repo
+        .create_task(operation(), TaskId::new(), draft("Defaulted"), now())
+        .await
+        .unwrap()
+        .task()
+        .unwrap()
+        .clone();
+    assert_eq!(defaulted.priority.map(|p| p.get()), Some(2));
+    assert_eq!(defaulted.estimated_minutes.map(|m| m.get()), Some(25));
+
+    let mut explicit = draft("Explicit");
+    explicit.priority = Some(Priority::new(4).unwrap());
+    explicit.estimated_minutes = Some(EstimatedMinutes::new(10).unwrap());
+    let explicit_task = repo
+        .create_task(operation(), TaskId::new(), explicit, now())
+        .await
+        .unwrap()
+        .task()
+        .unwrap()
+        .clone();
+    assert_eq!(explicit_task.priority.map(|p| p.get()), Some(4));
+    assert_eq!(explicit_task.estimated_minutes.map(|m| m.get()), Some(10));
+
+    let op = operation();
+    let first = repo
+        .create_task(op, TaskId::new(), draft("Replay me"), now())
+        .await
+        .unwrap();
+    let first_task = first.task().unwrap().clone();
+    assert_eq!(first_task.priority.map(|p| p.get()), Some(2));
+    assert_eq!(first_task.estimated_minutes.map(|m| m.get()), Some(25));
+
+    // Change settings after the original create so a buggy fill-before-receipt path would drift.
+    let mut changed = repo.get_settings().await.unwrap().task_defaults.clone();
+    changed.default_priority = Some(Priority::new(1).unwrap());
+    changed.default_estimated_minutes = Some(EstimatedMinutes::new(99).unwrap());
+    repo.patch_settings(
+        operation(),
+        junban_app::SettingsPatch {
+            task_defaults: Some(changed),
+            ..Default::default()
+        },
+        now(),
+    )
+    .await
+    .unwrap();
+
+    let replay = repo
+        .create_task(op, TaskId::new(), draft("Replay me"), now())
+        .await
+        .unwrap();
+    assert!(!replay.newly_committed);
+    assert_eq!(replay.event.revision, first.event.revision);
+    let replay_task = replay.task().unwrap().clone();
+    assert_eq!(replay_task.id, first_task.id);
+    assert_eq!(replay_task.priority.map(|p| p.get()), Some(2));
+    assert_eq!(replay_task.estimated_minutes.map(|m| m.get()), Some(25));
+}
+
+#[test]
+fn allowed_hosts_atomic_failure_before_rename_preserves_prior_policy() {
+    let directory = TestDir::new();
+    let profile = &directory.0;
+    let cli = vec!["127.0.0.1:4219".to_owned()];
+    let old = std::collections::HashSet::from([cli[0].clone(), "old.tailnet.ts.net".to_owned()]);
+    crate::save_allowed_hosts(profile, &old, &cli).unwrap();
+    let new = std::collections::HashSet::from([cli[0].clone(), "new.tailnet.ts.net".to_owned()]);
+
+    let error = crate::save_allowed_hosts_with(profile, &new, &cli, |_| {
+        Err(std::io::Error::other("injected before rename"))
+    })
+    .unwrap_err();
+    assert_eq!(error.kind(), std::io::ErrorKind::Other);
+    let reloaded = crate::load_allowed_hosts(profile, cli).unwrap();
+    assert!(reloaded.contains("old.tailnet.ts.net"));
+    assert!(!reloaded.contains("new.tailnet.ts.net"));
+    let sibling_temps = std::fs::read_dir(profile)
+        .unwrap()
+        .filter_map(Result::ok)
+        .filter(|entry| entry.file_name().to_string_lossy().ends_with(".tmp"))
+        .count();
+    assert_eq!(sibling_temps, 0);
+}
+
+#[test]
+fn load_and_save_allowed_hosts_merges_cli_and_persisted() {
+    let directory = TestDir::new();
+    let profile = &directory.0;
+    let cli = vec!["127.0.0.1:4219".to_owned(), "localhost:4219".to_owned()];
+
+    let initial = crate::load_allowed_hosts(profile, cli.clone()).unwrap();
+    assert_eq!(initial.len(), 2);
+
+    let mut effective = initial;
+    effective.insert("device.tailnet.ts.net".to_owned());
+    crate::save_allowed_hosts(profile, &effective, &cli).unwrap();
+
+    let reloaded = crate::load_allowed_hosts(profile, cli.clone()).unwrap();
+    assert!(reloaded.contains("device.tailnet.ts.net"));
+    assert!(reloaded.contains("127.0.0.1:4219"));
+
+    let path = profile.join(crate::ALLOWED_HOSTS_FILE);
+    let raw = std::fs::read_to_string(&path).unwrap();
+    assert!(raw.contains("device.tailnet.ts.net"));
+    assert!(!raw.contains("127.0.0.1:4219"));
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        assert_eq!(
+            std::fs::metadata(path).unwrap().permissions().mode() & 0o777,
+            0o600
+        );
+    }
+}
+
+#[tokio::test]
+async fn bounded_catalog_reads_do_not_require_full_snapshot() {
+    let directory = TestDir::new();
+    let owner = ProfileOwner::open(&directory.0).unwrap();
+    let repo = owner.repository();
+
+    for index in 0..5 {
+        repo.create_project(
+            operation(),
+            ProjectId::new(),
+            ProjectDraft {
+                name: EntityName::new(format!("Project {index}")).unwrap(),
+                color: HexColor::new("#3b82f6").unwrap(),
+                icon: None,
+                parent_id: None,
+                favorite: false,
+                archived: false,
+                view: Default::default(),
+                sort_order: SortOrder::new(index as i64),
+            },
+            now(),
+        )
+        .await
+        .unwrap();
+        repo.create_tag(
+            operation(),
+            TagId::new(),
+            TagDraft {
+                name: TagName::new(format!("tag-{index}")).unwrap(),
+                color: HexColor::new("#3b82f6").unwrap(),
+            },
+            now(),
+        )
+        .await
+        .unwrap();
+    }
+
+    let projects = repo.list_projects_bounded(2).await.unwrap();
+    assert_eq!(projects.projects.len(), 2);
+    assert!(projects.truncated);
+    assert_eq!(projects.projects[0].name.as_str(), "Project 0");
+
+    let tags = repo.list_tags_bounded(2).await.unwrap();
+    assert_eq!(tags.tags.len(), 2);
+    assert!(tags.truncated);
+
+    let by_name = repo
+        .get_project_by_name(EntityName::new("Project 3").unwrap())
+        .await
+        .unwrap();
+    assert_eq!(by_name.name.as_str(), "Project 3");
+    let by_id = repo.get_project(by_name.id).await.unwrap();
+    assert_eq!(by_id.id, by_name.id);
+
+    let multi = repo
+        .get_projects_by_ids(vec![
+            projects.projects[0].id,
+            projects.projects[1].id,
+            projects.projects[0].id,
+        ])
+        .await
+        .unwrap();
+    assert_eq!(multi.projects.len(), 2);
+    assert!(!multi.truncated);
+
+    let resolved = repo
+        .resolve_tags_by_names(vec![
+            TagName::new("tag-1").unwrap(),
+            TagName::new("tag-4").unwrap(),
+        ])
+        .await
+        .unwrap();
+    assert_eq!(resolved.len(), 2);
+    assert!(resolved.iter().any(|tag| tag.name.as_str() == "tag-1"));
+
+    // Full catalog still works and remains complete.
+    let full = repo.list_catalog().await.unwrap();
+    assert_eq!(full.projects.len(), 5);
+    assert_eq!(full.tags.len(), 5);
+}
+
+#[tokio::test]
+async fn get_projects_by_ids_is_bounded_and_exact() {
+    let directory = TestDir::new();
+    let owner = ProfileOwner::open(&directory.0).unwrap();
+    let repo = owner.repository();
+    let mut created = Vec::new();
+    for index in 0..8 {
+        let id = ProjectId::new();
+        repo.create_project(
+            operation(),
+            id,
+            ProjectDraft {
+                name: EntityName::new(format!("Bulk {index}")).unwrap(),
+                color: HexColor::new("#3b82f6").unwrap(),
+                icon: None,
+                parent_id: None,
+                favorite: false,
+                archived: false,
+                view: Default::default(),
+                sort_order: SortOrder::new(index as i64),
+            },
+            now(),
+        )
+        .await
+        .unwrap();
+        created.push(id);
+    }
+    let missing = ProjectId::new();
+    let page = repo
+        .get_projects_by_ids(vec![created[7], missing, created[0], created[7]])
+        .await
+        .unwrap();
+    assert_eq!(page.projects.len(), 2);
+    assert_eq!(page.projects[0].id, created[0]);
+    assert_eq!(page.projects[1].id, created[7]);
+    assert!(!page.truncated);
+
+    let too_many = (0..=MAX_BULK_IDS)
+        .map(|_| ProjectId::new())
+        .collect::<Vec<_>>();
+    let err = repo.get_projects_by_ids(too_many).await.unwrap_err();
+    assert!(matches!(
+        err,
+        RepositoryError::Validation(ValidationError::TooMany { .. })
+    ));
+}
+
+#[test]
+fn bounded_catalog_sql_is_indexed_and_limited() {
+    let directory = TestDir::new();
+    let mut connection = rusqlite::Connection::open(directory.0.join("junban.sqlite3")).unwrap();
+    connection
+        .pragma_update(None, "foreign_keys", true)
+        .unwrap();
+    crate::migration::migrate(&mut connection, &directory.0).unwrap();
+
+    let plan = |sql: &str| -> String {
+        let mut statement = connection
+            .prepare(&format!("EXPLAIN QUERY PLAN {sql}"))
+            .unwrap();
+        let rows = statement
+            .query_map([], |row| row.get::<_, String>(3))
+            .unwrap()
+            .map(|row| row.unwrap())
+            .collect::<Vec<_>>();
+        rows.join(" | ")
+    };
+
+    let projects_plan = plan("SELECT id FROM projects ORDER BY sort_order, id LIMIT 10");
+    assert!(
+        projects_plan.contains("idx_projects_sort") || projects_plan.contains("USING INDEX"),
+        "projects bounded list should use sort index: {projects_plan}"
+    );
+    assert!(
+        !projects_plan.to_ascii_lowercase().contains("scan projects")
+            || projects_plan.contains("INDEX"),
+        "projects bounded list should not plain-scan: {projects_plan}"
+    );
+
+    let tags_plan = plan("SELECT id FROM tags ORDER BY name_normalized LIMIT 10");
+    // name_normalized has a UNIQUE index; ORDER BY that column should prefer it.
+    assert!(
+        tags_plan.contains("name_normalized")
+            || tags_plan.contains("USING INDEX")
+            || tags_plan.contains("INDEX"),
+        "tags bounded list should use name index: {tags_plan}"
+    );
+
+    let project_id_plan =
+        plan("SELECT id FROM projects WHERE id = '00112233-4455-6677-8899-aabbccddeeff'");
+    assert!(
+        project_id_plan.contains("PRIMARY") || project_id_plan.contains("SEARCH"),
+        "project id lookup must be indexed: {project_id_plan}"
+    );
+
+    let multi_plan = plan(
+        "SELECT id FROM projects WHERE id IN ('00112233-4455-6677-8899-aabbccddeeff','aabbccdd-eeff-0011-2233-445566778899') ORDER BY sort_order, id",
+    );
+    assert!(
+        multi_plan.contains("PRIMARY")
+            || multi_plan.contains("SEARCH")
+            || multi_plan.contains("idx_projects_sort")
+            || multi_plan.contains("USING INDEX"),
+        "multi project id lookup must be indexed: {multi_plan}"
+    );
+
+    let tag_name_plan = plan("SELECT id FROM tags WHERE name_normalized = 'focus'");
+    assert!(
+        tag_name_plan.contains("name_normalized")
+            || tag_name_plan.contains("SEARCH")
+            || tag_name_plan.contains("INDEX"),
+        "tag name resolve must be indexed: {tag_name_plan}"
+    );
+}
+
+#[tokio::test]
+async fn release_cached_memory_runs_on_worker_without_mutating_data_or_revision() {
+    let directory = TestDir::new();
+    let owner = ProfileOwner::open(&directory.0).unwrap();
+    let repository = owner.repository();
+
+    let created = create_simple(&repository, "pager-release").await;
+    let task_id = created.task().unwrap().id;
+    let before = repository.diagnostics().await.unwrap();
+    let before_task = repository.get_task(task_id).await.unwrap();
+    let before_sync = repository.get_sync_state().await.unwrap();
+
+    let db_path = directory.0.join(DATABASE_FILE);
+    let wal_path = directory.0.join(format!("{DATABASE_FILE}-wal"));
+    let shm_path = directory.0.join(format!("{DATABASE_FILE}-shm"));
+    assert!(db_path.is_file(), "live main database must exist");
+    // A committed write under WAL journal_mode creates sidecars the release path covers.
+    assert!(
+        wal_path.is_file(),
+        "expected WAL sidecar after a committed write so release covers created sidecars"
+    );
+    assert!(
+        shm_path.is_file(),
+        "expected SHM sidecar after a committed write (release leaves it untouched)"
+    );
+
+    repository.release_cached_memory().await.unwrap();
+
+    let after = repository.diagnostics().await.unwrap();
+    let after_task = repository.get_task(task_id).await.unwrap();
+    let after_sync = repository.get_sync_state().await.unwrap();
+
+    assert_eq!(after.revision, before.revision);
+    assert_eq!(after.tasks, before.tasks);
+    assert_eq!(after.events, before.events);
+    assert_eq!(after.receipts, before.receipts);
+    assert_eq!(after.activity, before.activity);
+    assert_eq!(after_task, before_task);
+    assert_eq!(after_sync, before_sync);
+
+    // Missing optional sidecars are success; required main DB still advises cleanly.
+    let missing_wal = directory.0.join("absent-sidecar.sqlite3-wal");
+    assert!(!missing_wal.exists());
+    advise_sqlite_file_pages(&missing_wal, false).unwrap();
+    let scratch_db = directory.0.join("scratch-page-cache.sqlite3");
+    fs::write(&scratch_db, vec![0x5a; 8192]).unwrap();
+    advise_live_sqlite_page_cache(&scratch_db).unwrap();
+
+    // Second release after the same durable snapshot remains invariant.
+    repository.release_cached_memory().await.unwrap();
+    let again = repository.diagnostics().await.unwrap();
+    assert_eq!(again.revision, before.revision);
+    assert_eq!(again.events, before.events);
+    assert_eq!(again.receipts, before.receipts);
+    assert_eq!(repository.get_task(task_id).await.unwrap(), before_task);
+    assert_eq!(repository.get_sync_state().await.unwrap(), before_sync);
+}
+
+#[test]
+fn advise_sqlite_file_pages_tolerates_missing_optional_sidecar() {
+    let directory = TestDir::new();
+    let missing = directory.0.join("no-such-wal");
+    assert!(!missing.exists());
+    advise_sqlite_file_pages(&missing, false)
+        .expect("optional missing sidecar must not be an error");
+
+    let required_missing = directory.0.join("no-such-main");
+    let error = advise_sqlite_file_pages(&required_missing, true).unwrap_err();
+    match error {
+        RepositoryError::Storage(message) => {
+            assert!(
+                message.contains("page-cache open failed"),
+                "unexpected storage error: {message}"
+            );
+            assert!(
+                !message.contains(required_missing.to_string_lossy().as_ref()),
+                "profile paths must stay out of page-cache error strings: {message}"
+            );
+        }
+        other => panic!("expected storage error, got {other:?}"),
+    }
+
+    let present = directory.0.join("present-pages");
+    fs::write(&present, vec![0u8; 4096]).unwrap();
+    advise_sqlite_file_pages(&present, true).expect("existing file advice must succeed");
+    // Bytes unchanged — advice is cache-only.
+    assert_eq!(fs::read(&present).unwrap(), vec![0u8; 4096]);
 }

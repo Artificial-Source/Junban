@@ -15,7 +15,7 @@ import type { TemplateDto } from "../api/client";
 interface QuickAddModalProps {
   open: boolean;
   onClose: () => void;
-  /** Optional path to Filters & Labels template management when none exist yet. */
+  /** Optional path to Settings → Templates when none exist yet. */
   onManageTemplates?: () => void;
 }
 
@@ -276,7 +276,7 @@ export function QuickAddModal({ open, onClose, onManageTemplates }: QuickAddModa
                       }}
                       className="mt-1 text-xs text-accent-foreground hover:underline"
                     >
-                      Manage templates in Filters & Labels
+                      Manage templates in Settings
                     </button>
                   )}
                 </div>

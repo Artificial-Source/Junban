@@ -1,0 +1,21 @@
+{
+  "schema_version": 1,
+  "generated_at": "2026-08-13T10:26:12Z",
+  "entries": [
+    {
+      "plugin_id": "automation",
+      "version": "0.1.0",
+      "search_tags": ["automation", "tasks"]
+    },
+    {
+      "plugin_id": "import-typescript",
+      "version": "0.1.0",
+      "search_tags": ["import", "tasks", "typescript"]
+    },
+    {
+      "plugin_id": "pomodoro",
+      "version": "0.1.0",
+      "search_tags": ["focus", "timer"]
+    }
+  ]
+}

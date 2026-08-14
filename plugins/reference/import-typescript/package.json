@@ -1,0 +1,26 @@
+{
+  "name": "junban-reference-import-typescript",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "engines": {
+    "node": "24.13.1",
+    "npm": "11.18.0"
+  },
+  "scripts": {
+    "build": "node ./build.mjs --build",
+    "check": "node ./build.mjs --check && node --experimental-strip-types ./test/command.test.ts",
+    "test": "node --experimental-strip-types ./test/command.test.ts"
+  },
+  "devDependencies": {
+    "@bytecodealliance/componentize-js": "0.22.0",
+    "@bytecodealliance/jco": "1.26.1",
+    "prettier": "3.9.6",
+    "typescript": "6.0.3"
+  },
+  "overrides": {
+    "@bytecodealliance/jco": {
+      "@bytecodealliance/componentize-js": "0.22.0"
+    }
+  }
+}

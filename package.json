@@ -26,6 +26,19 @@
     "check:runtime-boundary": "node scripts/check-runtime-boundary.mjs",
     "check:local-voice-assets": "node scripts/check-local-voice-assets.mjs --require-dist",
     "check:phase6-legacy-visual": "node scripts/check-phase6-legacy-visual-baseline.mjs",
+    "check:phase7-legacy-visual": "node scripts/check-phase7-legacy-visual-baseline.mjs",
+    "check:phase7-legacy-visual:self-check": "node scripts/check-phase7-legacy-visual-baseline.mjs --self-check",
+    "check:phase7-plugin-artifacts": "python3 scripts/check-phase7-plugin-artifacts.py",
+    "check:phase7-plugin-artifacts:bootstrap": "python3 scripts/check-phase7-plugin-artifacts.py --bootstrap-empty",
+    "dogfood:phase7-plugins": "python3 scripts/run-phase7-plugin-dogfood.py",
+    "bench:phase7-wave5": "python3 scripts/check-phase7-wave5-performance.py --collect --authoritative --build-base",
+    "bench:phase7-wave5:quick": "python3 scripts/check-phase7-wave5-performance.py --collect --quick --non-authoritative --build-base",
+    "bench:phase7-wave5:self-check": "python3 scripts/check-phase7-wave5-performance.py --self-check",
+    "check:phase7-wave5-evidence": "python3 scripts/check-phase7-wave5-performance.py --check-evidence",
+    "check:phase7-wave5-preliminary-evidence": "python3 scripts/check-phase7-wave5-performance.py --check-preliminary-evidence",
+    "check:phase7-reference-matrix": "python3 scripts/check-phase7-reference-matrix.py",
+    "check:phase7-reference-matrix:self-check": "python3 scripts/check-phase7-reference-matrix.py --self-check",
+    "check:phase7-slice2e": "python3 scripts/check-phase7-slice2e.py",
     "bench:hosted-server": "python3 scripts/bench-hosted-server.py",
     "bench:hosted-server:quick": "python3 scripts/bench-hosted-server.py --quick",
     "bench:scale": "python3 scripts/bench-hosted-server.py --mode scale",
@@ -43,7 +56,7 @@
     "conformance:phase6": "python3 scripts/check-phase5-conformance.py --phase6 --authoritative",
     "bench:phase6-enabled:self-check": "python3 scripts/check-phase6-enabled-benchmark.py --self-check",
     "bench:self-check": "python3 scripts/bench-hosted-server.py --self-check && python3 scripts/check-phase6-disabled-matched-release.py --self-check",
-    "check": "pnpm format:check && pnpm lint && pnpm typecheck && pnpm test && pnpm build && pnpm contract:check && pnpm check:docs && pnpm check:runtime-boundary && pnpm check:local-voice-assets && pnpm check:phase6-legacy-visual"
+    "check": "pnpm format:check && pnpm lint && pnpm typecheck && pnpm test && pnpm build && pnpm contract:check && pnpm check:docs && pnpm check:runtime-boundary && pnpm check:local-voice-assets && pnpm check:phase6-legacy-visual && pnpm check:phase7-legacy-visual && pnpm check:phase7-plugin-artifacts && pnpm check:phase7-slice2e"
   },
   "dependencies": {
     "@diffusionstudio/piper-wasm": "1.0.0",
@@ -77,7 +90,7 @@
   "pnpm": {
     "overrides": {
       "brace-expansion": "5.0.9",
-      "js-yaml": "4.3.0",
+      "js-yaml": "4.3.1",
       "sharp": "0.35.3"
     },
     "patchedDependencies": {

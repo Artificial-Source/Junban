@@ -2,7 +2,7 @@
 
 - **Date:** 2026-08-04
 - **Current gate:** Phase 6 is approved after the final security finding `P6-FINAL-SEC-001` was fixed and narrowly rechecked; only the clean phase squash remains
-- **Reviewed base:** Wave 1 at `059b671`, Wave 3a from `ddafbe5`, Wave 3b from `542ef17`, Wave 3c from `f471009`, Wave 3d from `c543b7f`, Wave 3e from `c689099`, Wave 3f.1 from `1f6de1a`, Wave 3f.2a from `918633c`, Wave 3f.2b at `33e4c65`, Wave 3g at `070e357` (from clean base `4e31903`), integrated Wave 3 at `4602447`, integrated Wave 4 at `975b513`, and Wave 5 code/evidence candidate `a77298a`
+- **Reviewed base:** Wave 1 at `059b671`, Wave 3a from `ddafbe5`, Wave 3b from `542ef17`, Wave 3c from `f471009`, Wave 3d from `c543b7f`, Wave 3e from `c689099`, Wave 3f.1 from `1f6de1a`, Wave 3f.2a from `918633c`, Wave 3f.2b at `33e4c65`, Wave 3g at `070e357` (from clean base `4e31903`), integrated Wave 3 at `4602447`, integrated Wave 4 at `975b513`, and final Wave 5 code/evidence candidate `6401108`
 - **Gate result:** persistence approved after `P6-DB-001`–`P6-DB-009`; lifecycle approved after `P6-ARCH-001`–`P6-ARCH-003`; configuration/provider security approved after `P6-SEC-007`–`P6-SEC-009`; resource API approved after `P6-API-001`–`P6-API-003`; basic chat approved after `P6-CHAT-001`–`P6-CHAT-003`; direct tool boundary approved after `P6-3F1-001`–`P6-3F1-007`; durable approval/dispatch authority approved after `P6-AUTH-001`–`P6-AUTH-004`; tool-run security corrected after `P6-TOOLRUN-001`–`P6-TOOLRUN-003`; quality follow-up `P6-QUALITY-001` fixed without reopening tool-run authority; Wave 3g review findings `P6-3G-DB-001`–`002`, `P6-3G-QUALITY-001`–`002`, and `P6-3G-CHAT-001` fixed with focused regressions; integrated Wave 3 security/API review approved with no material finding; integrated Wave 4 frontend/accessibility review approved after `P6-W4-REV-001` and `P6-W4-REV-002` were fixed; Wave 5 `P6-DOG-001`–`P6-DOG-004` are fixed and both optimized performance protocols pass without waiver; final security finding `P6-FINAL-SEC-001` is fixed and the narrow closure recheck approved Phase 6
 
 ## Wave 1 database gate
@@ -153,9 +153,9 @@ The exact browser workflow report is `phase-6-dogfood/report.md`. Real Chromium 
 
 ## Wave 5 optimized evidence
 
-The authoritative disabled matched-release run at candidate `a77298a` passed with **8.2852 MiB** median warm versus **8.1289 MiB** at the Phase 5 parent, a **0.1563 MiB** delta below the **1.2193 MiB** allowance; exact-head maximum warm/peak was **9.2852 MiB**, below the frozen **24/32 MiB** ceilings. Process count, no-Node, cleanup, initial-UI request proof, growth, and absolute gates passed.
+The authoritative disabled matched-release run at candidate `6401108` passed with **8.3711 MiB** median warm versus **8.0742 MiB** at the Phase 5 parent, a **0.2969 MiB** delta below the **1.2111 MiB** allowance; exact-head maximum warm/peak was **8.8477 / 8.9727 MiB**, below the frozen **24/32 MiB** ceilings. Process count, no-Node, cleanup, initial-UI request proof, growth, and absolute gates passed.
 
-The authoritative three-profile enabled local-mock run on the same candidate passed every operation, process, cleanup, secrecy, latency, and memory gate: **10.4609 MiB** maximum post-session warm, **11.7852 MiB** maximum operation peak, **12.4570 MiB** maximum cgroup peak, **2.8633 MiB** maximum post-drain growth, **8.8160 ms** first-event p95, **11.0908 ms** completed-short-turn p95, and **1.8420 ms** cancellation-to-terminal-quiescence p95. No waiver or live-provider credential/egress was used.
+The authoritative three-profile enabled local-mock run on the same candidate passed every operation, process, cleanup, secrecy, latency, and memory gate: **11.0898 MiB** maximum post-session warm, **12.6953 MiB** maximum operation peak, **13.3164 MiB** maximum cgroup peak, **3.0898 MiB** maximum post-drain growth, **6.8936 ms** first-event p95, **10.5165 ms** completed-short-turn p95, and **1.8527 ms** cancellation-to-terminal-quiescence p95. No waiver or live-provider credential/egress was used.
 
 ## Final integrated security gate
 

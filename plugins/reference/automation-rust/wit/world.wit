@@ -1,0 +1,5 @@
+package junban:reference-automation@0.1.0;
+
+world reference-automation {
+  include junban:plugin/plugin@0.1.0;
+}

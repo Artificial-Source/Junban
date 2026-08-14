@@ -16,6 +16,7 @@ const SETTINGS_TAB_LABELS = [
   "Voice",
   "Keyboard",
   "Templates",
+  "Extensions",
   "Data",
   "Hosted",
   "Diagnostics",
@@ -147,7 +148,7 @@ describe("SettingsDialog", () => {
     container.remove();
   });
 
-  it("renders desktop tab rail including AI and Voice without other legacy tabs", () => {
+  it("renders desktop tab rail including AI, Voice, and Extensions without About", () => {
     act(() => {
       root.render(createElement(Harness));
     });
@@ -159,7 +160,7 @@ describe("SettingsDialog", () => {
     expect(labels).toEqual(SETTINGS_TAB_LABELS);
     expect(labels).toContain("AI");
     expect(labels).toContain("Voice");
-    expect(labels).not.toContain("Extensions");
+    expect(labels).toContain("Extensions");
     expect(labels).not.toContain("About");
   });
 

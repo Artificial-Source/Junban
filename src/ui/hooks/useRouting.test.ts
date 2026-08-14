@@ -86,6 +86,7 @@ describe("Phase 4 settings route matrix", () => {
     expect(parseSettingsLocation("/settings/features")).toEqual({ open: true, tab: "features" });
     expect(parseSettingsLocation("/settings/ai")).toEqual({ open: true, tab: "ai" });
     expect(parseSettingsLocation("/settings/voice")).toEqual({ open: true, tab: "voice" });
+    expect(parseSettingsLocation("/settings/plugins")).toEqual({ open: true, tab: "plugins" });
     expect(parseSettingsLocation("/settings/keyboard")).toEqual({ open: true, tab: "keyboard" });
     expect(parseSettingsLocation("/settings/templates")).toEqual({ open: true, tab: "templates" });
     expect(parseSettingsLocation("/settings/data")).toEqual({ open: true, tab: "data" });
@@ -97,7 +98,6 @@ describe("Phase 4 settings route matrix", () => {
   });
 
   it("rejects hidden legacy tabs and unknown segments", () => {
-    expect(parseSettingsLocation("/settings/plugins")).toBeNull();
     expect(parseSettingsLocation("/settings/about")).toBeNull();
     expect(parseSettingsLocation("/settings/general")).toBeNull();
     expect(parseSettingsLocation("/settings/ai/extra")).toBeNull();
@@ -109,6 +109,7 @@ describe("Phase 4 settings route matrix", () => {
     expect(settingsToPath("essentials")).toBe("/settings/essentials");
     expect(settingsToPath("ai")).toBe("/settings/ai");
     expect(settingsToPath("voice")).toBe("/settings/voice");
+    expect(settingsToPath("plugins")).toBe("/settings/plugins");
     expect(settingsToPath("data")).toBe("/settings/data");
     expect(settingsToPath("templates")).toBe("/settings/templates");
   });

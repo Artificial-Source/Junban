@@ -5266,6 +5266,2059 @@
         ]
       }
     },
+    "/api/v1/plugins": {
+      "get": {
+        "tags": ["routes_plugins"],
+        "operationId": "list_plugins",
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PluginListResponse"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearer_auth": []
+          }
+        ]
+      }
+    },
+    "/api/v1/plugins/community-policy": {
+      "get": {
+        "tags": ["routes_plugins"],
+        "operationId": "get_plugin_community_policy",
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CommunityPolicyResponse"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearer_auth": []
+          }
+        ]
+      },
+      "put": {
+        "tags": ["routes_plugins"],
+        "operationId": "set_plugin_community_policy",
+        "parameters": [
+          {
+            "name": "Idempotency-Key",
+            "in": "header",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/CommunityPolicyBody"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PluginMutationResponse"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "413": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearer_auth": []
+          }
+        ]
+      }
+    },
+    "/api/v1/plugins/contributions": {
+      "get": {
+        "tags": ["routes_plugins"],
+        "operationId": "list_plugin_contributions",
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PluginContributionListResponse"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearer_auth": []
+          }
+        ]
+      }
+    },
+    "/api/v1/plugins/packages/inspect": {
+      "post": {
+        "tags": ["routes_plugins"],
+        "operationId": "inspect_plugin_package",
+        "requestBody": {
+          "content": {
+            "application/octet-stream": {}
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PluginPackagePreviewResponse"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "413": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearer_auth": []
+          }
+        ]
+      }
+    },
+    "/api/v1/plugins/packages/install": {
+      "post": {
+        "tags": ["routes_plugins"],
+        "operationId": "install_plugin_package",
+        "parameters": [
+          {
+            "name": "expected_plugin_id",
+            "in": "query",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "expected_version",
+            "in": "query",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "expected_package_sha256",
+            "in": "query",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "expected_publisher_key_id",
+            "in": "query",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "expected_permission_hash",
+            "in": "query",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "expected_compatibility",
+            "in": "query",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "replace_existing",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "boolean"
+            }
+          },
+          {
+            "name": "allow_downgrade",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "boolean"
+            }
+          },
+          {
+            "name": "Idempotency-Key",
+            "in": "header",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/octet-stream": {}
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PluginMutationResponse"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "413": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearer_auth": []
+          }
+        ]
+      }
+    },
+    "/api/v1/plugins/publishers": {
+      "get": {
+        "tags": ["routes_plugins"],
+        "operationId": "list_plugin_publishers",
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PublisherTrustListResponse"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearer_auth": []
+          }
+        ]
+      }
+    },
+    "/api/v1/plugins/publishers/{key_id}": {
+      "put": {
+        "tags": ["routes_plugins"],
+        "operationId": "trust_plugin_publisher",
+        "parameters": [
+          {
+            "name": "key_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "Idempotency-Key",
+            "in": "header",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/TrustPublisherBody"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PluginMutationResponse"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "413": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearer_auth": []
+          }
+        ]
+      },
+      "delete": {
+        "tags": ["routes_plugins"],
+        "operationId": "revoke_plugin_publisher",
+        "parameters": [
+          {
+            "name": "key_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "Idempotency-Key",
+            "in": "header",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PluginMutationResponse"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearer_auth": []
+          }
+        ]
+      }
+    },
+    "/api/v1/plugins/registry": {
+      "get": {
+        "tags": ["routes_plugins"],
+        "operationId": "list_plugin_registry",
+        "parameters": [
+          {
+            "name": "query",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "capability",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RegistryListResponse"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearer_auth": []
+          }
+        ]
+      }
+    },
+    "/api/v1/plugins/registry/{plugin_id}": {
+      "get": {
+        "tags": ["routes_plugins"],
+        "operationId": "get_plugin_registry_entry",
+        "parameters": [
+          {
+            "name": "plugin_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "version",
+            "in": "query",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RegistryEntryDto"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearer_auth": []
+          }
+        ]
+      }
+    },
+    "/api/v1/plugins/registry/{plugin_id}/install": {
+      "post": {
+        "tags": ["routes_plugins"],
+        "operationId": "install_plugin_registry_entry",
+        "parameters": [
+          {
+            "name": "plugin_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "Idempotency-Key",
+            "in": "header",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/RegistryInstallBody"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PluginMutationResponse"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "413": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearer_auth": []
+          }
+        ]
+      }
+    },
+    "/api/v1/plugins/{plugin_id}": {
+      "get": {
+        "tags": ["routes_plugins"],
+        "operationId": "get_plugin",
+        "parameters": [
+          {
+            "name": "plugin_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/InstalledPluginDto"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearer_auth": []
+          }
+        ]
+      },
+      "delete": {
+        "tags": ["routes_plugins"],
+        "operationId": "uninstall_plugin",
+        "parameters": [
+          {
+            "name": "plugin_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "Idempotency-Key",
+            "in": "header",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PluginMutationResponse"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearer_auth": []
+          }
+        ]
+      }
+    },
+    "/api/v1/plugins/{plugin_id}/commands/{command_id}": {
+      "post": {
+        "tags": ["routes_plugins"],
+        "operationId": "invoke_plugin_command",
+        "parameters": [
+          {
+            "name": "plugin_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "command_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "Idempotency-Key",
+            "in": "header",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/InvokePluginCommandBody"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PluginInvocationResponse"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "413": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearer_auth": []
+          }
+        ]
+      }
+    },
+    "/api/v1/plugins/{plugin_id}/disable": {
+      "post": {
+        "tags": ["routes_plugins"],
+        "operationId": "disable_plugin",
+        "parameters": [
+          {
+            "name": "plugin_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "Idempotency-Key",
+            "in": "header",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PluginMutationResponse"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearer_auth": []
+          }
+        ]
+      }
+    },
+    "/api/v1/plugins/{plugin_id}/enable": {
+      "post": {
+        "tags": ["routes_plugins"],
+        "operationId": "enable_plugin",
+        "parameters": [
+          {
+            "name": "plugin_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "Idempotency-Key",
+            "in": "header",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PluginMutationResponse"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearer_auth": []
+          }
+        ]
+      }
+    },
+    "/api/v1/plugins/{plugin_id}/grants": {
+      "get": {
+        "tags": ["routes_plugins"],
+        "operationId": "list_plugin_grants",
+        "parameters": [
+          {
+            "name": "plugin_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PluginGrantListResponse"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearer_auth": []
+          }
+        ]
+      },
+      "put": {
+        "tags": ["routes_plugins"],
+        "operationId": "replace_plugin_grants",
+        "parameters": [
+          {
+            "name": "plugin_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "Idempotency-Key",
+            "in": "header",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ReplacePluginGrantsBody"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PluginMutationResponse"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "413": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearer_auth": []
+          }
+        ]
+      },
+      "delete": {
+        "tags": ["routes_plugins"],
+        "operationId": "revoke_plugin_grants",
+        "parameters": [
+          {
+            "name": "plugin_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "package_generation",
+            "in": "query",
+            "required": true,
+            "schema": {
+              "type": "integer",
+              "format": "int64",
+              "minimum": 0
+            }
+          },
+          {
+            "name": "Idempotency-Key",
+            "in": "header",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PluginMutationResponse"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearer_auth": []
+          }
+        ]
+      }
+    },
+    "/api/v1/plugins/{plugin_id}/retry": {
+      "post": {
+        "tags": ["routes_plugins"],
+        "operationId": "retry_plugin",
+        "parameters": [
+          {
+            "name": "plugin_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "Idempotency-Key",
+            "in": "header",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PluginMutationResponse"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearer_auth": []
+          }
+        ]
+      }
+    },
+    "/api/v1/plugins/{plugin_id}/settings": {
+      "get": {
+        "tags": ["routes_plugins"],
+        "operationId": "list_plugin_settings",
+        "parameters": [
+          {
+            "name": "plugin_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PluginSettingListResponse"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearer_auth": []
+          }
+        ]
+      }
+    },
+    "/api/v1/plugins/{plugin_id}/settings/{key}": {
+      "put": {
+        "tags": ["routes_plugins"],
+        "operationId": "set_plugin_setting",
+        "parameters": [
+          {
+            "name": "plugin_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "key",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "Idempotency-Key",
+            "in": "header",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/SetPluginSettingBody"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PluginMutationResponse"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "413": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearer_auth": []
+          }
+        ]
+      },
+      "delete": {
+        "tags": ["routes_plugins"],
+        "operationId": "delete_plugin_setting",
+        "parameters": [
+          {
+            "name": "plugin_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "key",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "package_generation",
+            "in": "query",
+            "required": true,
+            "schema": {
+              "type": "integer",
+              "format": "int64",
+              "minimum": 0
+            }
+          },
+          {
+            "name": "Idempotency-Key",
+            "in": "header",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PluginMutationResponse"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearer_auth": []
+          }
+        ]
+      }
+    },
+    "/api/v1/plugins/{plugin_id}/surfaces/{surface_id}/actions/{action_id}": {
+      "post": {
+        "tags": ["routes_plugins"],
+        "operationId": "invoke_plugin_surface_action",
+        "parameters": [
+          {
+            "name": "plugin_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "surface_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "action_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "Idempotency-Key",
+            "in": "header",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/InvokePluginActionBody"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PluginInvocationResponse"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "413": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearer_auth": []
+          }
+        ]
+      }
+    },
+    "/api/v1/plugins/{plugin_id}/surfaces/{surface_id}/render": {
+      "post": {
+        "tags": ["routes_plugins"],
+        "operationId": "render_plugin_surface",
+        "parameters": [
+          {
+            "name": "plugin_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "surface_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ContributionFenceBody"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RenderPluginContributionResponse"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "413": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearer_auth": []
+          }
+        ]
+      }
+    },
     "/api/v1/profile": {
       "get": {
         "tags": ["routes"],
@@ -13619,6 +15672,28 @@
           }
         }
       },
+      "CommunityPolicyBody": {
+        "type": "object",
+        "required": ["enabled"],
+        "properties": {
+          "enabled": {
+            "type": "boolean"
+          }
+        },
+        "additionalProperties": false
+      },
+      "CommunityPolicyResponse": {
+        "type": "object",
+        "required": ["enabled", "updated_at"],
+        "properties": {
+          "enabled": {
+            "type": "boolean"
+          },
+          "updated_at": {
+            "type": "string"
+          }
+        }
+      },
       "CompletionTimeBucketDto": {
         "type": "string",
         "enum": ["morning", "afternoon", "evening", "night"]
@@ -13648,6 +15723,26 @@
             "minimum": 0
           }
         }
+      },
+      "ContributionFenceBody": {
+        "type": "object",
+        "required": ["package_generation", "activation_epoch", "host_session_id"],
+        "properties": {
+          "activation_epoch": {
+            "type": "integer",
+            "format": "int64",
+            "minimum": 0
+          },
+          "host_session_id": {
+            "type": "string"
+          },
+          "package_generation": {
+            "type": "integer",
+            "format": "int64",
+            "minimum": 0
+          }
+        },
+        "additionalProperties": false
       },
       "CreateAiMemoryHttpRequest": {
         "type": "object",
@@ -14533,6 +16628,163 @@
         },
         "additionalProperties": false
       },
+      "InstalledPluginDto": {
+        "type": "object",
+        "required": [
+          "plugin_id",
+          "name",
+          "description",
+          "version",
+          "package_sha256",
+          "publisher_key_id",
+          "package_generation",
+          "activation_epoch",
+          "desired_enabled",
+          "runtime_state",
+          "requested_permissions",
+          "granted_permissions",
+          "dependencies",
+          "dependencies_satisfied",
+          "settings",
+          "failure_count",
+          "installed_at",
+          "updated_at"
+        ],
+        "properties": {
+          "activation_epoch": {
+            "type": "integer",
+            "format": "int64",
+            "minimum": 0
+          },
+          "dependencies": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "dependencies_satisfied": {
+            "type": "boolean"
+          },
+          "description": {
+            "type": "string"
+          },
+          "desired_enabled": {
+            "type": "boolean"
+          },
+          "failure_count": {
+            "type": "integer",
+            "format": "int32",
+            "minimum": 0
+          },
+          "granted_permissions": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/PluginPermissionDto"
+            }
+          },
+          "installed_at": {
+            "type": "string"
+          },
+          "last_error_code": {
+            "type": ["string", "null"]
+          },
+          "name": {
+            "type": "string"
+          },
+          "next_retry_at": {
+            "type": ["string", "null"]
+          },
+          "package_generation": {
+            "type": "integer",
+            "format": "int64",
+            "minimum": 0
+          },
+          "package_sha256": {
+            "type": "string"
+          },
+          "plugin_id": {
+            "type": "string"
+          },
+          "publisher_key_id": {
+            "type": "string"
+          },
+          "requested_permissions": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/PluginPermissionDto"
+            }
+          },
+          "runtime_state": {
+            "type": "string"
+          },
+          "settings": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/PluginSettingDeclarationDto"
+            }
+          },
+          "updated_at": {
+            "type": "string"
+          },
+          "version": {
+            "type": "string"
+          }
+        }
+      },
+      "InvokePluginActionBody": {
+        "type": "object",
+        "required": ["package_generation", "activation_epoch", "host_session_id", "values"],
+        "properties": {
+          "activation_epoch": {
+            "type": "integer",
+            "format": "int64",
+            "minimum": 0
+          },
+          "host_session_id": {
+            "type": "string"
+          },
+          "package_generation": {
+            "type": "integer",
+            "format": "int64",
+            "minimum": 0
+          },
+          "values": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/PluginScalarNamedValueDto"
+            },
+            "maxItems": 128
+          }
+        },
+        "additionalProperties": false
+      },
+      "InvokePluginCommandBody": {
+        "type": "object",
+        "required": ["package_generation", "activation_epoch", "host_session_id", "values"],
+        "properties": {
+          "activation_epoch": {
+            "type": "integer",
+            "format": "int64",
+            "minimum": 0
+          },
+          "host_session_id": {
+            "type": "string"
+          },
+          "package_generation": {
+            "type": "integer",
+            "format": "int64",
+            "minimum": 0
+          },
+          "values": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/PluginNamedValueDto"
+            },
+            "maxItems": 128
+          }
+        },
+        "additionalProperties": false
+      },
       "KeyboardShortcutDto": {
         "type": "object",
         "required": ["action", "chord"],
@@ -15338,6 +17590,900 @@
         },
         "additionalProperties": false
       },
+      "PluginBooleanSettingSchemaDto": {
+        "type": "object",
+        "required": ["type", "default"],
+        "properties": {
+          "default": {
+            "type": "boolean"
+          },
+          "type": {
+            "$ref": "#/components/schemas/PluginBooleanSettingSchemaTypeDto"
+          }
+        }
+      },
+      "PluginBooleanSettingSchemaTypeDto": {
+        "type": "string",
+        "enum": ["boolean"]
+      },
+      "PluginCapabilityDto": {
+        "type": "string",
+        "enum": [
+          "tasks:read",
+          "tasks:write",
+          "projects:read",
+          "projects:write",
+          "tags:read",
+          "tags:write",
+          "events:subscribe",
+          "settings",
+          "storage",
+          "commands",
+          "ui:view",
+          "ui:panel",
+          "ui:status",
+          "services:provide",
+          "services:consume",
+          "http",
+          "logging"
+        ]
+      },
+      "PluginContributionDto": {
+        "type": "object",
+        "required": [
+          "contribution_id",
+          "plugin_id",
+          "local_id",
+          "kind",
+          "title",
+          "actions",
+          "package_generation",
+          "activation_epoch",
+          "host_session_id"
+        ],
+        "properties": {
+          "actions": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "activation_epoch": {
+            "type": "integer",
+            "format": "int64",
+            "minimum": 0
+          },
+          "contribution_id": {
+            "type": "string"
+          },
+          "description": {
+            "type": ["string", "null"]
+          },
+          "host_session_id": {
+            "type": "string"
+          },
+          "kind": {
+            "type": "string"
+          },
+          "local_id": {
+            "type": "string"
+          },
+          "location": {
+            "type": ["string", "null"]
+          },
+          "package_generation": {
+            "type": "integer",
+            "format": "int64",
+            "minimum": 0
+          },
+          "plugin_id": {
+            "type": "string"
+          },
+          "title": {
+            "type": "string"
+          }
+        }
+      },
+      "PluginContributionListResponse": {
+        "type": "object",
+        "required": ["contributions"],
+        "properties": {
+          "contributions": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/PluginContributionDto"
+            }
+          }
+        }
+      },
+      "PluginDataValueDto": {
+        "oneOf": [
+          {
+            "type": "object",
+            "required": ["val", "tag"],
+            "properties": {
+              "tag": {
+                "type": "string",
+                "enum": ["scalar"]
+              },
+              "val": {
+                "$ref": "#/components/schemas/PluginScalarValueDto"
+              }
+            }
+          },
+          {
+            "type": "object",
+            "required": ["val", "tag"],
+            "properties": {
+              "tag": {
+                "type": "string",
+                "enum": ["string-list"]
+              },
+              "val": {
+                "type": "array",
+                "items": {
+                  "type": "string"
+                }
+              }
+            }
+          },
+          {
+            "type": "object",
+            "required": ["val", "tag"],
+            "properties": {
+              "tag": {
+                "type": "string",
+                "enum": ["integer-list"]
+              },
+              "val": {
+                "type": "array",
+                "items": {
+                  "type": "integer",
+                  "format": "int64"
+                }
+              }
+            }
+          },
+          {
+            "type": "object",
+            "required": ["val", "tag"],
+            "properties": {
+              "tag": {
+                "type": "string",
+                "enum": ["boolean-list"]
+              },
+              "val": {
+                "type": "array",
+                "items": {
+                  "type": "boolean"
+                }
+              }
+            }
+          },
+          {
+            "type": "object",
+            "required": ["val", "tag"],
+            "properties": {
+              "tag": {
+                "type": "string",
+                "enum": ["date-list"]
+              },
+              "val": {
+                "type": "array",
+                "items": {
+                  "type": "string"
+                }
+              }
+            }
+          },
+          {
+            "type": "object",
+            "required": ["val", "tag"],
+            "properties": {
+              "tag": {
+                "type": "string",
+                "enum": ["timestamp-list"]
+              },
+              "val": {
+                "type": "array",
+                "items": {
+                  "type": "string"
+                }
+              }
+            }
+          },
+          {
+            "type": "object",
+            "required": ["val", "tag"],
+            "properties": {
+              "tag": {
+                "type": "string",
+                "enum": ["task-id-list"]
+              },
+              "val": {
+                "type": "array",
+                "items": {
+                  "type": "string"
+                }
+              }
+            }
+          },
+          {
+            "type": "object",
+            "required": ["val", "tag"],
+            "properties": {
+              "tag": {
+                "type": "string",
+                "enum": ["project-id-list"]
+              },
+              "val": {
+                "type": "array",
+                "items": {
+                  "type": "string"
+                }
+              }
+            }
+          },
+          {
+            "type": "object",
+            "required": ["val", "tag"],
+            "properties": {
+              "tag": {
+                "type": "string",
+                "enum": ["tag-id-list"]
+              },
+              "val": {
+                "type": "array",
+                "items": {
+                  "type": "string"
+                }
+              }
+            }
+          },
+          {
+            "type": "object",
+            "required": ["val", "tag"],
+            "properties": {
+              "tag": {
+                "type": "string",
+                "enum": ["plugin-id-list"]
+              },
+              "val": {
+                "type": "array",
+                "items": {
+                  "type": "string"
+                }
+              }
+            }
+          },
+          {
+            "type": "object",
+            "required": ["val", "tag"],
+            "properties": {
+              "tag": {
+                "type": "string",
+                "enum": ["option-id-list"]
+              },
+              "val": {
+                "type": "array",
+                "items": {
+                  "type": "string"
+                }
+              }
+            }
+          }
+        ]
+      },
+      "PluginEventKindDto": {
+        "type": "string",
+        "enum": [
+          "task-created",
+          "task-updated",
+          "task-completed",
+          "task-uncompleted",
+          "task-cancelled",
+          "task-reopened",
+          "task-deleted",
+          "project-created",
+          "project-updated",
+          "project-deleted",
+          "tag-created",
+          "tag-updated",
+          "tag-deleted",
+          "section-created",
+          "section-updated",
+          "section-deleted"
+        ]
+      },
+      "PluginEventScopeDto": {
+        "type": "object",
+        "required": ["event_kinds"],
+        "properties": {
+          "event_kinds": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/PluginEventKindDto"
+            }
+          }
+        },
+        "additionalProperties": false
+      },
+      "PluginGrantDto": {
+        "type": "object",
+        "required": ["package_generation", "permission_hash", "permission", "granted_at"],
+        "properties": {
+          "granted_at": {
+            "type": "string"
+          },
+          "package_generation": {
+            "type": "integer",
+            "format": "int64",
+            "minimum": 0
+          },
+          "permission": {
+            "$ref": "#/components/schemas/PluginPermissionDto"
+          },
+          "permission_hash": {
+            "type": "string"
+          }
+        }
+      },
+      "PluginGrantListResponse": {
+        "type": "object",
+        "required": ["grants"],
+        "properties": {
+          "grants": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/PluginGrantDto"
+            }
+          }
+        }
+      },
+      "PluginHttpMethodDto": {
+        "type": "string",
+        "enum": ["DELETE", "GET", "PATCH", "POST", "PUT"]
+      },
+      "PluginHttpScopeDto": {
+        "type": "object",
+        "required": ["origins", "methods"],
+        "properties": {
+          "methods": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/PluginHttpMethodDto"
+            }
+          },
+          "origins": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          }
+        },
+        "additionalProperties": false
+      },
+      "PluginIntegerSettingSchemaDto": {
+        "type": "object",
+        "required": ["type", "default", "min", "max", "step"],
+        "properties": {
+          "default": {
+            "type": "integer",
+            "format": "int64"
+          },
+          "max": {
+            "type": "integer",
+            "format": "int64"
+          },
+          "min": {
+            "type": "integer",
+            "format": "int64"
+          },
+          "step": {
+            "type": "integer",
+            "format": "int64"
+          },
+          "type": {
+            "$ref": "#/components/schemas/PluginIntegerSettingSchemaTypeDto"
+          }
+        }
+      },
+      "PluginIntegerSettingSchemaTypeDto": {
+        "type": "string",
+        "enum": ["integer"]
+      },
+      "PluginInvocationResponse": {
+        "type": "object",
+        "required": ["status"],
+        "properties": {
+          "rejection": {
+            "type": ["string", "null"]
+          },
+          "revision": {
+            "type": ["integer", "null"],
+            "format": "int64",
+            "minimum": 0
+          },
+          "status": {
+            "type": "string"
+          },
+          "terminal_kind": {
+            "type": ["string", "null"]
+          }
+        }
+      },
+      "PluginListResponse": {
+        "type": "object",
+        "required": ["plugins"],
+        "properties": {
+          "plugins": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/InstalledPluginDto"
+            }
+          }
+        }
+      },
+      "PluginMutationResponse": {
+        "type": "object",
+        "required": ["event"],
+        "properties": {
+          "event": {
+            "$ref": "#/components/schemas/CommittedEventDto"
+          }
+        }
+      },
+      "PluginNamedValueDto": {
+        "type": "object",
+        "required": ["name", "value"],
+        "properties": {
+          "name": {
+            "type": "string"
+          },
+          "value": {
+            "$ref": "#/components/schemas/PluginDataValueDto"
+          }
+        },
+        "additionalProperties": false
+      },
+      "PluginPackagePreviewResponse": {
+        "type": "object",
+        "required": [
+          "plugin_id",
+          "name",
+          "description",
+          "version",
+          "junban_compatibility",
+          "runtime_profile",
+          "package_sha256",
+          "package_size",
+          "component_sha256",
+          "component_size",
+          "publisher_key_id",
+          "publisher_public_key_base64",
+          "publisher_trust",
+          "permission_hash",
+          "permissions",
+          "dependencies",
+          "commands",
+          "surfaces",
+          "settings",
+          "services"
+        ],
+        "properties": {
+          "commands": {},
+          "component_sha256": {
+            "type": "string"
+          },
+          "component_size": {
+            "type": "integer",
+            "format": "int64",
+            "minimum": 0
+          },
+          "dependencies": {},
+          "description": {
+            "type": "string"
+          },
+          "junban_compatibility": {
+            "type": "string"
+          },
+          "name": {
+            "type": "string"
+          },
+          "package_sha256": {
+            "type": "string"
+          },
+          "package_size": {
+            "type": "integer",
+            "format": "int64",
+            "minimum": 0
+          },
+          "permission_hash": {
+            "type": "string"
+          },
+          "permissions": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/PluginPermissionDto"
+            }
+          },
+          "plugin_id": {
+            "type": "string"
+          },
+          "publisher_key_id": {
+            "type": "string"
+          },
+          "publisher_public_key_base64": {
+            "type": "string"
+          },
+          "publisher_trust": {
+            "type": "string"
+          },
+          "runtime_profile": {
+            "type": "string"
+          },
+          "services": {},
+          "settings": {},
+          "surfaces": {},
+          "version": {
+            "type": "string"
+          }
+        }
+      },
+      "PluginPermissionDto": {
+        "type": "object",
+        "required": ["capability", "scope"],
+        "properties": {
+          "capability": {
+            "$ref": "#/components/schemas/PluginCapabilityDto"
+          },
+          "scope": {
+            "$ref": "#/components/schemas/PluginPermissionScopeDto"
+          }
+        },
+        "additionalProperties": false
+      },
+      "PluginPermissionScopeDto": {
+        "oneOf": [
+          {
+            "$ref": "#/components/schemas/PluginUnscopedPermissionDto"
+          },
+          {
+            "$ref": "#/components/schemas/PluginEventScopeDto"
+          },
+          {
+            "$ref": "#/components/schemas/PluginServiceScopeDto"
+          },
+          {
+            "$ref": "#/components/schemas/PluginHttpScopeDto"
+          }
+        ]
+      },
+      "PluginScalarNamedValueDto": {
+        "type": "object",
+        "required": ["name", "value"],
+        "properties": {
+          "name": {
+            "type": "string"
+          },
+          "value": {
+            "$ref": "#/components/schemas/PluginScalarValueDto"
+          }
+        },
+        "additionalProperties": false
+      },
+      "PluginScalarValueDto": {
+        "oneOf": [
+          {
+            "type": "object",
+            "required": ["val", "tag"],
+            "properties": {
+              "tag": {
+                "type": "string",
+                "enum": ["string-value"]
+              },
+              "val": {
+                "type": "string"
+              }
+            }
+          },
+          {
+            "type": "object",
+            "required": ["val", "tag"],
+            "properties": {
+              "tag": {
+                "type": "string",
+                "enum": ["integer-value"]
+              },
+              "val": {
+                "type": "integer",
+                "format": "int64"
+              }
+            }
+          },
+          {
+            "type": "object",
+            "required": ["val", "tag"],
+            "properties": {
+              "tag": {
+                "type": "string",
+                "enum": ["boolean-value"]
+              },
+              "val": {
+                "type": "boolean"
+              }
+            }
+          },
+          {
+            "type": "object",
+            "required": ["val", "tag"],
+            "properties": {
+              "tag": {
+                "type": "string",
+                "enum": ["date-value"]
+              },
+              "val": {
+                "type": "string"
+              }
+            }
+          },
+          {
+            "type": "object",
+            "required": ["val", "tag"],
+            "properties": {
+              "tag": {
+                "type": "string",
+                "enum": ["timestamp-value"]
+              },
+              "val": {
+                "type": "string"
+              }
+            }
+          },
+          {
+            "type": "object",
+            "required": ["val", "tag"],
+            "properties": {
+              "tag": {
+                "type": "string",
+                "enum": ["task-id"]
+              },
+              "val": {
+                "type": "string"
+              }
+            }
+          },
+          {
+            "type": "object",
+            "required": ["val", "tag"],
+            "properties": {
+              "tag": {
+                "type": "string",
+                "enum": ["project-id"]
+              },
+              "val": {
+                "type": "string"
+              }
+            }
+          },
+          {
+            "type": "object",
+            "required": ["val", "tag"],
+            "properties": {
+              "tag": {
+                "type": "string",
+                "enum": ["tag-id"]
+              },
+              "val": {
+                "type": "string"
+              }
+            }
+          },
+          {
+            "type": "object",
+            "required": ["val", "tag"],
+            "properties": {
+              "tag": {
+                "type": "string",
+                "enum": ["plugin-id"]
+              },
+              "val": {
+                "type": "string"
+              }
+            }
+          },
+          {
+            "type": "object",
+            "required": ["val", "tag"],
+            "properties": {
+              "tag": {
+                "type": "string",
+                "enum": ["option-id"]
+              },
+              "val": {
+                "type": "string"
+              }
+            }
+          }
+        ]
+      },
+      "PluginSelectSettingSchemaDto": {
+        "type": "object",
+        "required": ["type", "default", "options"],
+        "properties": {
+          "default": {
+            "type": "string"
+          },
+          "options": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/PluginSettingOptionDto"
+            }
+          },
+          "type": {
+            "$ref": "#/components/schemas/PluginSelectSettingSchemaTypeDto"
+          }
+        }
+      },
+      "PluginSelectSettingSchemaTypeDto": {
+        "type": "string",
+        "enum": ["select"]
+      },
+      "PluginServiceReferenceDto": {
+        "type": "object",
+        "required": ["plugin_id", "service_id"],
+        "properties": {
+          "plugin_id": {
+            "type": "string"
+          },
+          "service_id": {
+            "type": "string"
+          }
+        },
+        "additionalProperties": false
+      },
+      "PluginServiceScopeDto": {
+        "type": "object",
+        "required": ["services"],
+        "properties": {
+          "services": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/PluginServiceReferenceDto"
+            }
+          }
+        },
+        "additionalProperties": false
+      },
+      "PluginSettingDeclarationDto": {
+        "type": "object",
+        "required": ["id", "label", "description", "schema"],
+        "properties": {
+          "description": {
+            "type": "string"
+          },
+          "id": {
+            "type": "string"
+          },
+          "label": {
+            "type": "string"
+          },
+          "schema": {
+            "$ref": "#/components/schemas/PluginSettingSchemaDto"
+          }
+        }
+      },
+      "PluginSettingDto": {
+        "type": "object",
+        "required": ["key", "value", "updated_at"],
+        "properties": {
+          "key": {
+            "type": "string"
+          },
+          "updated_at": {
+            "type": "string"
+          },
+          "value": {
+            "$ref": "#/components/schemas/PluginSettingValueDto"
+          }
+        }
+      },
+      "PluginSettingListResponse": {
+        "type": "object",
+        "required": ["settings"],
+        "properties": {
+          "settings": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/PluginSettingDto"
+            }
+          }
+        }
+      },
+      "PluginSettingOptionDto": {
+        "type": "object",
+        "required": ["id", "label"],
+        "properties": {
+          "id": {
+            "type": "string"
+          },
+          "label": {
+            "type": "string"
+          }
+        }
+      },
+      "PluginSettingSchemaDto": {
+        "oneOf": [
+          {
+            "$ref": "#/components/schemas/PluginTextSettingSchemaDto"
+          },
+          {
+            "$ref": "#/components/schemas/PluginIntegerSettingSchemaDto"
+          },
+          {
+            "$ref": "#/components/schemas/PluginBooleanSettingSchemaDto"
+          },
+          {
+            "$ref": "#/components/schemas/PluginSelectSettingSchemaDto"
+          }
+        ],
+        "discriminator": {
+          "propertyName": "type",
+          "mapping": {
+            "boolean": "#/components/schemas/PluginBooleanSettingSchemaDto",
+            "integer": "#/components/schemas/PluginIntegerSettingSchemaDto",
+            "select": "#/components/schemas/PluginSelectSettingSchemaDto",
+            "text": "#/components/schemas/PluginTextSettingSchemaDto"
+          }
+        }
+      },
+      "PluginSettingValueDto": {
+        "oneOf": [
+          {
+            "type": "string"
+          },
+          {
+            "type": "integer",
+            "format": "int64"
+          },
+          {
+            "type": "boolean"
+          }
+        ]
+      },
+      "PluginTextSettingSchemaDto": {
+        "type": "object",
+        "required": ["type", "min_bytes", "max_bytes", "secret"],
+        "properties": {
+          "default": {
+            "type": ["string", "null"]
+          },
+          "max_bytes": {
+            "type": "integer",
+            "format": "int32",
+            "minimum": 0
+          },
+          "min_bytes": {
+            "type": "integer",
+            "format": "int32",
+            "minimum": 0
+          },
+          "secret": {
+            "type": "boolean"
+          },
+          "type": {
+            "$ref": "#/components/schemas/PluginTextSettingSchemaTypeDto"
+          }
+        }
+      },
+      "PluginTextSettingSchemaTypeDto": {
+        "type": "string",
+        "enum": ["text"]
+      },
+      "PluginUnscopedPermissionDto": {
+        "type": "object",
+        "additionalProperties": false
+      },
       "PrincipalKindDto": {
         "type": "string",
         "description": "Authenticated principal kind (never includes ids, tokens, or secrets).",
@@ -15444,6 +18590,39 @@
         "type": "string",
         "enum": ["fixed_cloud_https", "loopback", "operator_custom"]
       },
+      "PublisherTrustDto": {
+        "type": "object",
+        "required": ["key_id", "public_key_base64", "status", "trusted_at"],
+        "properties": {
+          "key_id": {
+            "type": "string"
+          },
+          "public_key_base64": {
+            "type": "string"
+          },
+          "revoked_at": {
+            "type": ["string", "null"]
+          },
+          "status": {
+            "type": "string"
+          },
+          "trusted_at": {
+            "type": "string"
+          }
+        }
+      },
+      "PublisherTrustListResponse": {
+        "type": "object",
+        "required": ["publishers"],
+        "properties": {
+          "publishers": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/PublisherTrustDto"
+            }
+          }
+        }
+      },
       "PutAiCredentialRequest": {
         "type": "object",
         "required": ["kind", "secret"],
@@ -15517,6 +18696,103 @@
           },
           "restart_required": {
             "type": "boolean"
+          }
+        }
+      },
+      "RegistryEntryDto": {
+        "type": "object",
+        "required": [
+          "plugin_id",
+          "version",
+          "package_sha256",
+          "package_size",
+          "publisher_key_id",
+          "name",
+          "description",
+          "author",
+          "license",
+          "search_tags",
+          "runtime_profile",
+          "requested_capabilities"
+        ],
+        "properties": {
+          "author": {
+            "type": "string"
+          },
+          "description": {
+            "type": "string"
+          },
+          "license": {
+            "type": "string"
+          },
+          "name": {
+            "type": "string"
+          },
+          "package_sha256": {
+            "type": "string"
+          },
+          "package_size": {
+            "type": "integer",
+            "format": "int64",
+            "minimum": 0
+          },
+          "plugin_id": {
+            "type": "string"
+          },
+          "publisher_key_id": {
+            "type": "string"
+          },
+          "requested_capabilities": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "runtime_profile": {
+            "type": "string"
+          },
+          "search_tags": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "version": {
+            "type": "string"
+          }
+        }
+      },
+      "RegistryInstallBody": {
+        "type": "object",
+        "required": ["version", "expected_package_sha256"],
+        "properties": {
+          "allow_downgrade": {
+            "type": "boolean"
+          },
+          "expected_package_sha256": {
+            "type": "string"
+          },
+          "replace_existing": {
+            "type": "boolean"
+          },
+          "version": {
+            "type": "string"
+          }
+        },
+        "additionalProperties": false
+      },
+      "RegistryListResponse": {
+        "type": "object",
+        "required": ["index_sha256", "entries"],
+        "properties": {
+          "entries": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/RegistryEntryDto"
+            }
+          },
+          "index_sha256": {
+            "type": "string"
           }
         }
       },
@@ -15679,6 +18955,39 @@
           }
         }
       },
+      "RenderPluginContributionResponse": {
+        "type": "object",
+        "required": [
+          "plugin_id",
+          "surface_id",
+          "package_generation",
+          "activation_epoch",
+          "host_session_id",
+          "surface"
+        ],
+        "properties": {
+          "activation_epoch": {
+            "type": "integer",
+            "format": "int64",
+            "minimum": 0
+          },
+          "host_session_id": {
+            "type": "string"
+          },
+          "package_generation": {
+            "type": "integer",
+            "format": "int64",
+            "minimum": 0
+          },
+          "plugin_id": {
+            "type": "string"
+          },
+          "surface": {},
+          "surface_id": {
+            "type": "string"
+          }
+        }
+      },
       "RenewReminderLeaseRequest": {
         "type": "object",
         "required": ["fence_term"],
@@ -15716,6 +19025,25 @@
           "section_id": {
             "type": ["string", "null"],
             "format": "uuid"
+          }
+        },
+        "additionalProperties": false
+      },
+      "ReplacePluginGrantsBody": {
+        "type": "object",
+        "required": ["package_generation", "permissions"],
+        "properties": {
+          "package_generation": {
+            "type": "integer",
+            "format": "int64",
+            "minimum": 0
+          },
+          "permissions": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/PluginPermissionDto"
+            },
+            "maxItems": 128
           }
         },
         "additionalProperties": false
@@ -16062,6 +19390,21 @@
             "format": "date-time"
           }
         }
+      },
+      "SetPluginSettingBody": {
+        "type": "object",
+        "required": ["package_generation", "value"],
+        "properties": {
+          "package_generation": {
+            "type": "integer",
+            "format": "int64",
+            "minimum": 0
+          },
+          "value": {
+            "$ref": "#/components/schemas/PluginSettingValueDto"
+          }
+        },
+        "additionalProperties": false
       },
       "SettleReminderDeliveredRequest": {
         "type": "object",
@@ -16977,6 +20320,16 @@
             "type": "string"
           }
         }
+      },
+      "TrustPublisherBody": {
+        "type": "object",
+        "required": ["public_key_base64"],
+        "properties": {
+          "public_key_base64": {
+            "type": "string"
+          }
+        },
+        "additionalProperties": false
       },
       "UncompleteOutcomeDto": {
         "type": "string",

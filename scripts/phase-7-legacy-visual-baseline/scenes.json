@@ -1,0 +1,152 @@
+[
+  {
+    "id": "settings-extensions-main-desktop-light",
+    "file": "settings-extensions-main-desktop-light.png",
+    "theme": "light",
+    "width": 1280,
+    "height": 900,
+    "componentAuthority": "src/ui/views/settings/PluginsTab.tsx + src/ui/views/Settings.tsx",
+    "testAuthority": "tests/ui/settings/PluginsTab.test.tsx",
+    "assertText": ["Extensions", "Restricted Mode is ON", "Built-in Extensions", "Pomodoro Timer"]
+  },
+  {
+    "id": "settings-extensions-safety-desktop-light",
+    "file": "settings-extensions-safety-desktop-light.png",
+    "theme": "light",
+    "width": 1280,
+    "height": 900,
+    "componentAuthority": "src/ui/views/settings/PluginsTab.tsx (community safety confirmation)",
+    "testAuthority": "tests/ui/settings/PluginsTab.test.tsx",
+    "assertText": ["Enable community plugins?", "Keep Restricted", "I understand, enable"]
+  },
+  {
+    "id": "settings-extensions-permission-desktop-light",
+    "file": "settings-extensions-permission-desktop-light.png",
+    "theme": "light",
+    "width": 1280,
+    "height": 900,
+    "componentAuthority": "src/ui/components/PermissionDialog.tsx",
+    "testAuthority": "tests/ui/components/PermissionDialog.test.tsx",
+    "assertText": ["Plugin Permissions", "Focus Helper", "task:read", "commands", "ui:status"]
+  },
+  {
+    "id": "registry-browser-list-detail-desktop-light",
+    "file": "registry-browser-list-detail-desktop-light.png",
+    "theme": "light",
+    "width": 1280,
+    "height": 900,
+    "componentAuthority": "src/ui/components/PluginBrowser.tsx + plugin-browser/PluginDetail.tsx",
+    "testAuthority": "tests/ui/settings/PluginsTab.test.tsx",
+    "assertText": [
+      "Community Plugins",
+      "Markdown Export Pack",
+      "All",
+      "Installed",
+      "Not Installed",
+      "Install"
+    ]
+  },
+  {
+    "id": "registry-browser-empty-desktop-light",
+    "file": "registry-browser-empty-desktop-light.png",
+    "theme": "light",
+    "width": 1280,
+    "height": 900,
+    "componentAuthority": "src/ui/components/PluginBrowser.tsx",
+    "testAuthority": "tests/ui/settings/PluginsTab.test.tsx",
+    "assertText": ["Community Plugins", "No plugins available."]
+  },
+  {
+    "id": "registry-browser-loading-desktop-light",
+    "file": "registry-browser-loading-desktop-light.png",
+    "theme": "light",
+    "width": 1280,
+    "height": 900,
+    "componentAuthority": "src/ui/components/PluginBrowser.tsx",
+    "testAuthority": "tests/ui/settings/PluginsTab.test.tsx",
+    "assertText": ["Community Plugins"],
+    "assertTestId": "phase7-scene-root"
+  },
+  {
+    "id": "registry-browser-error-desktop-light",
+    "file": "registry-browser-error-desktop-light.png",
+    "theme": "light",
+    "width": 1280,
+    "height": 900,
+    "componentAuthority": "src/ui/components/PluginBrowser.tsx",
+    "testAuthority": "tests/ui/settings/PluginsTab.test.tsx",
+    "assertText": ["Community Plugins", "Failed to load plugin registry"]
+  },
+  {
+    "id": "plugin-settings-pomodoro-desktop-light",
+    "file": "plugin-settings-pomodoro-desktop-light.png",
+    "theme": "light",
+    "width": 1280,
+    "height": 900,
+    "componentAuthority": "src/ui/components/plugin-browser/PluginSettingsPanel.tsx + SettingsPluginCard.tsx",
+    "testAuthority": "tests/ui/settings/PluginsTab.test.tsx",
+    "assertText": [
+      "Work Duration",
+      "Break Duration",
+      "Long Break Duration",
+      "Sessions Before Long Break"
+    ],
+    "expandPlugin": "Pomodoro Timer"
+  },
+  {
+    "id": "pomodoro-view-status-desktop-light",
+    "file": "pomodoro-view-status-desktop-light.png",
+    "theme": "light",
+    "width": 1440,
+    "height": 900,
+    "componentAuthority": "src/plugins/builtin/pomodoro (structured view) + src/ui/components/StructuredContentRenderer.tsx + StatusBar.tsx",
+    "testAuthority": "tests/plugins/pomodoro.test.ts",
+    "assertText": ["Pomodoro", "25:00", "Start", "Reset", "Skip", "Session 1/4", "Ready"]
+  },
+  {
+    "id": "declarative-panel-action-desktop-light",
+    "file": "declarative-panel-action-desktop-light.png",
+    "theme": "light",
+    "width": 1280,
+    "height": 900,
+    "componentAuthority": "src/ui/components/PluginPanel.tsx + StructuredContentRenderer.tsx",
+    "testAuthority": "tests/plugins/pomodoro.test.ts",
+    "assertText": [
+      "Automation Panel",
+      "Queued actions",
+      "Run plan",
+      "Dismiss",
+      "Declarative actions"
+    ]
+  },
+  {
+    "id": "settings-extensions-mobile-category-light",
+    "file": "settings-extensions-mobile-category-light.png",
+    "theme": "light",
+    "width": 390,
+    "height": 844,
+    "componentAuthority": "src/ui/views/Settings.tsx (mobile category index)",
+    "testAuthority": "tests/ui/settings/Settings.test.tsx",
+    "assertText": ["Settings", "Extensions", "Built-in and community plugins"]
+  },
+  {
+    "id": "settings-extensions-mobile-detail-light",
+    "file": "settings-extensions-mobile-detail-light.png",
+    "theme": "light",
+    "width": 390,
+    "height": 844,
+    "componentAuthority": "src/ui/views/Settings.tsx + PluginsTab.tsx (mobile detail)",
+    "testAuthority": "tests/ui/settings/PluginsTab.test.tsx",
+    "assertText": ["Extensions", "Restricted Mode is ON", "Pomodoro Timer"]
+  },
+  {
+    "id": "pomodoro-view-status-desktop-dark",
+    "file": "pomodoro-view-status-desktop-dark.png",
+    "theme": "dark",
+    "width": 1440,
+    "height": 900,
+    "componentAuthority": "src/plugins/builtin/pomodoro + StructuredContentRenderer.tsx + StatusBar.tsx (dark)",
+    "testAuthority": "tests/plugins/pomodoro.test.ts",
+    "assertText": ["Pomodoro", "25:00", "Start", "Ready"]
+  }
+]

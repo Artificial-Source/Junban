@@ -1,0 +1,146 @@
+{
+  "artifacts": {
+    "artifact_tool": {
+      "sha256": "64a716c8d75947187b2c0df105230117727e40adb8c2c4cee97cb11a6d10b325",
+      "size_bytes": 3889664
+    },
+    "host": {
+      "sha256": "a1a6aadb92730b3be6c3e7653aaf90e911540eaec171b999a03c5d2c1be3eb0f",
+      "size_bytes": 17936896
+    },
+    "production_dist_sha256": "147a00b9f45fd6353023c7a7db45cc48b6b2e69e40a6fc139b324edffa888104",
+    "server": {
+      "sha256": "783a4538087fc108901341bbeee8580a822ee8fdf45e5d32f55b901996a6c2a2",
+      "size_bytes": 46045696
+    }
+  },
+  "memory_authority": "none; this cross-platform matrix makes no Linux cgroup claim",
+  "product": {
+    "checks": {
+      "automation": {
+        "exact_effect": "completed",
+        "optimized_api_invoked": true
+      },
+      "import-typescript": {
+        "exact_effect": "completed",
+        "optimized_api_invoked": true
+      },
+      "package_cleanup": {
+        "automation": true,
+        "import-typescript": true,
+        "pomodoro": true
+      },
+      "pomodoro": {
+        "exact_metric": "25:00",
+        "optimized_api_invoked": true
+      }
+    },
+    "cleanup": {
+      "observed_children_gone": true,
+      "runtime_removed": true,
+      "server_exit_success": true
+    },
+    "process_observations": [
+      {
+        "host_count": 0,
+        "label": "bundled-publisher-trusted",
+        "names": [],
+        "node_count": 0
+      },
+      {
+        "host_count": 1,
+        "label": "pomodoro-active",
+        "names": [
+          "junban-plugin-host.exe"
+        ],
+        "node_count": 0
+      },
+      {
+        "host_count": 0,
+        "label": "pomodoro-disabled",
+        "names": [],
+        "node_count": 0
+      },
+      {
+        "host_count": 1,
+        "label": "automation-active",
+        "names": [
+          "junban-plugin-host.exe"
+        ],
+        "node_count": 0
+      },
+      {
+        "host_count": 0,
+        "label": "automation-disabled",
+        "names": [],
+        "node_count": 0
+      },
+      {
+        "host_count": 1,
+        "label": "typescript-active",
+        "names": [
+          "junban-plugin-host.exe"
+        ],
+        "node_count": 0
+      },
+      {
+        "host_count": 0,
+        "label": "typescript-disabled",
+        "names": [],
+        "node_count": 0
+      },
+      {
+        "host_count": 0,
+        "label": "all-uninstalled",
+        "names": [],
+        "node_count": 0
+      }
+    ],
+    "runtime_node_absent": true
+  },
+  "references": {
+    "automation-rust": {
+      "build": "cargo_release_wasm32_wasip2",
+      "exact_byte_match_required": false,
+      "exact_match": false,
+      "fresh": {
+        "sha256": "30a9978f2a637af62819b9aa90136b962ef990a564e34f4d1c22b2b2f5b22bac",
+        "size_bytes": 119173
+      },
+      "retained": {
+        "sha256": "32bfa3ef8887ac19a3a311dcfcc4bb2ea7675dacd4cd7e7c289bd2c68cc55fb0",
+        "size_bytes": 119173
+      }
+    },
+    "import-typescript": {
+      "build": "npm_locked_componentize_and_structural_check",
+      "exact_byte_match_required": false,
+      "fresh": {
+        "sha256": "2801639b7d4de1e678852cb5613c6c1e3cfdbb4ab2e94af3667b5914fa10c17f",
+        "size_bytes": 14980555
+      },
+      "optimized_product_api_checked": true,
+      "retained": {
+        "sha256": "9cc84add66d2f6371af013724bee0bbc93ef0c2958b37bc81471b8835ac3f132",
+        "size_bytes": 14975434
+      },
+      "structural_match": true
+    },
+    "pomodoro-rust": {
+      "build": "cargo_release_wasm32_wasip2",
+      "exact_byte_match_required": false,
+      "exact_match": false,
+      "fresh": {
+        "sha256": "3b58431ff431e6eb52707e184653a2b7990ae3f551e9cb4a82cf60c38b8ea8ef",
+        "size_bytes": 145056
+      },
+      "retained": {
+        "sha256": "24d498d3b2551547a506d94c46fca3a7ff68235a1d9709e86d77a8d006f07faf",
+        "size_bytes": 145056
+      }
+    }
+  },
+  "schema_version": 1,
+  "status": "passed",
+  "target_os": "windows"
+}

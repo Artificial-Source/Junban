@@ -1,0 +1,70 @@
+{
+  "artifacts": {
+    "conformance": {
+      "path": "crates/junban-plugin-sdk/consumers/slice2e-rust/slice2e-consumer.wasm",
+      "sha256": "1b46b7666a1c3772cc394e36363bda8be32a95deeefbf8293d370404c8d11a4c",
+      "size_bytes": 153835
+    },
+    "host": {
+      "path": "target/release/junban-plugin-host",
+      "sha256": "5d5e5f23cea5be953e09150e0c4836a6016a2e0dfdcfdd3fe2e2885c77d6cce9",
+      "size_bytes": 12362496
+    },
+    "rust": {
+      "path": "crates/junban-plugin-sdk/consumers/rust/rust-consumer.wasm",
+      "sha256": "c1811fdf9a9ebe11ca9586267db130ca6b735cf789d9a0efedab703cd9455833",
+      "size_bytes": 132483
+    },
+    "typescript": {
+      "path": "crates/junban-plugin-sdk/consumers/typescript/artifacts/typescript-consumer.wasm",
+      "sha256": "78abc3d8e07de4a6e399f12da523c2e52b76236416171b82bd7fbbf26b66d6c4",
+      "size_bytes": 15480272
+    },
+    "typescript_standalone_calibration": {
+      "path": "crates/junban-plugin-sdk/consumers/typescript/artifacts/typescript-standalone-calibration.wasm",
+      "sha256": "8616e64e1152ad6f2915107745201ac1888c15124132c9c1fffba0cbd165d8e7",
+      "size_bytes": 14988599
+    }
+  },
+  "cases": [
+    "typed-package-admission",
+    "rust-import-load-activate-invoke-deactivate",
+    "typescript-import-load-activate-invoke-deactivate",
+    "ordinary-query-settings-kv",
+    "returned-kv-patch",
+    "returned-domain-effect",
+    "loopback-http-consume-once-delivery-id",
+    "resync-catch-up-cursor-commit",
+    "failed-event-no-cursor-or-effect",
+    "nested-service-call",
+    "cancel-before-dispatch",
+    "cancel-blocked-callback-store-replacement",
+    "guest-trap",
+    "wasm-timeout",
+    "output-bound",
+    "callback-resource-failure",
+    "wasm-resource-failure",
+    "one-four-sixteen-graph",
+    "fifth-and-same-plugin-admission",
+    "sibling-isolation",
+    "real-child-kill-eof-reap",
+    "post-fault-retry-fresh-store",
+    "all-children-reaped"
+  ],
+  "cleanup": "all-children-reaped",
+  "fixture_profiles": [
+    "rust",
+    "typescript"
+  ],
+  "harness": "phase7-slice2e",
+  "process_model": "one-on-demand-child-per-profile",
+  "scales": [
+    1,
+    4,
+    16
+  ],
+  "schema_version": 1,
+  "status": "passed",
+  "target_os": "macos",
+  "wasmtime": "36.0.13"
+}

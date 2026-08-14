@@ -1,0 +1,5 @@
+package junban:reference-import-typescript@0.1.0;
+
+world reference-import-typescript {
+  include junban:plugin/plugin@0.1.0;
+}

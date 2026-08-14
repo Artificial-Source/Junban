@@ -1,0 +1,14 @@
+* text=auto eol=lf
+
+*.wasm binary
+*.png binary
+*.jpg binary
+*.jpeg binary
+*.gif binary
+*.webp binary
+*.ico binary
+*.wav binary
+*.webm binary
+*.woff2 binary
+*.ttf binary
+*.junban-backup binary

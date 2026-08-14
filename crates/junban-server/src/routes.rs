@@ -3924,6 +3924,9 @@ pub async fn restore_backup(
         ));
     }
 
+    #[cfg(feature = "plugin-sdk")]
+    state.shutdown_plugin_runtime().await;
+
     if !state
         .quiesce_streams(deadline.saturating_duration_since(tokio::time::Instant::now()))
         .await

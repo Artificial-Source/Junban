@@ -3,6 +3,18 @@ import { createRoot, type Root } from "react-dom/client";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { CatalogResponse } from "../api/client";
 import type { AppRoute, NavigateTarget, View } from "../hooks/useRouting";
+
+vi.mock("../plugins/contributions", () => ({
+  PluginSidebarPanels: ({ collapsed = false }: { collapsed?: boolean }) =>
+    collapsed
+      ? null
+      : createElement(
+          "div",
+          { "data-testid": "plugin-sidebar-panels" },
+          "Plugin panel composition",
+        ),
+}));
+
 import { Sidebar } from "./Sidebar";
 
 (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
@@ -96,5 +108,20 @@ describe("Sidebar", () => {
     );
     expect(aiButton?.getAttribute("aria-current")).toBe("page");
     expect(aiButton?.className).toMatch(/bg-accent-action\/10/);
+  });
+
+  it("mounts plugin sidebar panels when expanded and omits them when collapsed", () => {
+    render({ collapsed: false });
+    expect(container.querySelector('[data-testid="plugin-sidebar-panels"]')).not.toBeNull();
+    expect(container.textContent).toContain("Plugin panel composition");
+
+    render({ collapsed: true });
+    expect(container.querySelector('[data-testid="plugin-sidebar-panels"]')).toBeNull();
+    expect(container.textContent).not.toContain("Plugin panel composition");
+  });
+
+  it("does not mount plugin sidebar panels in Phase 2 visual fixture chrome", () => {
+    render({ phase2VisualFixture: true, collapsed: false });
+    expect(container.querySelector('[data-testid="plugin-sidebar-panels"]')).toBeNull();
   });
 });

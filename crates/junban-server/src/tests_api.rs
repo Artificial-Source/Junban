@@ -2160,6 +2160,7 @@ async fn health_includes_instance_id_matching_state() {
     assert_eq!(body["instance_id"], context.state.instance_id());
 }
 
+#[cfg(feature = "plugin-sdk")]
 #[test]
 fn openapi_artifact_does_not_drift() {
     let path = Path::new(env!("CARGO_MANIFEST_DIR")).join("../../openapi/junban-v1.json");
@@ -5659,6 +5660,9 @@ async fn automation_scope_matrix_allows_and_denies_classified_routes() {
         (Method::POST, "/api/v1/reminders/lease"),
         (Method::POST, "/api/v1/reminders/claim"),
         (Method::POST, "/api/v1/backup/restore"),
+        (Method::GET, "/api/v1/plugins"),
+        (Method::GET, "/api/v1/plugins/registry"),
+        (Method::POST, "/api/v1/plugins/packages/inspect"),
     ] {
         let response = context
             .request(
@@ -9068,6 +9072,1010 @@ async fn cancelled_ai_memory_mutation_still_completes_owned_worker() {
         .await
         .unwrap();
     assert_eq!(listed.memories.len(), 1);
+}
+
+#[cfg(feature = "plugin-sdk")]
+async fn install_command_plugin(context: &TestContext) -> junban_app::InstalledPlugin {
+    use ed25519_dalek::SigningKey;
+    use junban_app::{
+        PluginInstallSource, PluginPackageAdmission, PluginPackageAuthority, StagedFile,
+        TrustPublisherRequest,
+    };
+    use junban_plugin_sdk::{
+        Capability, CommandDeclaration, HttpMethod, HttpOrigin, HttpScope, Permission,
+        PermissionScope, Publisher, RuntimeManifest, RuntimeProfile, UnscopedPermission,
+        WitAuthority, pack_package, signer_key_id,
+    };
+
+    let component = include_bytes!("../../junban-plugin-sdk/consumers/rust/rust-consumer.wasm");
+    let key = SigningKey::from_bytes(&[41; 32]);
+    let public_key = key.verifying_key().to_bytes();
+    let manifest = RuntimeManifest {
+        schema_version: 1,
+        id: "command-fence-plugin".to_owned(),
+        name: "Command fence plugin".to_owned(),
+        description: "Command contribution fence API fixture".to_owned(),
+        version: "1.0.0".to_owned(),
+        publisher: Publisher {
+            id: "command-fence-publisher".to_owned(),
+            name: "Command Fence Publisher".to_owned(),
+            key_id: signer_key_id(&public_key).to_string(),
+        },
+        license: "MIT".to_owned(),
+        junban_compatibility: "^0.1".to_owned(),
+        wit: WitAuthority {
+            package: "junban:plugin".to_owned(),
+            world: "plugin".to_owned(),
+            version: "0.1.0".to_owned(),
+        },
+        runtime_profile: RuntimeProfile::Rust,
+        component_sha256: junban_plugin_sdk::Sha256Digest::of(component).to_string(),
+        permissions: {
+            let unscoped = |capability| Permission {
+                capability,
+                scope: PermissionScope::Unscoped(UnscopedPermission {}),
+            };
+            vec![
+                unscoped(Capability::Commands),
+                Permission {
+                    capability: Capability::Http,
+                    scope: PermissionScope::Http(HttpScope {
+                        origins: vec![HttpOrigin("https://example.test".to_owned())],
+                        methods: vec![HttpMethod::Post],
+                    }),
+                },
+                unscoped(Capability::Logging),
+                unscoped(Capability::ProjectsRead),
+                unscoped(Capability::Settings),
+                unscoped(Capability::Storage),
+                unscoped(Capability::TagsRead),
+                unscoped(Capability::TasksRead),
+                unscoped(Capability::TasksWrite),
+            ]
+        },
+        dependencies: Vec::new(),
+        commands: vec![CommandDeclaration {
+            id: "run".to_owned(),
+            title: "Run".to_owned(),
+            description: "Run fixture".to_owned(),
+            icon: None,
+            inputs: Vec::new(),
+        }],
+        subscriptions: Vec::new(),
+        surfaces: Vec::new(),
+        settings: Vec::new(),
+        services: Vec::new(),
+    };
+    let bytes = pack_package(&manifest, component, &key).unwrap();
+    let package = PluginPackageAuthority::inspect(&bytes).unwrap();
+    context
+        .state
+        .service
+        .trust_publisher(
+            OperationId::new(),
+            TrustPublisherRequest::new(public_key),
+            Timestamp::now(),
+        )
+        .await
+        .unwrap();
+    context
+        .state
+        .service
+        .set_community_plugin_policy(OperationId::new(), true, Timestamp::now())
+        .await
+        .unwrap();
+    let staged_path = context.directory.join("command-fence-plugin.jbp");
+    fs::write(&staged_path, &bytes).unwrap();
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt as _;
+        fs::set_permissions(&staged_path, fs::Permissions::from_mode(0o600)).unwrap();
+    }
+    let staged = StagedFile::new(staged_path, u64::try_from(bytes.len()).unwrap());
+    let admission = PluginPackageAdmission::inspect(staged).unwrap();
+    context
+        .state
+        .service
+        .install_plugin_admission(
+            OperationId::new(),
+            admission,
+            PluginInstallSource::LocalPackage,
+            false,
+            false,
+            Timestamp::now(),
+        )
+        .await
+        .unwrap();
+    context
+        .state
+        .service
+        .get_installed_plugin(package.plugin_id().clone())
+        .await
+        .unwrap()
+}
+
+#[cfg(all(feature = "plugin-sdk", unix))]
+fn install_test_plugin_host_sibling() {
+    let current = env::current_exe().expect("server test executable");
+    let directory = current.parent().expect("server test executable directory");
+    let sibling = directory.join("junban-plugin-host");
+    if sibling.is_file() {
+        return;
+    }
+    let built_host = directory
+        .parent()
+        .expect("Cargo target profile directory")
+        .join("junban-plugin-host");
+    fs::hard_link(&built_host, &sibling).unwrap_or_else(|error| {
+        if error.kind() != std::io::ErrorKind::AlreadyExists {
+            panic!(
+                "hard-link the built junban-plugin-host beside the server test executable: {error}"
+            );
+        }
+    });
+}
+
+#[cfg(all(feature = "plugin-sdk", unix))]
+async fn install_enabled_pomodoro_plugin(context: &TestContext) -> u64 {
+    use junban_app::{
+        PluginInstallSource, PluginPackageAdmission, StagedFile, TrustPublisherRequest,
+    };
+
+    install_test_plugin_host_sibling();
+    let package = include_bytes!(
+        "../../../plugins/registry/sha256/829723f49e2ec911f93d40dfcc2664ee08f495f9e710d227434f07456e0d103b.jbp"
+    );
+    let public_key = *include_bytes!("../../../plugins/registry/publisher-public-key.bin");
+    context
+        .state
+        .service
+        .trust_publisher(
+            OperationId::new(),
+            TrustPublisherRequest::new(public_key),
+            Timestamp::now(),
+        )
+        .await
+        .unwrap();
+    context
+        .state
+        .service
+        .set_community_plugin_policy(OperationId::new(), true, Timestamp::now())
+        .await
+        .unwrap();
+    let staged_path = context.directory.join("pomodoro.jbp");
+    fs::write(&staged_path, package).unwrap();
+    use std::os::unix::fs::PermissionsExt as _;
+    fs::set_permissions(&staged_path, fs::Permissions::from_mode(0o600)).unwrap();
+    let staged = StagedFile::new(staged_path, u64::try_from(package.len()).unwrap());
+    let admission = PluginPackageAdmission::inspect(staged).unwrap();
+    context
+        .state
+        .service
+        .install_plugin_admission(
+            OperationId::new(),
+            admission,
+            PluginInstallSource::LocalPackage,
+            false,
+            false,
+            Timestamp::now(),
+        )
+        .await
+        .unwrap();
+
+    let (_, plugin) = get_json(context, "/api/v1/plugins/pomodoro").await;
+    let package_generation = plugin["package_generation"].as_u64().unwrap();
+    let grants = context
+        .request(
+            operation_header(authenticated(
+                Method::PUT,
+                "/api/v1/plugins/pomodoro/grants",
+            ))
+            .header(header::CONTENT_TYPE, "application/json")
+            .body(Body::from(
+                json!({
+                    "package_generation": package_generation,
+                    "permissions": plugin["requested_permissions"]
+                })
+                .to_string(),
+            ))
+            .unwrap(),
+        )
+        .await;
+    assert_eq!(grants.status(), StatusCode::OK);
+
+    let enabled = context
+        .request(
+            operation_header(authenticated(
+                Method::POST,
+                "/api/v1/plugins/pomodoro/enable",
+            ))
+            .body(Body::empty())
+            .unwrap(),
+        )
+        .await;
+    assert_eq!(enabled.status(), StatusCode::OK);
+    let (_, plugin) = get_json(context, "/api/v1/plugins/pomodoro").await;
+    assert_eq!(plugin["runtime_state"], "active");
+    package_generation
+}
+
+#[cfg(all(feature = "plugin-sdk", unix))]
+#[tokio::test]
+async fn plugin_setting_mutations_validate_effective_complete_pomodoro_settings() {
+    let context = TestContext::new();
+    let generation = install_enabled_pomodoro_plugin(&context).await;
+    let settings_path = "/api/v1/plugins/pomodoro/settings";
+    let (_, settings) = get_json(&context, settings_path).await;
+    assert_eq!(settings["settings"], json!([]));
+
+    let set = |operation_id: &str, key: &str, value: i64| {
+        operation_header_key(
+            authenticated(
+                Method::PUT,
+                &format!("/api/v1/plugins/pomodoro/settings/{key}"),
+            ),
+            operation_id,
+        )
+        .header(header::CONTENT_TYPE, "application/json")
+        .body(Body::from(
+            json!({"package_generation": generation, "value": value}).to_string(),
+        ))
+        .unwrap()
+    };
+
+    // A fresh plugin has no override rows. The real Pomodoro guest requires all four
+    // declarations, so this succeeds only when the other three manifest defaults are supplied.
+    let long_break_operation = Uuid::new_v4().to_string();
+    let first = context
+        .request(set(&long_break_operation, "long-break-minutes", 20))
+        .await;
+    assert_eq!(first.status(), StatusCode::OK);
+    let (_, settings) = get_json(&context, settings_path).await;
+    assert_eq!(
+        settings["settings"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .map(|setting| (
+                setting["key"].as_str().unwrap(),
+                setting["value"].as_i64().unwrap()
+            ))
+            .collect::<Vec<_>>(),
+        [("long-break-minutes", 20)]
+    );
+
+    // Break=18 is valid only with the prior long-break=20 override; its manifest default is 15.
+    // The other two declarations must still arrive with their defaults.
+    let break_operation = Uuid::new_v4().to_string();
+    let second = context
+        .request(set(&break_operation, "break-minutes", 18))
+        .await;
+    assert_eq!(second.status(), StatusCode::OK);
+    let second_bytes = response_bytes(second).await;
+    let (_, settings) = get_json(&context, settings_path).await;
+    assert_eq!(
+        settings["settings"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .map(|setting| (
+                setting["key"].as_str().unwrap(),
+                setting["value"].as_i64().unwrap()
+            ))
+            .collect::<Vec<_>>(),
+        [("break-minutes", 18), ("long-break-minutes", 20)]
+    );
+
+    // Deleting the break override restores its five-minute default for guest validation and
+    // removes only that override row.
+    let deleted = context
+        .request(
+            operation_header(authenticated(
+                Method::DELETE,
+                &format!(
+                    "/api/v1/plugins/pomodoro/settings/break-minutes?package_generation={generation}"
+                ),
+            ))
+            .body(Body::empty())
+            .unwrap(),
+        )
+        .await;
+    assert_eq!(deleted.status(), StatusCode::OK);
+    let (_, settings) = get_json(&context, settings_path).await;
+    assert_eq!(settings["settings"].as_array().unwrap().len(), 1);
+    assert_eq!(settings["settings"][0]["key"], "long-break-minutes");
+    assert_eq!(settings["settings"][0]["value"], 20);
+
+    // Pomodoro rejects a regular break longer than the persisted long break.
+    let rejected = context
+        .request(set(&Uuid::new_v4().to_string(), "break-minutes", 21))
+        .await;
+    assert_eq!(rejected.status(), StatusCode::UNPROCESSABLE_ENTITY);
+    assert_eq!(
+        json(rejected).await["error"]["code"],
+        "plugin_settings_rejected"
+    );
+    let (_, settings) = get_json(&context, settings_path).await;
+    assert_eq!(settings["settings"].as_array().unwrap().len(), 1);
+    assert_eq!(settings["settings"][0]["key"], "long-break-minutes");
+    assert_eq!(settings["settings"][0]["value"], 20);
+
+    // Make the current state reject break=18, then replay its earlier successful operation.
+    // Success with byte-identical output proves replay bypasses the transient guest and leaves
+    // the newer override untouched.
+    assert_eq!(
+        context
+            .request(set(&Uuid::new_v4().to_string(), "long-break-minutes", 10,))
+            .await
+            .status(),
+        StatusCode::OK
+    );
+    let revision = context
+        .state
+        .service
+        .get_sync_state()
+        .await
+        .unwrap()
+        .revision;
+    let replay = context
+        .request(set(&break_operation, "break-minutes", 18))
+        .await;
+    assert_eq!(replay.status(), StatusCode::OK);
+    assert_eq!(response_bytes(replay).await, second_bytes);
+    assert_eq!(
+        context
+            .state
+            .service
+            .get_sync_state()
+            .await
+            .unwrap()
+            .revision,
+        revision
+    );
+    let (_, settings) = get_json(&context, settings_path).await;
+    assert_eq!(
+        settings["settings"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .map(|setting| (
+                setting["key"].as_str().unwrap(),
+                setting["value"].as_i64().unwrap()
+            ))
+            .collect::<Vec<_>>(),
+        [("long-break-minutes", 10)]
+    );
+
+    let disabled = context
+        .request(
+            operation_header(authenticated(
+                Method::POST,
+                "/api/v1/plugins/pomodoro/disable",
+            ))
+            .body(Body::empty())
+            .unwrap(),
+        )
+        .await;
+    assert_eq!(disabled.status(), StatusCode::OK);
+}
+
+#[cfg(feature = "plugin-sdk")]
+#[tokio::test]
+async fn plugin_command_api_rejects_stale_contribution_fences_before_dispatch() {
+    let context = TestContext::new();
+    let plugin = install_command_plugin(&context).await;
+    let invoke = |operation_id: &str,
+                  package_generation: u64,
+                  activation_epoch: u64,
+                  host_session_id: &str| {
+        operation_header_key(
+            authenticated(
+                Method::POST,
+                "/api/v1/plugins/command-fence-plugin/commands/run",
+            ),
+            operation_id,
+        )
+        .header(header::CONTENT_TYPE, "application/json")
+        .body(Body::from(
+            json!({
+                "package_generation": package_generation,
+                "activation_epoch": activation_epoch,
+                "host_session_id": host_session_id,
+                "values": []
+            })
+            .to_string(),
+        ))
+        .unwrap()
+    };
+    let operation_id = Uuid::new_v4().to_string();
+
+    for request in [
+        invoke(
+            &operation_id,
+            plugin.package_generation + 1,
+            plugin.activation_epoch,
+            &OperationId::new().to_string(),
+        ),
+        invoke(
+            &Uuid::new_v4().to_string(),
+            plugin.package_generation,
+            plugin.activation_epoch + 1,
+            &OperationId::new().to_string(),
+        ),
+        invoke(
+            &Uuid::new_v4().to_string(),
+            plugin.package_generation,
+            plugin.activation_epoch,
+            "stale-session",
+        ),
+    ] {
+        let response = context.request(request).await;
+        assert_eq!(response.status(), StatusCode::CONFLICT);
+        assert_eq!(
+            json(response).await["error"]["code"],
+            "stale_plugin_authority"
+        );
+    }
+}
+
+#[cfg(feature = "plugin-sdk")]
+#[tokio::test]
+async fn dormant_plugin_startup_owns_no_event_worker_and_shutdown_remains_empty() {
+    let context = TestContext::new();
+
+    context.state.start_plugin_runtime().await.unwrap();
+    assert!(!context.state.plugin_event_worker_is_running());
+    assert_eq!(context.state.plugin_event_worker_starts(), 0);
+
+    context.state.shutdown_plugin_runtime().await;
+    assert!(!context.state.plugin_event_worker_is_running());
+}
+
+#[cfg(all(feature = "plugin-sdk", unix))]
+#[tokio::test]
+async fn first_enable_route_lazily_starts_one_durable_event_worker() {
+    let context = TestContext::new();
+    context.state.start_plugin_runtime().await.unwrap();
+    assert!(!context.state.plugin_event_worker_is_running());
+
+    let generation = install_enabled_pomodoro_plugin(&context).await;
+    assert!(generation > 0);
+    assert!(context.state.plugin_event_worker_is_running());
+    assert_eq!(context.state.plugin_event_worker_starts(), 1);
+    assert_eq!(
+        context
+            .state
+            .plugin_runtime
+            .snapshot()
+            .await
+            .unwrap()
+            .lifecycle,
+        crate::plugin_runtime::PluginRuntimeLifecycle::Running
+    );
+
+    let starts = context.state.plugin_event_worker_starts();
+    let (first, second) = tokio::join!(
+        context.state.start_plugin_runtime(),
+        context.state.start_plugin_runtime(),
+    );
+    first.unwrap();
+    second.unwrap();
+    assert_eq!(context.state.plugin_event_worker_starts(), starts);
+
+    let reconciliations = context.state.plugin_event_reconciliations();
+    let task = context
+        .request(
+            operation_header(authenticated(Method::POST, "/api/v1/tasks"))
+                .header(header::CONTENT_TYPE, "application/json")
+                .body(Body::from(
+                    json!({"title": "Wake active plugin"}).to_string(),
+                ))
+                .unwrap(),
+        )
+        .await;
+    assert_eq!(task.status(), StatusCode::CREATED);
+    tokio::time::timeout(
+        Duration::from_secs(2),
+        context
+            .state
+            .wait_for_plugin_event_reconciliation(reconciliations),
+    )
+    .await
+    .expect("active event worker reconciles an ordinary task event");
+    assert_eq!(context.state.plugin_event_worker_starts(), starts);
+
+    let disabled = context
+        .request(
+            operation_header(authenticated(
+                Method::POST,
+                "/api/v1/plugins/pomodoro/disable",
+            ))
+            .body(Body::empty())
+            .unwrap(),
+        )
+        .await;
+    assert_eq!(disabled.status(), StatusCode::OK);
+    assert!(context.state.plugin_event_worker_is_running());
+    assert_eq!(context.state.plugin_event_worker_starts(), starts);
+
+    context.state.shutdown_plugin_runtime().await;
+    assert!(!context.state.plugin_event_worker_is_running());
+    assert_eq!(context.state.plugin_event_worker_starts(), starts);
+}
+
+#[cfg(feature = "plugin-sdk")]
+#[tokio::test]
+async fn plugin_operator_routes_are_authenticated_and_registry_is_signed() {
+    let context = TestContext::new();
+
+    let unauthenticated = context
+        .request(
+            request(Method::GET, "/api/v1/plugins")
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await;
+    assert_eq!(unauthenticated.status(), StatusCode::UNAUTHORIZED);
+
+    let (_, automation_token, _) =
+        create_automation_via_api(&context, &["read", "write", "data"]).await;
+    let automation = context
+        .request(
+            bearer(Method::GET, "/api/v1/plugins", &automation_token)
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await;
+    assert_eq!(automation.status(), StatusCode::FORBIDDEN);
+    assert_eq!(json(automation).await["error"]["code"], "operator_required");
+
+    let plugins = context
+        .request(
+            authenticated(Method::GET, "/api/v1/plugins")
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await;
+    assert_eq!(plugins.status(), StatusCode::OK);
+    let plugins: Value = serde_json::from_slice(&response_bytes(plugins).await).unwrap();
+    assert_eq!(plugins["plugins"], json!([]));
+    assert_eq!(
+        context
+            .state
+            .plugin_runtime
+            .snapshot()
+            .await
+            .unwrap()
+            .graph_size,
+        0
+    );
+
+    let registry = context
+        .request(
+            authenticated(Method::GET, "/api/v1/plugins/registry")
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await;
+    assert_eq!(registry.status(), StatusCode::OK);
+    let registry: Value = serde_json::from_slice(&response_bytes(registry).await).unwrap();
+    assert_eq!(
+        registry["index_sha256"],
+        "41d2218b830bf5d547049053d40a925a3431a7e5d364acc31754ea02f9fd413c"
+    );
+    let entries = registry["entries"].as_array().unwrap();
+    assert_eq!(entries.len(), 3);
+    assert_eq!(
+        entries
+            .iter()
+            .map(|entry| entry["plugin_id"].as_str().unwrap())
+            .collect::<Vec<_>>(),
+        ["automation", "import-typescript", "pomodoro"]
+    );
+    assert_eq!(
+        entries
+            .iter()
+            .map(|entry| entry["version"].as_str().unwrap())
+            .collect::<Vec<_>>(),
+        ["0.1.0", "0.1.0", "0.1.0"]
+    );
+    assert_eq!(
+        entries
+            .iter()
+            .map(|entry| entry["runtime_profile"].as_str().unwrap())
+            .collect::<Vec<_>>(),
+        ["rust", "typescript", "rust"]
+    );
+    assert_eq!(
+        entries
+            .iter()
+            .map(|entry| entry["package_sha256"].as_str().unwrap())
+            .collect::<Vec<_>>(),
+        [
+            "14457dc76c42c23178ec56fa5e4fcb9fa27dd1996a795db70cf64adf07e48ee1",
+            "69daf8a5346a7d9e213f8d4e49aaa11f12014ebfa1252082750e1597d1805085",
+            "829723f49e2ec911f93d40dfcc2664ee08f495f9e710d227434f07456e0d103b",
+        ]
+    );
+    assert!(entries.iter().all(|entry| {
+        entry["publisher_key_id"]
+            == "35ab9815a29650c2985186daa06eef9362ff0312b89df0b080517ddcf18b8595"
+    }));
+    assert_eq!(
+        entries
+            .iter()
+            .map(|entry| entry["requested_capabilities"].clone())
+            .collect::<Vec<_>>(),
+        [
+            json!(["events:subscribe", "tasks:write"]),
+            json!(["commands", "tasks:write"]),
+            json!(["commands", "settings", "storage", "ui:status", "ui:view"]),
+        ]
+    );
+    assert_eq!(
+        context
+            .state
+            .plugin_runtime
+            .snapshot()
+            .await
+            .unwrap()
+            .graph_size,
+        0
+    );
+
+    let malformed = context
+        .request(
+            operation_header(authenticated(
+                Method::PUT,
+                "/api/v1/plugins/community-policy",
+            ))
+            .header(header::CONTENT_TYPE, "application/json")
+            .body(Body::from("{"))
+            .unwrap(),
+        )
+        .await;
+    assert_eq!(malformed.status(), StatusCode::BAD_REQUEST);
+    let malformed = json(malformed).await;
+    assert_eq!(malformed["error"]["code"], "invalid_json");
+    assert!(malformed["request_id"].as_str().is_some());
+
+    let wrong_type = context
+        .request(
+            authenticated(Method::POST, "/api/v1/plugins/packages/inspect")
+                .header(header::CONTENT_TYPE, "application/json")
+                .body(Body::from("x"))
+                .unwrap(),
+        )
+        .await;
+    assert_eq!(wrong_type.status(), StatusCode::UNSUPPORTED_MEDIA_TYPE);
+    assert_eq!(
+        json(wrong_type).await["error"]["code"],
+        "unsupported_media_type"
+    );
+}
+
+#[cfg(feature = "plugin-sdk")]
+#[tokio::test]
+async fn bundled_registry_install_uses_private_staging_and_uninstall_removes_package() {
+    let context = TestContext::new();
+    let digest = "14457dc76c42c23178ec56fa5e4fcb9fa27dd1996a795db70cf64adf07e48ee1";
+    let install = context
+        .request(
+            operation_header(authenticated(
+                Method::POST,
+                "/api/v1/plugins/registry/automation/install",
+            ))
+            .header(header::CONTENT_TYPE, "application/json")
+            .body(Body::from(
+                json!({
+                    "version": "0.1.0",
+                    "expected_package_sha256": digest,
+                    "replace_existing": false,
+                })
+                .to_string(),
+            ))
+            .unwrap(),
+        )
+        .await;
+    let install_status = install.status();
+    let install_body = json(install).await;
+    assert_eq!(install_status, StatusCode::OK, "{install_body}");
+
+    let profile = context.directory.join("profile");
+    let package = profile
+        .join("plugins/packages/sha256")
+        .join(format!("{digest}.jbp"));
+    assert!(package.is_file());
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt as _;
+        assert_eq!(
+            fs::metadata(profile.join("plugins"))
+                .unwrap()
+                .permissions()
+                .mode()
+                & 0o777,
+            0o700
+        );
+        assert_eq!(
+            fs::metadata(profile.join("plugins/staging"))
+                .unwrap()
+                .permissions()
+                .mode()
+                & 0o777,
+            0o700
+        );
+        assert_eq!(
+            fs::metadata(&package).unwrap().permissions().mode() & 0o777,
+            0o600
+        );
+    }
+
+    let uninstall = context
+        .request(
+            operation_header(authenticated(Method::DELETE, "/api/v1/plugins/automation"))
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await;
+    assert_eq!(uninstall.status(), StatusCode::OK);
+    assert!(!package.exists());
+}
+
+#[cfg(feature = "plugin-sdk")]
+#[tokio::test]
+async fn plugin_mutation_replay_is_byte_stable_after_state_changes_and_rejects_changed_body() {
+    let context = TestContext::new();
+    let operation_id = Uuid::new_v4().to_string();
+    let mutate = |key: &str, enabled: bool| {
+        operation_header_key(
+            authenticated(Method::PUT, "/api/v1/plugins/community-policy"),
+            key,
+        )
+        .header(header::CONTENT_TYPE, "application/json")
+        .body(Body::from(json!({ "enabled": enabled }).to_string()))
+        .unwrap()
+    };
+
+    let original = context.request(mutate(&operation_id, true)).await;
+    assert_eq!(original.status(), StatusCode::OK);
+    let original = response_bytes(original).await;
+
+    let changed = context
+        .request(mutate(&Uuid::new_v4().to_string(), false))
+        .await;
+    assert_eq!(changed.status(), StatusCode::OK);
+
+    let replay = context.request(mutate(&operation_id, true)).await;
+    assert_eq!(replay.status(), StatusCode::OK);
+    assert_eq!(response_bytes(replay).await, original);
+
+    let mismatch = context.request(mutate(&operation_id, false)).await;
+    assert_eq!(mismatch.status(), StatusCode::CONFLICT);
+    assert_eq!(
+        json(mismatch).await["error"]["code"],
+        "idempotency_mismatch"
+    );
+}
+
+#[cfg(feature = "plugin-sdk")]
+#[test]
+fn plugin_mutations_declare_required_idempotency_headers() {
+    let doc: Value = serde_json::from_str(&openapi_json()).unwrap();
+    let mutation_ids = [
+        "install_plugin_registry_entry",
+        "install_plugin_package",
+        "enable_plugin",
+        "disable_plugin",
+        "retry_plugin",
+        "uninstall_plugin",
+        "trust_plugin_publisher",
+        "revoke_plugin_publisher",
+        "set_plugin_community_policy",
+        "replace_plugin_grants",
+        "revoke_plugin_grants",
+        "set_plugin_setting",
+        "delete_plugin_setting",
+        "invoke_plugin_command",
+        "invoke_plugin_surface_action",
+    ];
+    for mutation_id in mutation_ids {
+        let operation = doc["paths"]
+            .as_object()
+            .unwrap()
+            .values()
+            .flat_map(|item| item.as_object().unwrap().values())
+            .find(|operation| operation["operationId"] == mutation_id)
+            .unwrap_or_else(|| panic!("missing plugin operation {mutation_id}"));
+        let declared = operation["parameters"]
+            .as_array()
+            .is_some_and(|parameters| {
+                parameters.iter().any(|parameter| {
+                    parameter["name"] == "Idempotency-Key"
+                        && parameter["in"] == "header"
+                        && parameter["required"] == true
+                        && parameter["schema"]["format"] == "uuid"
+                })
+            });
+        assert!(declared, "{mutation_id} lacks required Idempotency-Key");
+    }
+}
+
+#[cfg(feature = "plugin-sdk")]
+#[test]
+fn every_plugin_operation_documents_operator_forbidden_response() {
+    let doc: Value = serde_json::from_str(&openapi_json()).unwrap();
+    for (path, item) in doc["paths"].as_object().unwrap() {
+        if !path.starts_with("/api/v1/plugins") {
+            continue;
+        }
+        for method in ["get", "post", "put", "patch", "delete"] {
+            let Some(operation) = item.get(method) else {
+                continue;
+            };
+            assert_eq!(
+                operation["responses"]["403"]["content"]["application/json"]["schema"]["$ref"],
+                "#/components/schemas/ErrorEnvelope",
+                "{method} {path} does not document operator-only 403"
+            );
+        }
+    }
+}
+
+#[cfg(feature = "plugin-sdk")]
+#[test]
+fn plugin_public_input_schemas_are_concrete_and_discriminated() {
+    let doc: Value = serde_json::from_str(&openapi_json()).unwrap();
+    let schemas = doc["components"]["schemas"].as_object().unwrap();
+    assert_eq!(
+        schemas["ReplacePluginGrantsBody"]["properties"]["permissions"]["items"]["$ref"],
+        "#/components/schemas/PluginPermissionDto"
+    );
+    assert_eq!(
+        schemas["PluginCapabilityDto"]["enum"],
+        json!([
+            "tasks:read",
+            "tasks:write",
+            "projects:read",
+            "projects:write",
+            "tags:read",
+            "tags:write",
+            "events:subscribe",
+            "settings",
+            "storage",
+            "commands",
+            "ui:view",
+            "ui:panel",
+            "ui:status",
+            "services:provide",
+            "services:consume",
+            "http",
+            "logging"
+        ])
+    );
+    assert_eq!(
+        schemas["PluginPermissionDto"]["properties"]["scope"]["$ref"],
+        "#/components/schemas/PluginPermissionScopeDto"
+    );
+    assert_eq!(
+        schemas["SetPluginSettingBody"]["properties"]["value"]["$ref"],
+        "#/components/schemas/PluginSettingValueDto"
+    );
+    assert_eq!(
+        schemas["InvokePluginCommandBody"]["properties"]["values"]["items"]["$ref"],
+        "#/components/schemas/PluginNamedValueDto"
+    );
+    assert_eq!(
+        schemas["InvokePluginCommandBody"]["required"],
+        json!([
+            "package_generation",
+            "activation_epoch",
+            "host_session_id",
+            "values"
+        ])
+    );
+    assert_eq!(
+        schemas["InvokePluginCommandBody"]["properties"]["package_generation"]["type"],
+        "integer"
+    );
+    assert_eq!(
+        schemas["InvokePluginCommandBody"]["properties"]["activation_epoch"]["type"],
+        "integer"
+    );
+    assert_eq!(
+        schemas["InvokePluginCommandBody"]["properties"]["host_session_id"]["type"],
+        "string"
+    );
+    assert_eq!(
+        schemas["InvokePluginActionBody"]["properties"]["values"]["items"]["$ref"],
+        "#/components/schemas/PluginScalarNamedValueDto"
+    );
+    assert!(schemas["PluginDataValueDto"]["oneOf"].is_array());
+    assert!(schemas["PluginScalarValueDto"]["oneOf"].is_array());
+    assert_eq!(
+        schemas["PluginMutationResponse"]["properties"]
+            .as_object()
+            .unwrap()
+            .keys()
+            .collect::<Vec<_>>(),
+        vec!["event"]
+    );
+}
+
+#[cfg(feature = "plugin-sdk")]
+#[test]
+fn installed_plugin_settings_openapi_is_concrete_and_discriminated() {
+    let doc: Value = serde_json::from_str(&openapi_json()).unwrap();
+    let schemas = &doc["components"]["schemas"];
+    assert_eq!(
+        schemas["InstalledPluginDto"]["properties"]["settings"]["items"]["$ref"],
+        "#/components/schemas/PluginSettingDeclarationDto"
+    );
+    assert_eq!(
+        schemas["PluginSettingDeclarationDto"]["properties"]["schema"]["$ref"],
+        "#/components/schemas/PluginSettingSchemaDto"
+    );
+    assert_eq!(
+        schemas["PluginSettingSchemaDto"]["discriminator"],
+        json!({
+            "propertyName": "type",
+            "mapping": {
+                "text": "#/components/schemas/PluginTextSettingSchemaDto",
+                "integer": "#/components/schemas/PluginIntegerSettingSchemaDto",
+                "boolean": "#/components/schemas/PluginBooleanSettingSchemaDto",
+                "select": "#/components/schemas/PluginSelectSettingSchemaDto"
+            }
+        })
+    );
+    assert_eq!(
+        schemas["PluginSettingSchemaDto"]["oneOf"],
+        json!([
+            { "$ref": "#/components/schemas/PluginTextSettingSchemaDto" },
+            { "$ref": "#/components/schemas/PluginIntegerSettingSchemaDto" },
+            { "$ref": "#/components/schemas/PluginBooleanSettingSchemaDto" },
+            { "$ref": "#/components/schemas/PluginSelectSettingSchemaDto" }
+        ])
+    );
+    for (schema, tag_schema, tag) in [
+        (
+            "PluginTextSettingSchemaDto",
+            "PluginTextSettingSchemaTypeDto",
+            "text",
+        ),
+        (
+            "PluginIntegerSettingSchemaDto",
+            "PluginIntegerSettingSchemaTypeDto",
+            "integer",
+        ),
+        (
+            "PluginBooleanSettingSchemaDto",
+            "PluginBooleanSettingSchemaTypeDto",
+            "boolean",
+        ),
+        (
+            "PluginSelectSettingSchemaDto",
+            "PluginSelectSettingSchemaTypeDto",
+            "select",
+        ),
+    ] {
+        assert_eq!(
+            schemas[schema]["properties"]["type"]["$ref"],
+            format!("#/components/schemas/{tag_schema}")
+        );
+        assert_eq!(schemas[tag_schema]["enum"], json!([tag]));
+    }
+    assert_eq!(
+        schemas["PluginSelectSettingSchemaDto"]["properties"]["options"]["items"]["$ref"],
+        "#/components/schemas/PluginSettingOptionDto"
+    );
+    assert!(
+        !schemas["PluginTextSettingSchemaDto"]["required"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .any(|field| field == "default"),
+        "secret text declarations must be representable without exposing a default"
+    );
 }
 
 #[test]

@@ -756,6 +756,326 @@ export interface paths {
     patch?: never;
     trace?: never;
   };
+  "/api/v1/plugins": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    get: operations["list_plugins"];
+    put?: never;
+    post?: never;
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
+  "/api/v1/plugins/community-policy": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    get: operations["get_plugin_community_policy"];
+    put: operations["set_plugin_community_policy"];
+    post?: never;
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
+  "/api/v1/plugins/contributions": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    get: operations["list_plugin_contributions"];
+    put?: never;
+    post?: never;
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
+  "/api/v1/plugins/packages/inspect": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    get?: never;
+    put?: never;
+    post: operations["inspect_plugin_package"];
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
+  "/api/v1/plugins/packages/install": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    get?: never;
+    put?: never;
+    post: operations["install_plugin_package"];
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
+  "/api/v1/plugins/publishers": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    get: operations["list_plugin_publishers"];
+    put?: never;
+    post?: never;
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
+  "/api/v1/plugins/publishers/{key_id}": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    get?: never;
+    put: operations["trust_plugin_publisher"];
+    post?: never;
+    delete: operations["revoke_plugin_publisher"];
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
+  "/api/v1/plugins/registry": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    get: operations["list_plugin_registry"];
+    put?: never;
+    post?: never;
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
+  "/api/v1/plugins/registry/{plugin_id}": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    get: operations["get_plugin_registry_entry"];
+    put?: never;
+    post?: never;
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
+  "/api/v1/plugins/registry/{plugin_id}/install": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    get?: never;
+    put?: never;
+    post: operations["install_plugin_registry_entry"];
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
+  "/api/v1/plugins/{plugin_id}": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    get: operations["get_plugin"];
+    put?: never;
+    post?: never;
+    delete: operations["uninstall_plugin"];
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
+  "/api/v1/plugins/{plugin_id}/commands/{command_id}": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    get?: never;
+    put?: never;
+    post: operations["invoke_plugin_command"];
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
+  "/api/v1/plugins/{plugin_id}/disable": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    get?: never;
+    put?: never;
+    post: operations["disable_plugin"];
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
+  "/api/v1/plugins/{plugin_id}/enable": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    get?: never;
+    put?: never;
+    post: operations["enable_plugin"];
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
+  "/api/v1/plugins/{plugin_id}/grants": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    get: operations["list_plugin_grants"];
+    put: operations["replace_plugin_grants"];
+    post?: never;
+    delete: operations["revoke_plugin_grants"];
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
+  "/api/v1/plugins/{plugin_id}/retry": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    get?: never;
+    put?: never;
+    post: operations["retry_plugin"];
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
+  "/api/v1/plugins/{plugin_id}/settings": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    get: operations["list_plugin_settings"];
+    put?: never;
+    post?: never;
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
+  "/api/v1/plugins/{plugin_id}/settings/{key}": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    get?: never;
+    put: operations["set_plugin_setting"];
+    post?: never;
+    delete: operations["delete_plugin_setting"];
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
+  "/api/v1/plugins/{plugin_id}/surfaces/{surface_id}/actions/{action_id}": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    get?: never;
+    put?: never;
+    post: operations["invoke_plugin_surface_action"];
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
+  "/api/v1/plugins/{plugin_id}/surfaces/{surface_id}/render": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    get?: never;
+    put?: never;
+    post: operations["render_plugin_surface"];
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
   "/api/v1/profile": {
     parameters: {
       query?: never;
@@ -2089,6 +2409,13 @@ export interface components {
       revision: number;
       snapshot?: null | components["schemas"]["ResourceSnapshotDto"];
     };
+    CommunityPolicyBody: {
+      enabled: boolean;
+    };
+    CommunityPolicyResponse: {
+      enabled: boolean;
+      updated_at: string;
+    };
     /** @enum {string} */
     CompletionTimeBucketDto: "morning" | "afternoon" | "evening" | "night";
     CompletionTimeBucketsDto: {
@@ -2100,6 +2427,13 @@ export interface components {
       morning: number;
       /** Format: int32 */
       night: number;
+    };
+    ContributionFenceBody: {
+      /** Format: int64 */
+      activation_epoch: number;
+      host_session_id: string;
+      /** Format: int64 */
+      package_generation: number;
     };
     CreateAiMemoryHttpRequest: {
       content: string;
@@ -2394,6 +2728,47 @@ export interface components {
       content: string;
       format: components["schemas"]["TransferFormatDto"];
     };
+    InstalledPluginDto: {
+      /** Format: int64 */
+      activation_epoch: number;
+      dependencies: string[];
+      dependencies_satisfied: boolean;
+      description: string;
+      desired_enabled: boolean;
+      /** Format: int32 */
+      failure_count: number;
+      granted_permissions: components["schemas"]["PluginPermissionDto"][];
+      installed_at: string;
+      last_error_code?: string | null;
+      name: string;
+      next_retry_at?: string | null;
+      /** Format: int64 */
+      package_generation: number;
+      package_sha256: string;
+      plugin_id: string;
+      publisher_key_id: string;
+      requested_permissions: components["schemas"]["PluginPermissionDto"][];
+      runtime_state: string;
+      settings: components["schemas"]["PluginSettingDeclarationDto"][];
+      updated_at: string;
+      version: string;
+    };
+    InvokePluginActionBody: {
+      /** Format: int64 */
+      activation_epoch: number;
+      host_session_id: string;
+      /** Format: int64 */
+      package_generation: number;
+      values: components["schemas"]["PluginScalarNamedValueDto"][];
+    };
+    InvokePluginCommandBody: {
+      /** Format: int64 */
+      activation_epoch: number;
+      host_session_id: string;
+      /** Format: int64 */
+      package_generation: number;
+      values: components["schemas"]["PluginNamedValueDto"][];
+    };
     KeyboardShortcutDto: {
       action: string;
       chord: string;
@@ -2646,6 +3021,327 @@ export interface components {
       nudge_rules: components["schemas"]["NudgeRuleSettingsDto"][];
       work_hours?: null | components["schemas"]["WorkHoursDto"];
     };
+    PluginBooleanSettingSchemaDto: {
+      default: boolean;
+      /**
+       * @description discriminator enum property added by openapi-typescript
+       * @enum {string}
+       */
+      type: "boolean";
+    };
+    /** @enum {string} */
+    PluginBooleanSettingSchemaTypeDto: "boolean";
+    /** @enum {string} */
+    PluginCapabilityDto:
+      | "tasks:read"
+      | "tasks:write"
+      | "projects:read"
+      | "projects:write"
+      | "tags:read"
+      | "tags:write"
+      | "events:subscribe"
+      | "settings"
+      | "storage"
+      | "commands"
+      | "ui:view"
+      | "ui:panel"
+      | "ui:status"
+      | "services:provide"
+      | "services:consume"
+      | "http"
+      | "logging";
+    PluginContributionDto: {
+      actions: string[];
+      /** Format: int64 */
+      activation_epoch: number;
+      contribution_id: string;
+      description?: string | null;
+      host_session_id: string;
+      kind: string;
+      local_id: string;
+      location?: string | null;
+      /** Format: int64 */
+      package_generation: number;
+      plugin_id: string;
+      title: string;
+    };
+    PluginContributionListResponse: {
+      contributions: components["schemas"]["PluginContributionDto"][];
+    };
+    PluginDataValueDto:
+      | {
+          /** @enum {string} */
+          tag: "scalar";
+          val: components["schemas"]["PluginScalarValueDto"];
+        }
+      | {
+          /** @enum {string} */
+          tag: "string-list";
+          val: string[];
+        }
+      | {
+          /** @enum {string} */
+          tag: "integer-list";
+          val: number[];
+        }
+      | {
+          /** @enum {string} */
+          tag: "boolean-list";
+          val: boolean[];
+        }
+      | {
+          /** @enum {string} */
+          tag: "date-list";
+          val: string[];
+        }
+      | {
+          /** @enum {string} */
+          tag: "timestamp-list";
+          val: string[];
+        }
+      | {
+          /** @enum {string} */
+          tag: "task-id-list";
+          val: string[];
+        }
+      | {
+          /** @enum {string} */
+          tag: "project-id-list";
+          val: string[];
+        }
+      | {
+          /** @enum {string} */
+          tag: "tag-id-list";
+          val: string[];
+        }
+      | {
+          /** @enum {string} */
+          tag: "plugin-id-list";
+          val: string[];
+        }
+      | {
+          /** @enum {string} */
+          tag: "option-id-list";
+          val: string[];
+        };
+    /** @enum {string} */
+    PluginEventKindDto:
+      | "task-created"
+      | "task-updated"
+      | "task-completed"
+      | "task-uncompleted"
+      | "task-cancelled"
+      | "task-reopened"
+      | "task-deleted"
+      | "project-created"
+      | "project-updated"
+      | "project-deleted"
+      | "tag-created"
+      | "tag-updated"
+      | "tag-deleted"
+      | "section-created"
+      | "section-updated"
+      | "section-deleted";
+    PluginEventScopeDto: {
+      event_kinds: components["schemas"]["PluginEventKindDto"][];
+    };
+    PluginGrantDto: {
+      granted_at: string;
+      /** Format: int64 */
+      package_generation: number;
+      permission: components["schemas"]["PluginPermissionDto"];
+      permission_hash: string;
+    };
+    PluginGrantListResponse: {
+      grants: components["schemas"]["PluginGrantDto"][];
+    };
+    /** @enum {string} */
+    PluginHttpMethodDto: "DELETE" | "GET" | "PATCH" | "POST" | "PUT";
+    PluginHttpScopeDto: {
+      methods: components["schemas"]["PluginHttpMethodDto"][];
+      origins: string[];
+    };
+    PluginIntegerSettingSchemaDto: {
+      /** Format: int64 */
+      default: number;
+      /** Format: int64 */
+      max: number;
+      /** Format: int64 */
+      min: number;
+      /** Format: int64 */
+      step: number;
+      /**
+       * @description discriminator enum property added by openapi-typescript
+       * @enum {string}
+       */
+      type: "integer";
+    };
+    /** @enum {string} */
+    PluginIntegerSettingSchemaTypeDto: "integer";
+    PluginInvocationResponse: {
+      rejection?: string | null;
+      /** Format: int64 */
+      revision?: number | null;
+      status: string;
+      terminal_kind?: string | null;
+    };
+    PluginListResponse: {
+      plugins: components["schemas"]["InstalledPluginDto"][];
+    };
+    PluginMutationResponse: {
+      event: components["schemas"]["CommittedEventDto"];
+    };
+    PluginNamedValueDto: {
+      name: string;
+      value: components["schemas"]["PluginDataValueDto"];
+    };
+    PluginPackagePreviewResponse: {
+      commands: unknown;
+      component_sha256: string;
+      /** Format: int64 */
+      component_size: number;
+      dependencies: unknown;
+      description: string;
+      junban_compatibility: string;
+      name: string;
+      package_sha256: string;
+      /** Format: int64 */
+      package_size: number;
+      permission_hash: string;
+      permissions: components["schemas"]["PluginPermissionDto"][];
+      plugin_id: string;
+      publisher_key_id: string;
+      publisher_public_key_base64: string;
+      publisher_trust: string;
+      runtime_profile: string;
+      services: unknown;
+      settings: unknown;
+      surfaces: unknown;
+      version: string;
+    };
+    PluginPermissionDto: {
+      capability: components["schemas"]["PluginCapabilityDto"];
+      scope: components["schemas"]["PluginPermissionScopeDto"];
+    };
+    PluginPermissionScopeDto:
+      | components["schemas"]["PluginUnscopedPermissionDto"]
+      | components["schemas"]["PluginEventScopeDto"]
+      | components["schemas"]["PluginServiceScopeDto"]
+      | components["schemas"]["PluginHttpScopeDto"];
+    PluginScalarNamedValueDto: {
+      name: string;
+      value: components["schemas"]["PluginScalarValueDto"];
+    };
+    PluginScalarValueDto:
+      | {
+          /** @enum {string} */
+          tag: "string-value";
+          val: string;
+        }
+      | {
+          /** @enum {string} */
+          tag: "integer-value";
+          /** Format: int64 */
+          val: number;
+        }
+      | {
+          /** @enum {string} */
+          tag: "boolean-value";
+          val: boolean;
+        }
+      | {
+          /** @enum {string} */
+          tag: "date-value";
+          val: string;
+        }
+      | {
+          /** @enum {string} */
+          tag: "timestamp-value";
+          val: string;
+        }
+      | {
+          /** @enum {string} */
+          tag: "task-id";
+          val: string;
+        }
+      | {
+          /** @enum {string} */
+          tag: "project-id";
+          val: string;
+        }
+      | {
+          /** @enum {string} */
+          tag: "tag-id";
+          val: string;
+        }
+      | {
+          /** @enum {string} */
+          tag: "plugin-id";
+          val: string;
+        }
+      | {
+          /** @enum {string} */
+          tag: "option-id";
+          val: string;
+        };
+    PluginSelectSettingSchemaDto: {
+      default: string;
+      options: components["schemas"]["PluginSettingOptionDto"][];
+      /**
+       * @description discriminator enum property added by openapi-typescript
+       * @enum {string}
+       */
+      type: "select";
+    };
+    /** @enum {string} */
+    PluginSelectSettingSchemaTypeDto: "select";
+    PluginServiceReferenceDto: {
+      plugin_id: string;
+      service_id: string;
+    };
+    PluginServiceScopeDto: {
+      services: components["schemas"]["PluginServiceReferenceDto"][];
+    };
+    PluginSettingDeclarationDto: {
+      description: string;
+      id: string;
+      label: string;
+      schema: components["schemas"]["PluginSettingSchemaDto"];
+    };
+    PluginSettingDto: {
+      key: string;
+      updated_at: string;
+      value: components["schemas"]["PluginSettingValueDto"];
+    };
+    PluginSettingListResponse: {
+      settings: components["schemas"]["PluginSettingDto"][];
+    };
+    PluginSettingOptionDto: {
+      id: string;
+      label: string;
+    };
+    PluginSettingSchemaDto:
+      | components["schemas"]["PluginTextSettingSchemaDto"]
+      | components["schemas"]["PluginIntegerSettingSchemaDto"]
+      | components["schemas"]["PluginBooleanSettingSchemaDto"]
+      | components["schemas"]["PluginSelectSettingSchemaDto"];
+    PluginSettingValueDto: string | number | boolean;
+    PluginTextSettingSchemaDto: {
+      default?: string | null;
+      /** Format: int32 */
+      max_bytes: number;
+      /** Format: int32 */
+      min_bytes: number;
+      secret: boolean;
+      /**
+       * @description discriminator enum property added by openapi-typescript
+       * @enum {string}
+       */
+      type: "text";
+    };
+    /** @enum {string} */
+    PluginTextSettingSchemaTypeDto: "text";
+    PluginUnscopedPermissionDto: Record<string, never>;
     /**
      * @description Authenticated principal kind (never includes ids, tokens, or secrets).
      * @enum {string}
@@ -2698,6 +3394,16 @@ export interface components {
       | "model_discovery";
     /** @enum {string} */
     ProviderOriginClassDto: "fixed_cloud_https" | "loopback" | "operator_custom";
+    PublisherTrustDto: {
+      key_id: string;
+      public_key_base64: string;
+      revoked_at?: string | null;
+      status: string;
+      trusted_at: string;
+    };
+    PublisherTrustListResponse: {
+      publishers: components["schemas"]["PublisherTrustDto"][];
+    };
     PutAiCredentialRequest: {
       kind: components["schemas"]["AiSecretKindDto"];
       secret: string;
@@ -2723,6 +3429,31 @@ export interface components {
     RecoveryStatusResponse: {
       mode: string;
       restart_required: boolean;
+    };
+    RegistryEntryDto: {
+      author: string;
+      description: string;
+      license: string;
+      name: string;
+      package_sha256: string;
+      /** Format: int64 */
+      package_size: number;
+      plugin_id: string;
+      publisher_key_id: string;
+      requested_capabilities: string[];
+      runtime_profile: string;
+      search_tags: string[];
+      version: string;
+    };
+    RegistryInstallBody: {
+      allow_downgrade?: boolean;
+      expected_package_sha256: string;
+      replace_existing?: boolean;
+      version: string;
+    };
+    RegistryListResponse: {
+      entries: components["schemas"]["RegistryEntryDto"][];
+      index_sha256: string;
     };
     RelationDto: {
       /** Format: uuid */
@@ -2787,6 +3518,16 @@ export interface components {
        */
       server_now: string;
     };
+    RenderPluginContributionResponse: {
+      /** Format: int64 */
+      activation_epoch: number;
+      host_session_id: string;
+      /** Format: int64 */
+      package_generation: number;
+      plugin_id: string;
+      surface: unknown;
+      surface_id: string;
+    };
     RenewReminderLeaseRequest: {
       fence_term: string;
       /** Format: int64 */
@@ -2800,6 +3541,11 @@ export interface components {
       project_id?: string | null;
       /** Format: uuid */
       section_id?: string | null;
+    };
+    ReplacePluginGrantsBody: {
+      /** Format: int64 */
+      package_generation: number;
+      permissions: components["schemas"]["PluginPermissionDto"][];
     };
     ReplaceTimeSlotTasksRequest: {
       task_ids: string[];
@@ -2932,6 +3678,11 @@ export interface components {
       sort_order: number;
       /** Format: date-time */
       updated_at: string;
+    };
+    SetPluginSettingBody: {
+      /** Format: int64 */
+      package_generation: number;
+      value: components["schemas"]["PluginSettingValueDto"];
     };
     SettleReminderDeliveredRequest: {
       channel: components["schemas"]["ReminderChannelDto"];
@@ -3255,6 +4006,9 @@ export interface components {
     TransferWarningDto: {
       line: number;
       message: string;
+    };
+    TrustPublisherBody: {
+      public_key_base64: string;
     };
     /**
      * @description How an ordinary uncomplete handled recurring work.
@@ -7106,6 +7860,1350 @@ export interface operations {
         };
       };
       503: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["ErrorEnvelope"];
+        };
+      };
+    };
+  };
+  list_plugins: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["PluginListResponse"];
+        };
+      };
+      401: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["ErrorEnvelope"];
+        };
+      };
+      403: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["ErrorEnvelope"];
+        };
+      };
+    };
+  };
+  get_plugin_community_policy: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["CommunityPolicyResponse"];
+        };
+      };
+      401: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["ErrorEnvelope"];
+        };
+      };
+      403: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["ErrorEnvelope"];
+        };
+      };
+    };
+  };
+  set_plugin_community_policy: {
+    parameters: {
+      query?: never;
+      header: {
+        "Idempotency-Key": string;
+      };
+      path?: never;
+      cookie?: never;
+    };
+    requestBody: {
+      content: {
+        "application/json": components["schemas"]["CommunityPolicyBody"];
+      };
+    };
+    responses: {
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["PluginMutationResponse"];
+        };
+      };
+      401: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["ErrorEnvelope"];
+        };
+      };
+      403: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["ErrorEnvelope"];
+        };
+      };
+      413: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["ErrorEnvelope"];
+        };
+      };
+    };
+  };
+  list_plugin_contributions: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["PluginContributionListResponse"];
+        };
+      };
+      401: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["ErrorEnvelope"];
+        };
+      };
+      403: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["ErrorEnvelope"];
+        };
+      };
+      503: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["ErrorEnvelope"];
+        };
+      };
+    };
+  };
+  inspect_plugin_package: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    requestBody?: {
+      content: {
+        "application/octet-stream": unknown;
+      };
+    };
+    responses: {
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["PluginPackagePreviewResponse"];
+        };
+      };
+      401: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["ErrorEnvelope"];
+        };
+      };
+      403: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["ErrorEnvelope"];
+        };
+      };
+      413: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["ErrorEnvelope"];
+        };
+      };
+      422: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["ErrorEnvelope"];
+        };
+      };
+    };
+  };
+  install_plugin_package: {
+    parameters: {
+      query: {
+        expected_plugin_id: string;
+        expected_version: string;
+        expected_package_sha256: string;
+        expected_publisher_key_id: string;
+        expected_permission_hash: string;
+        expected_compatibility: string;
+        replace_existing?: boolean;
+        allow_downgrade?: boolean;
+      };
+      header: {
+        "Idempotency-Key": string;
+      };
+      path?: never;
+      cookie?: never;
+    };
+    requestBody?: {
+      content: {
+        "application/octet-stream": unknown;
+      };
+    };
+    responses: {
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["PluginMutationResponse"];
+        };
+      };
+      401: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["ErrorEnvelope"];
+        };
+      };
+      403: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["ErrorEnvelope"];
+        };
+      };
+      409: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["ErrorEnvelope"];
+        };
+      };
+      413: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["ErrorEnvelope"];
+        };
+      };
+      422: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["ErrorEnvelope"];
+        };
+      };
+    };
+  };
+  list_plugin_publishers: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["PublisherTrustListResponse"];
+        };
+      };
+      401: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["ErrorEnvelope"];
+        };
+      };
+      403: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["ErrorEnvelope"];
+        };
+      };
+    };
+  };
+  trust_plugin_publisher: {
+    parameters: {
+      query?: never;
+      header: {
+        "Idempotency-Key": string;
+      };
+      path: {
+        key_id: string;
+      };
+      cookie?: never;
+    };
+    requestBody: {
+      content: {
+        "application/json": components["schemas"]["TrustPublisherBody"];
+      };
+    };
+    responses: {
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["PluginMutationResponse"];
+        };
+      };
+      401: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["ErrorEnvelope"];
+        };
+      };
+      403: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["ErrorEnvelope"];
+        };
+      };
+      413: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["ErrorEnvelope"];
+        };
+      };
+      422: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["ErrorEnvelope"];
+        };
+      };
+    };
+  };
+  revoke_plugin_publisher: {
+    parameters: {
+      query?: never;
+      header: {
+        "Idempotency-Key": string;
+      };
+      path: {
+        key_id: string;
+      };
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["PluginMutationResponse"];
+        };
+      };
+      401: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["ErrorEnvelope"];
+        };
+      };
+      403: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["ErrorEnvelope"];
+        };
+      };
+      409: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["ErrorEnvelope"];
+        };
+      };
+    };
+  };
+  list_plugin_registry: {
+    parameters: {
+      query?: {
+        query?: string;
+        capability?: string;
+      };
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["RegistryListResponse"];
+        };
+      };
+      401: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["ErrorEnvelope"];
+        };
+      };
+      403: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["ErrorEnvelope"];
+        };
+      };
+      503: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["ErrorEnvelope"];
+        };
+      };
+    };
+  };
+  get_plugin_registry_entry: {
+    parameters: {
+      query: {
+        version: string;
+      };
+      header?: never;
+      path: {
+        plugin_id: string;
+      };
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["RegistryEntryDto"];
+        };
+      };
+      401: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["ErrorEnvelope"];
+        };
+      };
+      403: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["ErrorEnvelope"];
+        };
+      };
+      404: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["ErrorEnvelope"];
+        };
+      };
+      503: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["ErrorEnvelope"];
+        };
+      };
+    };
+  };
+  install_plugin_registry_entry: {
+    parameters: {
+      query?: never;
+      header: {
+        "Idempotency-Key": string;
+      };
+      path: {
+        plugin_id: string;
+      };
+      cookie?: never;
+    };
+    requestBody: {
+      content: {
+        "application/json": components["schemas"]["RegistryInstallBody"];
+      };
+    };
+    responses: {
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["PluginMutationResponse"];
+        };
+      };
+      401: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["ErrorEnvelope"];
+        };
+      };
+      403: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["ErrorEnvelope"];
+        };
+      };
+      404: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["ErrorEnvelope"];
+        };
+      };
+      409: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["ErrorEnvelope"];
+        };
+      };
+      413: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["ErrorEnvelope"];
+        };
+      };
+      503: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["ErrorEnvelope"];
+        };
+      };
+    };
+  };
+  get_plugin: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path: {
+        plugin_id: string;
+      };
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["InstalledPluginDto"];
+        };
+      };
+      401: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["ErrorEnvelope"];
+        };
+      };
+      403: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["ErrorEnvelope"];
+        };
+      };
+      404: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["ErrorEnvelope"];
+        };
+      };
+    };
+  };
+  uninstall_plugin: {
+    parameters: {
+      query?: never;
+      header: {
+        "Idempotency-Key": string;
+      };
+      path: {
+        plugin_id: string;
+      };
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["PluginMutationResponse"];
+        };
+      };
+      401: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["ErrorEnvelope"];
+        };
+      };
+      403: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["ErrorEnvelope"];
+        };
+      };
+      409: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["ErrorEnvelope"];
+        };
+      };
+    };
+  };
+  invoke_plugin_command: {
+    parameters: {
+      query?: never;
+      header: {
+        "Idempotency-Key": string;
+      };
+      path: {
+        plugin_id: string;
+        command_id: string;
+      };
+      cookie?: never;
+    };
+    requestBody: {
+      content: {
+        "application/json": components["schemas"]["InvokePluginCommandBody"];
+      };
+    };
+    responses: {
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["PluginInvocationResponse"];
+        };
+      };
+      401: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["ErrorEnvelope"];
+        };
+      };
+      403: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["ErrorEnvelope"];
+        };
+      };
+      409: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["ErrorEnvelope"];
+        };
+      };
+      413: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["ErrorEnvelope"];
+        };
+      };
+      503: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["ErrorEnvelope"];
+        };
+      };
+    };
+  };
+  disable_plugin: {
+    parameters: {
+      query?: never;
+      header: {
+        "Idempotency-Key": string;
+      };
+      path: {
+        plugin_id: string;
+      };
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["PluginMutationResponse"];
+        };
+      };
+      401: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["ErrorEnvelope"];
+        };
+      };
+      403: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["ErrorEnvelope"];
+        };
+      };
+      409: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["ErrorEnvelope"];
+        };
+      };
+    };
+  };
+  enable_plugin: {
+    parameters: {
+      query?: never;
+      header: {
+        "Idempotency-Key": string;
+      };
+      path: {
+        plugin_id: string;
+      };
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["PluginMutationResponse"];
+        };
+      };
+      401: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["ErrorEnvelope"];
+        };
+      };
+      403: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["ErrorEnvelope"];
+        };
+      };
+      409: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["ErrorEnvelope"];
+        };
+      };
+    };
+  };
+  list_plugin_grants: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path: {
+        plugin_id: string;
+      };
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["PluginGrantListResponse"];
+        };
+      };
+      401: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["ErrorEnvelope"];
+        };
+      };
+      403: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["ErrorEnvelope"];
+        };
+      };
+    };
+  };
+  replace_plugin_grants: {
+    parameters: {
+      query?: never;
+      header: {
+        "Idempotency-Key": string;
+      };
+      path: {
+        plugin_id: string;
+      };
+      cookie?: never;
+    };
+    requestBody: {
+      content: {
+        "application/json": components["schemas"]["ReplacePluginGrantsBody"];
+      };
+    };
+    responses: {
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["PluginMutationResponse"];
+        };
+      };
+      401: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["ErrorEnvelope"];
+        };
+      };
+      403: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["ErrorEnvelope"];
+        };
+      };
+      409: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["ErrorEnvelope"];
+        };
+      };
+      413: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["ErrorEnvelope"];
+        };
+      };
+      422: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["ErrorEnvelope"];
+        };
+      };
+    };
+  };
+  revoke_plugin_grants: {
+    parameters: {
+      query: {
+        package_generation: number;
+      };
+      header: {
+        "Idempotency-Key": string;
+      };
+      path: {
+        plugin_id: string;
+      };
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["PluginMutationResponse"];
+        };
+      };
+      401: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["ErrorEnvelope"];
+        };
+      };
+      403: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["ErrorEnvelope"];
+        };
+      };
+      409: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["ErrorEnvelope"];
+        };
+      };
+    };
+  };
+  retry_plugin: {
+    parameters: {
+      query?: never;
+      header: {
+        "Idempotency-Key": string;
+      };
+      path: {
+        plugin_id: string;
+      };
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["PluginMutationResponse"];
+        };
+      };
+      401: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["ErrorEnvelope"];
+        };
+      };
+      403: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["ErrorEnvelope"];
+        };
+      };
+      409: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["ErrorEnvelope"];
+        };
+      };
+    };
+  };
+  list_plugin_settings: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path: {
+        plugin_id: string;
+      };
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["PluginSettingListResponse"];
+        };
+      };
+      401: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["ErrorEnvelope"];
+        };
+      };
+      403: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["ErrorEnvelope"];
+        };
+      };
+    };
+  };
+  set_plugin_setting: {
+    parameters: {
+      query?: never;
+      header: {
+        "Idempotency-Key": string;
+      };
+      path: {
+        plugin_id: string;
+        key: string;
+      };
+      cookie?: never;
+    };
+    requestBody: {
+      content: {
+        "application/json": components["schemas"]["SetPluginSettingBody"];
+      };
+    };
+    responses: {
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["PluginMutationResponse"];
+        };
+      };
+      401: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["ErrorEnvelope"];
+        };
+      };
+      403: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["ErrorEnvelope"];
+        };
+      };
+      409: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["ErrorEnvelope"];
+        };
+      };
+      413: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["ErrorEnvelope"];
+        };
+      };
+      422: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["ErrorEnvelope"];
+        };
+      };
+    };
+  };
+  delete_plugin_setting: {
+    parameters: {
+      query: {
+        package_generation: number;
+      };
+      header: {
+        "Idempotency-Key": string;
+      };
+      path: {
+        plugin_id: string;
+        key: string;
+      };
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["PluginMutationResponse"];
+        };
+      };
+      401: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["ErrorEnvelope"];
+        };
+      };
+      403: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["ErrorEnvelope"];
+        };
+      };
+      409: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["ErrorEnvelope"];
+        };
+      };
+    };
+  };
+  invoke_plugin_surface_action: {
+    parameters: {
+      query?: never;
+      header: {
+        "Idempotency-Key": string;
+      };
+      path: {
+        plugin_id: string;
+        surface_id: string;
+        action_id: string;
+      };
+      cookie?: never;
+    };
+    requestBody: {
+      content: {
+        "application/json": components["schemas"]["InvokePluginActionBody"];
+      };
+    };
+    responses: {
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["PluginInvocationResponse"];
+        };
+      };
+      401: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["ErrorEnvelope"];
+        };
+      };
+      403: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["ErrorEnvelope"];
+        };
+      };
+      409: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["ErrorEnvelope"];
+        };
+      };
+      413: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["ErrorEnvelope"];
+        };
+      };
+      503: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["ErrorEnvelope"];
+        };
+      };
+    };
+  };
+  render_plugin_surface: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path: {
+        plugin_id: string;
+        surface_id: string;
+      };
+      cookie?: never;
+    };
+    requestBody: {
+      content: {
+        "application/json": components["schemas"]["ContributionFenceBody"];
+      };
+    };
+    responses: {
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["RenderPluginContributionResponse"];
+        };
+      };
+      401: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["ErrorEnvelope"];
+        };
+      };
+      403: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["ErrorEnvelope"];
+        };
+      };
+      409: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["ErrorEnvelope"];
+        };
+      };
+      413: {
         headers: {
           [name: string]: unknown;
         };

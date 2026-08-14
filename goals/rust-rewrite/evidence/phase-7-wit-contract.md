@@ -1,0 +1,252 @@
+# Phase 7 WIT contract
+
+Date: 2026-08-04
+Status: Wave 1 production authority; exact `.wit`, generated Rust/TypeScript bindings, source consumers, and retained inspected components remain unchanged. Narrow Slice 2D planning recheck at exact `073f00d98dac4b9110ec028da01d0fb71eaa3ae3` approved/closed `P7-PLAN-2D-001`–`004`; converter recheck at exact `ff76e01abec9fb7377210833a48e409d694b6b1b` closed `P7-API-2D-001`–`004`, and HTTPS recheck at exact `71aad742cf33ab256a70142858b720146f7dc439` closed `P7-2D-SEC-001` with public-IPv4-only transport. Focused recheck **APPROVED** `P7-PLAN-2D-005` and its UUID subsidiary at exact `dbf63a58f38df245b0b62337b29c644b8054984c`. Ordinary query implementation at exact `dbb3700fa5459369633eb42b53723427244a6683` then received focused database **APPROVE** with no material issues and may be consumed by server callbacks with required pre/post authority and grant checks; callback composition remains unaccepted. No WIT or generated-body shape change is authorized, and no callback, resync, supervisor, Slice 2D, or Wave 2 acceptance is claimed.
+Package: `junban:plugin@0.1.0`
+Parent authorities: [`phase-7-context-map.md`](phase-7-context-map.md), [`phase-7-package-contract.md`](phase-7-package-contract.md)
+
+## Contract goal
+
+One synchronous Component Model ABI supports Rust and TypeScript plugins without runtime Node, ambient authority, arbitrary JSON, guest UI code, or duplicated Junban business rules. Host imports are bounded reads or explicitly scoped external calls. Guest writes are typed requests returned only after successful execution; the parent validates and commits at most one SQLite effect.
+
+WASI P3 async/streams/futures, Junban-owned WIT resources, free-form maps, recursive values, arbitrary byte-encoded mutations/UI/settings/errors, and compatibility with legacy plugins are excluded. The exact Rust runtime baseline necessarily uses the standard WASI I/O resource handles named later; those are closed/sink host plumbing, not guest-owned Junban authority.
+
+## World composition and optional capabilities
+
+WIT has no optional imports. The canonical package therefore separates the required export world from capability interfaces:
+
+```wit
+package junban:plugin@0.1.0;
+
+world plugin {
+  export guest;
+}
+```
+
+`plugin` has no imports and requires the exact `guest` interface below. Each authored package targets its own local world, includes this required world, and imports only capabilities it requests:
+
+```wit
+package example:pomodoro@1.0.0;
+
+world pomodoro {
+  include junban:plugin/plugin@0.1.0;
+  import junban:plugin/host-tasks@0.1.0;
+  import junban:plugin/host-settings@0.1.0;
+  import junban:plugin/host-storage@0.1.0;
+  import junban:plugin/host-log@0.1.0;
+}
+```
+
+The local package/world name is build metadata, not authority. JBP1 records the required Junban world/version and actual import fingerprint. Install requires actual imports to be a subset of requested permissions and the runtime-profile baseline. Enable links only actual granted Junban interfaces plus the exact baseline. Declarations and returned effects are checked separately by the package-contract capability matrix because they need not correspond to imports.
+
+## Interface set
+
+Exact package interface IDs:
+
+- `types`: the shared records/variants/enums authority imported nominally by generated consumers and reused by every interface;
+- `host-tasks`, `host-projects`, `host-tags`: bounded read queries;
+- `host-settings`: current typed settings reads;
+- `host-storage`: isolated KV reads;
+- `host-clock`: wall timestamp and monotonic milliseconds;
+- `host-http`: one synchronous exact-origin request;
+- `host-log`: structured bounded log;
+- `host-services`: one declared dependency service call;
+- `guest`: required lifecycle, command, event, UI, settings, resync and service exports.
+
+Interfaces are split by permission so an ungranted interface is absent from the linker: in particular, settings and KV storage are separate imports and grants. No generic `host-call(name, bytes)` exists.
+
+## Common scalar rules
+
+WIT strings are revalidated by the host. IDs use their canonical package/domain regex and ≤64 bytes. Visible text is ≤8 KiB unless a smaller manifest/UI limit applies. Date and timestamp are canonical strings parsed by Junban; duration/count/revision values are bounded integers. Lists have explicit element and aggregate limits before allocation/iteration. UUID/operation values are canonical strings; guest-provided identifiers never bypass parent derivation/validation.
+
+Closed data used by commands/actions/services:
+
+```text
+scalar-value = string | signed integer | boolean | date | timestamp |
+               task id | project id | tag id | plugin id | option id
+data-value   = scalar(scalar-value) |
+               string-list | integer-list | boolean-list | date-list |
+               timestamp-list | task-id-list | project-id-list | tag-id-list |
+               plugin-id-list | option-id-list
+named-value  = { name, value: data-value }
+```
+
+Lists are homogeneous, contain at most 100 elements, and share the caller's aggregate 64 KiB cap. UI form action values are scalars; command/service inputs may use these nonrecursive list variants. There is no nested object/list recursion and no bytes. Opaque bytes are justified only for plugin KV values and HTTP bodies under their independent limits.
+
+## Read queries
+
+`host-tasks` exposes `query-tasks(task-query) -> result<task-page, host-error>` with:
+
+- optional exact task/project/section/parent IDs;
+- ≤16 tag IDs;
+- ≤3 statuses and ≤4 priorities;
+- optional due-date half-open range and bounded text search;
+- opaque host cursor ≤512 bytes and limit 1…100.
+
+A task view contains the existing safe plugin subset: id, title, full valid description (up to the domain's 10,000 Unicode-character bound), status, priority, due date/time, estimated/actual minutes, project/section/parent IDs, up to the domain's 100 tag IDs, recurrence/someday indicators, created/updated timestamps and revision. It excludes receipts, operation identities, reminder leases, AI/provider data, credentials and unrelated settings. Valid domain fields are never silently truncated.
+
+Project/tag queries accept only an equivalent opaque cursor plus a `1..=100` limit and return bounded id/name/color/icon/view/revision summaries. All three kinds use canonical resource-ID ascending exclusive keyset order, never offset pagination. Task IDs/project IDs/section IDs/parent IDs are exact predicates; tags are normalized all-of; statuses/priorities are normalized membership sets; due dates are `[from,before)`; and the nonempty ≤10,000-scalar text is literal title/description search with SQL `%`, `_`, and `\` escaping. Input collection limits are checked before sorted/deduplicated normalization.
+
+The exact internal authority is [`phase-7-capability-matrix.md`](phase-7-capability-matrix.md). A new internal ordinary-plugin AppService API delegates each page to one repository-owned SQLite read transaction. The first page samples global revision and event epoch. Continuations authenticate and recheck that pair in the same transaction before selecting rows; drift is `cursor-stale`. This is not the general public `TaskQuery` cursor and is not resync's fixed-head protocol.
+
+The cursor is strict unpadded base64url of a fixed binary v1 envelope containing kind, issued/expiry Unix seconds, sampled revision/event epoch, canonical domain-separated normalized-query hash, and last canonical UUID plus a profile-private domain-separated HMAC. It is 163 bytes encoded, below the existing 512-byte WIT bound, and has a non-configurable 300-second TTL. It reuses the existing private verification key through dedicated-worker profile-MAC methods without initializing AI/provider runtime. Malformed/tampered/cross-query/cross-kind/cross-profile/replaced-key cursors are `invalid-input`; authenticated expiry or revision/event-epoch drift is `cursor-stale`; private-file/key failures are scrubbed `unavailable`.
+
+A page greedily includes complete records while count and the exact 256-KiB ceiling hold. The ceiling is measured over canonical SDK private-body bytes of the complete successful `HostCallReply::QueryTasks|QueryProjects|QueryTags(Ok(page))`, including revision and `next-cursor`, not lifted material or a fragment. `next-cursor` exists only after proving another match. Fields are never truncated; if the first individually valid record cannot fit, the host returns scrubbed internal/operation-too-large rather than an empty looping page. Tasks carry row revision; Project/Tag carry the sampled global revision because schema v7 has no row-revision columns.
+
+Queries always recheck the current generation/epoch/session/invocation/mode and read grant and run through AppService/repository authority. Guest filters are not SQL or JSON. Cursor/key material is not logged or persisted in SQLite/events/receipts/backups. This planning correction changes no `.wit`, generated body, WIT SHA, JBP1/JRI1/package hash, schema/version/migration, public DTO/OpenAPI route, or dependency package.
+
+## Guest exports
+
+The exact required export names are:
+
+```text
+activate(context) -> result<unit, plugin-error>
+deactivate(context) -> result<unit, plugin-error>
+invoke-command(context, command-call) -> result<plugin-outcome, plugin-error>
+handle-event(context, event-envelope) -> result<plugin-outcome, plugin-error>
+render-surface(context, surface-request) -> result<surface, plugin-error>
+handle-surface-action(context, surface-action) -> result<plugin-outcome, plugin-error>
+validate-settings(context, setting-values) -> result<list<validation-issue>, plugin-error>
+resync(context, resync-page) -> result<resync-page-outcome, plugin-error>
+call-service(context, service-call) -> result<service-data, plugin-error>
+```
+
+Activation/deactivation/validation/render/service results cannot carry domain effects. Resync may return only staged bounded KV segments and a final replacement decision defined below; no segment is durable before the final cursor CAS. Context includes bounded invocation/contribution identity for diagnostics but is never authority; host-side generation/epoch/session and grants remain authoritative.
+
+## One returned effect
+
+```text
+plugin-outcome = { effect: option<plugin-effect> }
+plugin-effect  = domain-mutation | kv-patch
+```
+
+A domain mutation is a closed variant mapped to existing AppService operations:
+
+- `create-task`: exact `TaskDraft` fields title, description, priority, due date/time, deadline, someday, estimated/actual minutes, dread, project/section/parent IDs, tag IDs, sort order, recurrence rule, reminder timestamp and recurrence anchor; WIT defaults equal `TaskDraft::new` defaults;
+- `patch-task`: task ID plus every exact `TaskPatch` field above; required/non-null fields use `unchanged | set`, nullable fields use `unchanged | clear | set`, booleans/sort use `unchanged | set`, and tags use `unchanged | replace`;
+- `complete-task`, `uncomplete-task`, `cancel-task`, `reopen-task`, `delete-task`: exact task ID;
+- `bulk-tasks`: 1…500 unique task IDs plus the existing closed `BulkAction` variants complete, uncomplete, cancel, reopen, delete, move, tag, schedule and priority. Move mirrors project/section/parent `unchanged | clear | set` and fixes `OrderAnchor::Keep`; tag mirrors bounded unique add/remove sets; schedule mirrors due date/time/deadline `unchanged | clear | set` and someday `unchanged | set`;
+- `create-project`: exact `ProjectDraft` fields name, color, icon, parent ID, favorite, archived, view and sort order with existing defaults;
+- `patch-project`: project ID plus exact `ProjectPatch` fields; icon/parent use `unchanged | clear | set`, all others `unchanged | set`;
+- `delete-project`: exact project ID;
+- `create-tag`: exact `TagDraft` name and color;
+- `patch-tag`: tag ID plus exact `TagPatch` name/color `unchanged | set` fields;
+- `delete-tag`: exact tag ID.
+
+Generated bindings expose named records/variants, never positional option nesting. Every value is reconstructed through the named domain/AppService type and existing validation; no independent mutation semantics or defaults exist in the plugin layer. The guest does not choose the authoritative operation ID, revision, generated entity ID, event summary or receipt bytes. The parent deterministically derives one operation identity under `junban.plugin.effect.v1` from exact generation/invocation-or-event/action identity plus canonical typed effect, persists/binds it to the invocation, and applies or exact-replays the normal transaction/event/receipt path. Same identity with changed effect conflicts.
+
+A KV patch contains 1…64 sorted unique set/delete operations and ≤64 KiB aggregate new value bytes; profile totals remain 2 MiB/plugin. It is committed with the event cursor/invocation terminalization in one plugin-local transaction and emits no global event.
+
+If the invocation called `host-http`, every returned domain/KV effect is rejected. Trap, timeout, cancellation, malformed/oversized output or guest error commits neither effect.
+
+## Invocation modes and HTTP import
+
+The parent stores one closed invocation mode and checks it before every host import and after guest return:
+
+| Guest export                                      | Allowed imports                                                                                  | Allowed return                                                                                     |
+| ------------------------------------------------- | ------------------------------------------------------------------------------------------------ | -------------------------------------------------------------------------------------------------- |
+| activate/deactivate                               | granted settings/storage reads, clock, log                                                       | no effect                                                                                          |
+| invoke-command/handle-event/handle-surface-action | granted domain/settings/storage reads, clock, log, dependency service and HTTP                   | at most one domain/KV effect, but none after any HTTP call                                         |
+| render-surface                                    | granted domain/settings/storage reads, clock, log and dependency service                         | declarative surface only; no HTTP/effect                                                           |
+| validate-settings                                 | clock and log only                                                                               | validation issues only                                                                             |
+| resync                                            | settings, clock and log; with storage grant, isolated KV list/read; host supplies snapshot pages | no HTTP/domain/service; staged KV segments plus final replacement decision only with storage grant |
+| call-service                                      | granted domain/settings/storage reads, clock, log and nested dependency service                  | flat service data only; no HTTP/effect/UI                                                          |
+
+Nested service depth/cycle checks apply to every dependency call. Service depth counts edges, not nodes: the top-level/root invocation is depth 0, the eighth `call-service` edge is allowed, and a ninth is rejected before callee dispatch. This is distinct from the dependency activation graph's depth-16 limit. A mode cannot gain an import because the package has that grant in another mode.
+
+The parent additionally binds every dispatch to one runtime-local, nonserialized `PluginDeliveryAuthority`: exact plugin ID, package generation, activation epoch, current host session, invocation ID, payload SHA-256, and closed internal mode `StartingResync | StartingCatchUp | Active`. Its existing domain-separated canonical authority digest remains unchanged. The payload is exactly SHA-256 of the canonical validated private body for command/action; `SHA-256("junban.plugin.retained-event-payload.v1\0" || raw committed-event content hash || u32be(body length) || exact canonical private body)` for retained event; or the raw existing `plugin_resync_request_hash(session)` for resync. Every received body must pass decode→canonical-re-encode byte equality before hashing.
+
+The persisted invocation `request_hash` is exactly `SHA-256("junban.plugin.invocation-request.v2\0" || one-byte command=0/event=1/action=2/resync=3 hook tag || u64be(persisted-entry-ID byte length) || canonical UTF-8 persisted entry ID || raw delivery-authority digest)` and must exact-match at reserve, transition, terminal, verified skip, and resync finalization. `StartingResync` can call only `resync`. `StartingCatchUp` can call only retained `handle-event` and cannot authorize command/action/HTTP/domain/KV/arbitrary-cursor work; it must reach the sampled head before same-epoch activation. These modes are parent runtime authority, not new WIT variants.
+
+On any process/session loss, all non-HTTP `reserved`/`effect_committing` rows are abandoned regardless of Starting or Active mode. Only `dispatching_http` becomes `ambiguous_http`, existing ambiguity remains, and a fresh process gets fresh session/authority; no dead Active non-HTTP row survives.
+
+`host-http.request(http-request) -> result<http-response, http-error>` is synchronous to the guest. Request has method enum, canonical HTTPS origin + path/query, ≤1 MiB body, and only the exact headers `accept`, `accept-language`, `content-type`, `if-match`, and `if-none-match`. Response has status, ≤1 MiB body, truncated flag, and exposes only `cache-control`, `content-language`, `content-type`, `etag`, `expires`, `last-modified`, `location`, and `retry-after`; every other valid response header is omitted. Non-2xx is a normal response.
+
+Guest header names are exact lowercase ASCII HTTP tokens of 1–64 bytes, sorted and unique; invalid case/order/duplicates are rejected, never normalized. A value is ≤8 KiB visible ASCII plus internal HTAB, with no edge SP/HTAB, CR, LF, NUL, or other control. Request and exposed-response lists each have ≤32 entries and ≤64 KiB aggregate name-plus-value bytes. Duplicate/invalid allowlisted or oversized raw response metadata is `invalid-response`; nonallowlisted valid response metadata is omitted. `authorization`, proxy authorization, cookies/set-cookie, `host`, `content-length`, forwarding/proxy and hop-by-hop headers, and every `x-junban-*` name are forbidden. Transport alone owns Host/content length, injects exactly one stable `x-junban-plugin-delivery-id`, forces `accept-encoding: identity`, and disables cookies, redirects, proxies, credentials, and automatic transport retries.
+
+A top-level command, event, or action owns a consume-once parent permit, so zero or one logical HTTP callback can occur. The invocation durably enters `DispatchingHttp` before send; a second call is rejected without transport. Same-process ambiguity may resend only the identical in-memory request and delivery ID without guest re-execution. Process loss leaves the dispatch unresolved and never reruns the guest or reconstructs a request. For an event, accepted HTTP terminalization and the exact source cursor commit together; remote HTTP is never claimed atomic with SQLite.
+
+`http-error` has closed code `invalid-request | invalid-response | permission-denied | dns-denied | tls-failed | connect-failed | timeout | delivery-ambiguous | unavailable`, delivery state `not-sent | may-have-been-sent | response-received`, retryable boolean and ≤512-byte scrubbed message. Request over-limit is `invalid-request` before send. The client reads at most the first 1 MiB of a response body; if another byte exists it closes that response stream and returns the successful bounded response with `truncated = true` and delivery state `response-received`—body size never alternatively becomes an error. Invalid/over-limit response metadata is `invalid-response` + `response-received`. Any post-dispatch uncertainty before a valid response is `delivery-ambiguous` + `may-have-been-sent`; neither guest nor host reports it as definitely unsent. HTTP body bytes are external content only and cannot be interpreted as a Junban mutation, setting, service, error, or UI payload. External delivery is honestly at-least-once only through the exact same-process resend rule.
+
+## Settings, KV, clock, log and services
+
+- `get-settings()`: exact manifest-declared typed values only; ≤64 settings/64 KiB.
+- `get-kv(keys)`: ≤64 unique keys and ≤64 KiB returned aggregate.
+- `list-kv(cursor, limit)`: all isolated keys in bytewise key order, limit 1…64 and ≤256 KiB page. The opaque cursor is invocation/session-bound; one-plugin-at-a-time execution makes the plugin-local snapshot stable. No prefix/range scan exists in v1.
+- `wall-now()`: canonical UTC timestamp; `monotonic-ms()`: invocation-relative monotonic value. No guest timer/scheduler.
+- `log(level, message, fields)`: closed level enum, ≤4 KiB message, ≤16 flat scalar fields; parent redacts/truncates/rate-limits before diagnostics.
+- `call-service(plugin-id, service-id, values)`: exact manifest dependency lock + `services:consume` grant and ≤64 KiB flat typed data. Root is depth 0; service edges one through eight are allowed, the ninth is denied before dispatch, and cycles fail closed. Callee mode denies HTTP/effects/UI and requires `services:provide`; activation graph depth remains independently capped at 16.
+
+Settings are operator-owned; there is no guest setting write. KV bytes are isolated by plugin id and never rendered/interpreted by the host.
+
+## Events and resync
+
+The exhaustive retained-event converter directly exposes only the seven Task kinds create/update/complete/uncomplete/cancel/reopen/delete and create/update/delete for Project, Tag, and Section. A nondelete direct event requires exact agreement among retained event type, typed primary resource, typed snapshot resource, and identical ID. A delete requires the exact typed primary and no snapshot. Task uses only the retained event snapshot; Project/Tag/Section use the enclosing retained event revision as the WIT summary revision. No live read or affected-ID synthesis may repair an envelope, and malformed direct remains fail closed.
+
+For resync-tail verification and `StartingCatchUp`, the host classifies the retained envelope without changing WIT. Baseline-relevant IDs are exact Task/Project/Tag affected IDs. `Represented` requires a subscribed direct subject covering all of them: Task has exactly its primary task/no project/tag; Project exactly its primary project/no task/tag; Tag exactly its primary tag/no task/project; Section no Task/Project/Tag IDs. `Irrelevant` requires no baseline-relevant IDs and an otherwise valid non-invalidating cursor-only event. All others are `Invalidating`, including task moved/reordered/bulk/restored, cascade/multi-ID direct complete/delete, Project/Tag/Section deletion cascades, unsubscribed Task/Project/Tag direct mutations, undo/import, and future baseline-ID events.
+
+An `Invalidating` final tail aborts/discards resync transcript and staging and restarts at a fresh head; it is never cursor-skipped. After success at `R`, `StartingCatchUp` delivers `Represented`, skips only `Irrelevant`, and restarts on `Invalidating`; malformed direct still fails closed. This covers rows omitted by Task `revision <= R` and the Project/Tag anti-join. Active ordinary event delivery retains exact event hash/revision/cursor reservation, subscribed direct dispatch, bounded cursor-only verification, and atomic accepted result plus cursor. Event envelopes still contain no receipt response or arbitrary guest event JSON.
+
+Resync remains the existing WIT paged protocol, never a truncated snapshot accepted as complete. `resync-page` is still the closed request variant `snapshot | flush-staged-kv | finalize`; `resync-page-outcome` keeps the existing corresponding variants. Slice 2D adds only runtime-local transcript validation, not ABI fields:
+
+1. Parent closes that plugin's event admission, atomically samples event epoch `E` and head revision `R`, and binds a fresh `StartingResync` delivery authority and exact `PluginResyncSession`.
+2. A bounded nonpersisted `PluginResyncTranscript` starts exactly at `SHA-256("junban.plugin.resync-transcript.v1\0" || raw delivery-authority digest || raw existing plugin_resync_request_hash(session))`. Each private request/outcome passes decode→canonical-re-encode equality and folds exactly as `SHA-256("junban.plugin.resync-transcript-step.v1\0" || prior digest || u32be(global step index) || one-byte snapshot=0/flush=1/finalize=2 tag || u32be(request length) || exact request bytes || u32be(outcome length) || exact outcome bytes)`. It retains only compact page/item/byte counts, last IDs, per-page digests, flush/finalize state, and candidate count/bytes/digest.
+3. Snapshot calls are mandatory in exact Task→Project→Tag order with one contiguous global page index and at least one page for every kind, including empty kinds. Every request exact-matches kind and `after-id`; only an exhausted Tag page may carry `final-snapshot-page`.
+4. Task keyset selection is `id > last-id AND revision <= R`. Project and Tag retain their existing `> R` retained-tail anti-join; they do not acquire a fictitious row-revision field. No offset cursor or long-lived SQLite transaction is used.
+5. Every snapshot outcome acknowledges only its exact page and may add one bounded KV segment. Despite the unchanged shared WIT patch shape, resync accepts canonical SET operations only and rejects delete. Keys are canonical and globally sorted/unique across all snapshot and flush segments; the existing ≤256-key/2-MiB aggregate applies. With `storage`, the guest may list/read old isolated KV and explicitly SET any value it wants to preserve.
+6. After the exhausted Tag terminal page, flush requests use contiguous indices `0` through at most `9`. Each response before the terminal one is `more` with a nonempty segment, exactly one response is `complete` (possibly at index `0`), and no flush may follow it; index `10`, a duplicate/out-of-order key, or any bound violation fails.
+7. Exactly one `finalize` follows `complete` and returns only the existing leave/replace choice. The replacement candidate starts empty, so omission deletes an old key. Its sorted resulting set map is hashed exactly as `SHA-256("junban.plugin.resync-kv.v1\0" || u32be(count) || each u32be(key-length) || key || u32be(value-length) || value)`. Leave discards the candidate and preserves old KV; replace commits exactly it, and zero-entry replace empties KV.
+8. One final transaction revalidates the transcript/session/delivery authority, invocation final request hash/state, candidate digest/count/bytes/bounds, package generation, activation epoch, current host session, classified contiguous retained tail after `R`, and expected cursor. It applies the KV choice, CASes the cursor to `(E,R,false)`, and deletes the invocation row together. No global event is emitted.
+9. Crash before commit loses the runtime transcript/candidate and restarts with a fresh session. Crash after commit is recognized by the cursor and cannot finalize twice. Catch-up follows the `Represented`/`Irrelevant`/`Invalidating` rule above, reaches head, then permits same-epoch activation. Epoch/tail/session/request/CAS failure restarts or suspends rather than skipping.
+
+This permits the full 2 MiB isolated state to be preserved/rebuilt through bounded outputs without partial commit or a transaction held across guest code. Resync denies HTTP, domain effects, and dependency services. No transcript row, schema migration, WIT/generated-body change, or new cursor field is introduced.
+
+## Declarative UI
+
+WIT types cannot be recursive. `surface` is therefore one flat preorder node array, not a tree:
+
+```text
+surface = { surface-id, root-index: u16, nodes: list<ui-node> }
+ui-node = { id, parent-index: option<u16>, content: ui-content }
+```
+
+Root index is zero with no parent. Every later node has a unique ID and parent index lower than itself, allowing one-pass acyclic validation; ≤256 nodes, depth ≤8, serialized material ≤32 KiB.
+
+Closed `ui-content` variants:
+
+- stack, row;
+- heading, text, badge, metric, progress;
+- button, text-input, number-input, select, toggle;
+- task-list, task-ref;
+- divider, empty-state, error-state.
+
+Props are closed typed records with host tone/size/alignment/icon enums, plain escaped text, bounded numeric ranges and manifest-declared action IDs. There is no HTML, Markdown, SVG/image/data URL, CSS/style/class, route, script, component name, React object, recursive child payload or arbitrary props map.
+
+Surface actions contain exact surface/action identity and ≤32 flat named scalar values. Browser requests also carry package generation + activation epoch + host session; parent rechecks them before guest call and before any effect.
+
+## Errors
+
+`host-error` and `plugin-error` use closed codes (`invalid-input`, `not-found`, `conflict`, `cursor-stale`, `permission-denied`, `unavailable`, `rate-limited`, `cancelled`, `internal`) plus optional bounded field and ≤512-byte scrubbed message. Raw Wasmtime/provider/HTTP/SQLite/package/token/path errors do not cross the API. Guest error strings are untrusted diagnostics and never become an authorization decision.
+
+## Runtime profiles
+
+Wave 0 actual import inspection freezes:
+
+- `typescript`: componentize-js 0.22.0 with `random`, `stdio`, `clocks`, `http`, and `fetch-event` disabled; **zero WASI imports**. Clock/log/HTTP/random-like identifiers come only from Junban interfaces/host-owned identity.
+- `rust`: Rust 1.93.0 `wasm32-wasip2` reference imports exactly `wasi:io/error@0.2.6`, `wasi:io/streams@0.2.6`, `wasi:cli/environment@0.2.6`, `wasi:cli/exit@0.2.6`, and `wasi:cli/stderr@0.2.6`. Host returns empty environment/arguments/cwd, provides closed/bounded sink streams, and maps exit to controlled guest termination. Nothing is inherited.
+
+WASI filesystem/preopens/sockets/network/HTTP/random/clocks/stdin/stdout/process spawning and every unknown import are absent. The Wave 0 full P2 linker is measurement scaffolding, not production selective-linker proof.
+
+## Versioning
+
+Import lint requires exact `@0.1.0` Junban interface names even if Wasmtime can semver-match compatible interfaces. Additions ship only after a new exact package version and host implementation; breaking changes use `0.2.0`. Phase 7 ships one required version and no adapter/dual-world compatibility layer.
+
+Package update changing component bytes, WIT version, imports, permissions, signer or manifest consumes a new package generation and requires approval. Dependency service semver is manifest/lock authority and cannot substitute another Junban WIT version.
+
+## Validation gate
+
+Wave 1 must check in actual `.wit` files plus generated Rust/TypeScript bindings and golden components. Required tests compile both profiles, enumerate exact imports/exports, round-trip every variant/record, reject all bounds and malformed graphs, prove TypeScript change/clear patch distinctions, and show import/declaration/effect grant omissions fail. One API-contract reviewer approves the compiled contract before Wave 2 runtime implementation closes.
+
+Narrow Slice 2D planning recheck at exact `073f00d98dac4b9110ec028da01d0fb71eaa3ae3` approved unchanged WIT/generated-body hashes and fixed/closed `P7-PLAN-2D-001`–`004`. Focused converter recheck at `ff76e01` closed `P7-API-2D-001`–`004`; HTTPS security recheck at `71aad74` closed `P7-2D-SEC-001`. Their tests remain retained, and neither verdict accepts final callback composition.
+
+Focused planning recheck **APPROVED** high `P7-PLAN-2D-005` and its UUID subsidiary at exact `dbf63a58f38df245b0b62337b29c644b8054984c`, including normalized-filter/hash goldens; exact keyset/filter/byte boundaries; task/project/tag traversal; cursor tamper/query/kind/profile/expiry/revision/event/key-replacement cases; profile-MAC/AI-domain separation; lazy serialized private-key creation/failure; one-page transaction consistency; revision presentation; and no default-runtime/artifact initialization. This authorizes ordinary app/storage query coding only—not implementation acceptance, callback composition, resync, supervisor, Slice 2C, Slice 2D, or Wave 2.

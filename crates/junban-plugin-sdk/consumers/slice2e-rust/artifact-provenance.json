@@ -1,0 +1,25 @@
+{
+  "schemaVersion": 1,
+  "authority": "crates/junban-plugin-sdk/wit/plugin.wit",
+  "witSha256": "5705801973219a0e6981693653f2caefdf1090345b65494750c8d8a9bf4b15f4",
+  "toolchain": "rustc 1.93.0",
+  "target": "wasm32-wasip2",
+  "witBindgen": "0.51.0",
+  "artifact": "crates/junban-plugin-sdk/consumers/slice2e-rust/slice2e-consumer.wasm",
+  "sizeBytes": 153835,
+  "sha256": "1b46b7666a1c3772cc394e36363bda8be32a95deeefbf8293d370404c8d11a4c",
+  "byteReproducible": true,
+  "imports": [
+    "junban:plugin/host-http@0.1.0",
+    "junban:plugin/host-services@0.1.0",
+    "junban:plugin/host-settings@0.1.0",
+    "junban:plugin/host-storage@0.1.0",
+    "junban:plugin/host-tasks@0.1.0",
+    "junban:plugin/types@0.1.0",
+    "wasi:cli/environment@0.2.6",
+    "wasi:cli/exit@0.2.6",
+    "wasi:cli/stderr@0.2.6",
+    "wasi:io/error@0.2.6",
+    "wasi:io/streams@0.2.6"
+  ]
+}

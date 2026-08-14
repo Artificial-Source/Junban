@@ -1,7 +1,7 @@
 /**
  * Settings modal shell — legacy desktop tab rail + mobile category index/detail.
  * Tabs: Essentials, Appearance, Features, AI, Voice, Keyboard, Templates,
- * Data, Hosted, Diagnostics. AI/Voice are lazy-loaded only when selected.
+ * Extensions, Data, Hosted, Diagnostics. AI/Voice/Extensions are lazy-loaded only when selected.
  */
 import { lazy, Suspense, useCallback, useEffect, useRef, useState, type ReactNode } from "react";
 import {
@@ -14,6 +14,7 @@ import {
   Keyboard,
   Mic,
   Palette,
+  Puzzle,
   Server,
   SlidersHorizontal,
   Sparkles,
@@ -35,6 +36,9 @@ import { TemplatesTab } from "./TemplatesTab";
 
 const AiTab = lazy(() => import("./ai/AiTab").then((mod) => ({ default: mod.AiTab })));
 const VoiceTab = lazy(() => import("./voice/VoiceTab").then((mod) => ({ default: mod.VoiceTab })));
+const PluginsTab = lazy(() =>
+  import("../../plugins/PluginsTab").then((mod) => ({ default: mod.PluginsTab })),
+);
 
 function SettingsTabFallback() {
   return (
@@ -101,6 +105,12 @@ const TABS: TabMeta[] = SETTINGS_TAB_META.map((meta) => {
         icon: <FileText {...iconProps} />,
         mobileIcon: <FileText {...mobileIconProps} />,
       };
+    case "plugins":
+      return {
+        ...meta,
+        icon: <Puzzle {...iconProps} />,
+        mobileIcon: <Puzzle {...mobileIconProps} />,
+      };
     case "data":
       return {
         ...meta,
@@ -155,6 +165,12 @@ function renderTabContent(tab: SettingsTabId): ReactNode {
       return wrap(<KeyboardTab />);
     case "templates":
       return wrap(<TemplatesTab />);
+    case "plugins":
+      return wrap(
+        <Suspense fallback={<SettingsTabFallback />}>
+          <PluginsTab />
+        </Suspense>,
+      );
     case "data":
       return wrap(<DataTab />);
     case "hosted":

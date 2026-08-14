@@ -1429,9 +1429,12 @@ async fn regenerate_replaces_exact_suffix_and_tombstones_old_run() {
             .unwrap_err(),
         junban_app::AppError::Conflict
     );
-    let backup = service.create_backup().await.unwrap();
-    let candidate = service.prepare_restore(backup).await.unwrap();
-    service.restore_backup(candidate).await.unwrap();
+    {
+        let _serial = crate::backup_ops::RESTORE_FAULT_TEST_LOCK.lock().await;
+        let backup = service.create_backup().await.unwrap();
+        let candidate = service.prepare_restore(backup).await.unwrap();
+        service.restore_backup(candidate).await.unwrap();
+    }
     assert_eq!(
         service
             .ensure_ai_response_current(old_run)

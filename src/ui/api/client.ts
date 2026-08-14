@@ -97,6 +97,7 @@ import type {
 export type * from "./types";
 export {
   KNOWN_EVENT_TYPES,
+  PLUGIN_EVENT_TYPES,
   RESYNC_REQUIRED_TYPE,
   isCommittedEvent,
   isKnownEventType,

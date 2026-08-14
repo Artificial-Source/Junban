@@ -71,7 +71,26 @@ cargo clippy --locked --workspace --all-targets --all-features -- -D warnings
 cargo test --locked --workspace --all-targets --all-features
 ```
 
-The current backend crates are `junban-domain`, `junban-app`, `junban-storage`, and `junban-server`. Supply-chain checks are also required:
+The current backend crates are `junban-domain`, `junban-app`, `junban-storage`, `junban-server`, `junban-cli`, `junban-mcp`, `junban-ai`, the pure `junban-plugin-sdk`, and the isolated `junban-plugin-host` binary. The SDK has no runtime host, storage, HTTP, or Wasmtime dependency; Wasmtime is confined to the child binary crate. Focused Phase 7 SDK/host checks are:
+
+```bash
+cargo clippy --locked -p junban-plugin-sdk -p junban-plugin-host --all-targets --all-features -- -D warnings
+cargo test --locked -p junban-plugin-sdk -p junban-plugin-host --all-targets --all-features
+cargo tree --locked -p junban-plugin-host -e features
+cargo tree --locked -p junban-server -e normal
+python3 scripts/check-phase7-sdk-consumers.py
+# Intentional binding/golden update only:
+# python3 scripts/check-phase7-sdk-consumers.py --regenerate
+cargo test --locked -p junban-server
+cargo test --locked -p junban-server --no-default-features
+cargo tree --locked -p junban-server --edges normal,build
+cargo tree --locked -p junban-server --no-default-features --edges normal,build
+python3 scripts/check-phase7-sdk-matched-release.py --self-check
+```
+
+The consumer check requires Rust 1.93 with `wasm32-wasip2`, exact `wit-bindgen-cli 0.51.0`, and `npm ci --ignore-scripts` in `crates/junban-plugin-sdk/consumers/typescript` for exact jco 1.26.1/ComponentizeJS 0.22.0. It compiles/typechecks both target worlds and verifies retained hashes, exact imports/exports, shared bindings, and the TypeScript size ceiling. See the consumer README for the explicit ComponentizeJS byte-reproducibility limitation.
+
+The default server touches the SDK's zero-allocation static product authority, including typed pointers that retain every production parser/validator without executing one. `--no-default-features` provides the matched feature-off benchmark baseline; neither configuration links or initializes Wasmtime. Supply-chain checks are also required:
 
 ```bash
 cargo deny check

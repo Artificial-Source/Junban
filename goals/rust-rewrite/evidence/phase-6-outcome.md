@@ -20,12 +20,12 @@ No Node runtime, second live store, schema-v7 compatibility layer, unrestricted 
 
 ### Disabled path
 
-The authoritative five-pair matched-release report at code/evidence candidate `a77298a46a195862f6e03f43314425a2fd55509c` passed every gate:
+The authoritative five-pair matched-release report at code/evidence candidate `6401108b31e7768048d154c8b14662bb3a2e9bb1` passed every gate:
 
-- Phase 5 parent median warm: **8.1289 MiB**;
-- Phase 6 disabled median warm: **8.2852 MiB**;
-- median delta: **0.1563 MiB**, below the frozen **1.2193 MiB** allowance;
-- Phase 6 maximum warm and peak: **9.2852 MiB**, below the **24/32 MiB** ceilings;
+- Phase 5 parent median warm: **8.0742 MiB**;
+- Phase 6 disabled median warm: **8.3711 MiB**;
+- median delta: **0.2969 MiB**, below the frozen **1.2111 MiB** allowance;
+- Phase 6 maximum warm / peak: **8.8477 / 8.9727 MiB**, below the **24/32 MiB** ceilings;
 - one Rust process, no resident Node process, cleanup, initial-UI request proof, and absolute/growth budgets all passed.
 
 Evidence: [`phase-6-disabled-matched-release.json`](phase-6-disabled-matched-release.json) and [`phase-6-disabled-matched-release-protocol.md`](phase-6-disabled-matched-release-protocol.md).
@@ -34,14 +34,14 @@ Evidence: [`phase-6-disabled-matched-release.json`](phase-6-disabled-matched-rel
 
 The authoritative three-profile optimized local-mock run on the same candidate passed every frozen gate:
 
-- post-session warm maximum: **10.4609 MiB**;
-- operation peak maximum: **11.7852 MiB**;
-- cgroup absolute peak maximum: **12.4570 MiB**;
-- post-drain growth maximum: **2.8633 MiB**;
-- first normalized event p95: **8.8160 ms**;
-- completed short turn p95: **11.0908 ms**;
-- cancellation-to-terminal-quiescence p95: **1.8420 ms**;
-- 1 MiB STT/TTS p95: **6.4414 / 3.9304 ms**.
+- post-session warm maximum: **11.0898 MiB**;
+- operation peak maximum: **12.6953 MiB**;
+- cgroup absolute peak maximum: **13.3164 MiB**;
+- post-drain growth maximum: **3.0898 MiB**;
+- first normalized event p95: **6.8936 ms**;
+- completed short turn p95: **10.5165 ms**;
+- cancellation-to-terminal-quiescence p95: **1.8527 ms**;
+- 1 MiB STT/TTS p95: **6.3739 / 3.9619 ms**.
 
 The exact operation matrix covered discovery, 90 fragmented UTF-8 streams, read tools, rejected and approved exactly-once mutations, retry-before-body, timeout, mid-stream failure, cancellation, 1 MiB speech, drain cleanup, secret scans, and the one-Rust/no-Node process boundary. Evidence: [`phase-6-enabled-benchmark.json`](phase-6-enabled-benchmark.json) and [`phase-6-enabled-benchmark-protocol.md`](phase-6-enabled-benchmark-protocol.md).
 

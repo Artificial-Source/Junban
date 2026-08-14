@@ -483,7 +483,7 @@ pub(crate) fn patch_project(
 }
 
 fn load_task_ids_for_project(
-    tx: &rusqlite::Transaction<'_>,
+    tx: &rusqlite::Connection,
     project_id: ProjectId,
 ) -> Result<Vec<TaskId>, RepositoryError> {
     let mut statement = tx
@@ -506,7 +506,7 @@ fn load_task_ids_for_project(
 }
 
 fn load_task_ids_for_section(
-    tx: &rusqlite::Transaction<'_>,
+    tx: &rusqlite::Connection,
     section_id: SectionId,
 ) -> Result<Vec<TaskId>, RepositoryError> {
     let mut statement = tx
@@ -529,7 +529,7 @@ fn load_task_ids_for_section(
 }
 
 fn load_task_ids_for_tag(
-    tx: &rusqlite::Transaction<'_>,
+    tx: &rusqlite::Connection,
     tag_id: TagId,
 ) -> Result<Vec<TaskId>, RepositoryError> {
     let mut statement = tx
@@ -671,7 +671,7 @@ pub(crate) fn delete_project(
 }
 
 fn load_time_slot_ids_for_project(
-    tx: &rusqlite::Transaction<'_>,
+    tx: &rusqlite::Connection,
     project_id: ProjectId,
 ) -> Result<Vec<TimeSlotId>, RepositoryError> {
     let mut statement = tx
@@ -986,7 +986,7 @@ pub(crate) fn delete_tag(
 }
 
 fn write_template_tags(
-    tx: &rusqlite::Transaction<'_>,
+    tx: &rusqlite::Connection,
     template_id: TemplateId,
     tag_names: &[TagName],
 ) -> Result<(), RepositoryError> {

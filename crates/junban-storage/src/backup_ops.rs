@@ -9,8 +9,8 @@ use std::{
 
 use jiff::{Timestamp, ToSpan};
 use junban_app::{
-    CommittedEvent, CommittedMutation, EventType, RepositoryError, ResourceSnapshot, ResourceType,
-    StagedFile,
+    CommittedEvent, CommittedMutation, CommittedPluginInvocation, EventType, RepositoryError,
+    ResourceSnapshot, ResourceType, StagedFile,
 };
 use junban_domain::{
     AI_APPROVAL_LIFETIME_SECS, AI_MEMORIES_PER_PROFILE_MAX, AI_MEMORY_BYTES_MAX,
@@ -33,6 +33,7 @@ use rusqlite::{Connection, MAIN_DB, OptionalExtension, Transaction, backup::Back
 use sha2::{Digest, Sha256};
 
 use crate::migration::{self, CURRENT_SCHEMA_VERSION};
+use crate::plugin_validation;
 use crate::rows::storage_error;
 use crate::{advise_dont_need_pages, ensure_private_dir, set_private_file_permissions};
 
@@ -51,6 +52,7 @@ pub(crate) fn create_backup(
     assert_integrity(connection)?;
     assert_foreign_keys_clean(connection)?;
     assert_canonical_schema(connection, profile_dir)?;
+    validate_authoritative_rows(connection)?;
 
     let inventory = read_inventory(connection)?;
     let schema_version = read_schema_version(connection)?;
@@ -81,6 +83,7 @@ pub(crate) fn create_backup(
     assert_integrity(&snapshot)?;
     assert_foreign_keys_clean(&snapshot)?;
     assert_canonical_schema(&snapshot, profile_dir)?;
+    validate_authoritative_rows(&snapshot)?;
     let normalized_inventory = read_inventory(&snapshot)?;
     drop(snapshot);
 
@@ -212,6 +215,7 @@ pub(crate) fn prepare_restore(
     // Candidate restore validation clears credential bindings and forces AI/cloud
     // speech disabled while preserving non-secret preferences/chat/memory data.
     sanitize_restored_ai_state(&validated)?;
+    sanitize_restored_plugin_state(&validated, &event_epoch)?;
     checkpoint_wal(&validated)?;
     validate_payload(&validated, &manifest, profile_dir)?;
     drop(validated);
@@ -350,16 +354,13 @@ fn open_and_validate_payload(
         .pragma_update(None, "foreign_keys", true)
         .map_err(storage_error)?;
 
-    // The framed payload and its hash have already been authenticated. Authenticate
-    // SQLite integrity before applying only the known in-place current-v6 response-
-    // authority correction; canonical schema and all semantic checks still follow.
+    // The framed payload and its hash have already been authenticated. Current-v7
+    // restore preflight is validation-only and never repairs missing schema objects.
     assert_integrity(&connection).map_err(|_| invalid_backup())?;
     let schema_version = read_schema_version(&connection).map_err(|_| invalid_backup())?;
     if schema_version != manifest.schema_version || schema_version != CURRENT_SCHEMA_VERSION {
         return Err(invalid_backup());
     }
-    migration::repair_current_v6_ai_response_authority(&connection)
-        .map_err(|_| invalid_backup())?;
     validate_payload(&connection, manifest, profile_dir)?;
     Ok(connection)
 }
@@ -496,6 +497,7 @@ fn validate_authoritative_rows(connection: &Connection) -> Result<(), Repository
     validate_event_rows(&tx, head)?;
     validate_receipt_rows(&tx, head)?;
     validate_graph_invariants(&tx)?;
+    crate::plugin_validation::validate_plugin_authority(&tx)?;
     tx.commit().map_err(storage_error)
 }
 
@@ -1508,6 +1510,79 @@ fn validate_event_rows(tx: &Transaction<'_>, head: u64) -> Result<(), Repository
     Ok(())
 }
 
+fn validate_receipt_mutation(
+    tx: &Transaction<'_>,
+    response: &CommittedMutation,
+    head: u64,
+    expected_operation_id: Option<OperationId>,
+) -> Result<(), RepositoryError> {
+    validate_committed_event(&response.event)?;
+    if expected_operation_id.is_some_and(|operation_id| response.event.operation_id != operation_id)
+        || response.event.revision > head
+    {
+        return Err(RepositoryError::Storage(
+            "receipt response identity is inconsistent".to_owned(),
+        ));
+    }
+    let retained_event: Option<String> = tx
+        .query_row(
+            "SELECT event_json FROM events WHERE revision = ?1",
+            [i64::try_from(response.event.revision).map_err(storage_error)?],
+            |row| row.get(0),
+        )
+        .optional()
+        .map_err(storage_error)?;
+    if let Some(retained_event) = retained_event {
+        let retained: CommittedEvent =
+            serde_json::from_str(&retained_event).map_err(storage_error)?;
+        if retained != response.event {
+            return Err(RepositoryError::Storage(
+                "receipt response disagrees with retained event".to_owned(),
+            ));
+        }
+    }
+    Ok(())
+}
+
+fn validate_plugin_invocation_receipt(
+    tx: &Transaction<'_>,
+    operation_id: OperationId,
+    request_json: &str,
+    response_json: &str,
+    head: u64,
+) -> Result<(), RepositoryError> {
+    let _request = crate::plugin_ops::parse_invocation_receipt_request(operation_id, request_json)?;
+    let response: CommittedPluginInvocation =
+        serde_json::from_str(response_json).map_err(storage_error)?;
+    let in_flight: bool = tx
+        .query_row(
+            "SELECT EXISTS(
+                SELECT 1 FROM plugin_invocations WHERE operation_id = ?1
+             )",
+            [operation_id.to_string()],
+            |row| row.get(0),
+        )
+        .map_err(storage_error)?;
+    if serde_json::to_string(&response).map_err(storage_error)? != response_json
+        || in_flight
+        || response.cursor.is_some()
+        || !crate::plugin_ops::plugin_invocation_terminal_shape_is_valid(&response)
+    {
+        return Err(RepositoryError::Storage(
+            "plugin invocation terminal receipt is inconsistent".to_owned(),
+        ));
+    }
+    if let Some(mutation) = &response.mutation {
+        if mutation.event.operation_id == operation_id {
+            return Err(RepositoryError::Storage(
+                "plugin invocation child receipt reuses terminal identity".to_owned(),
+            ));
+        }
+        validate_receipt_mutation(tx, mutation, head, None)?;
+    }
+    Ok(())
+}
+
 fn validate_receipt_rows(tx: &Transaction<'_>, head: u64) -> Result<(), RepositoryError> {
     let mut after: Option<String> = None;
     loop {
@@ -1544,29 +1619,43 @@ fn validate_receipt_rows(tx: &Transaction<'_>, head: u64) -> Result<(), Reposito
                     "receipt request is not a contract object".to_owned(),
                 ));
             }
-            let response: CommittedMutation =
-                serde_json::from_str(response_json).map_err(storage_error)?;
-            validate_committed_event(&response.event)?;
-            if response.event.operation_id != operation_id || response.event.revision > head {
-                return Err(RepositoryError::Storage(
-                    "receipt response identity is inconsistent".to_owned(),
-                ));
-            }
-            let retained_event: Option<String> = tx
-                .query_row(
-                    "SELECT event_json FROM events WHERE revision = ?1",
-                    [i64::try_from(response.event.revision).map_err(storage_error)?],
-                    |row| row.get(0),
-                )
-                .optional()
-                .map_err(storage_error)?;
-            if let Some(retained_event) = retained_event {
-                let retained: CommittedEvent =
-                    serde_json::from_str(&retained_event).map_err(storage_error)?;
-                if retained != response.event {
-                    return Err(RepositoryError::Storage(
-                        "receipt response disagrees with retained event".to_owned(),
-                    ));
+            if request.get("op").and_then(serde_json::Value::as_str) == Some("fence_plugin_graph") {
+                let outcome = crate::plugin_ops::validate_plugin_graph_fence_receipt(
+                    operation_id,
+                    request_json,
+                    response_json,
+                )?;
+                validate_receipt_mutation(tx, &outcome.mutation, head, Some(operation_id))?;
+            } else if request.get("op").and_then(serde_json::Value::as_str)
+                == Some("mark_plugin_retention_loss")
+            {
+                crate::plugin_ops::validate_plugin_retention_loss_receipt(
+                    operation_id,
+                    request_json,
+                    response_json,
+                )?;
+            } else if request.get("op").and_then(serde_json::Value::as_str)
+                == Some("mark_plugin_invalidating_event")
+            {
+                crate::plugin_ops::validate_plugin_invalidating_event_receipt(
+                    operation_id,
+                    request_json,
+                    response_json,
+                )?;
+            } else {
+                match serde_json::from_str::<CommittedMutation>(response_json) {
+                    Ok(response) => {
+                        validate_receipt_mutation(tx, &response, head, Some(operation_id))?;
+                    }
+                    Err(_) => {
+                        validate_plugin_invocation_receipt(
+                            tx,
+                            operation_id,
+                            request_json,
+                            response_json,
+                            head,
+                        )?;
+                    }
                 }
             }
             match (created_at, expires_at) {
@@ -1839,6 +1928,20 @@ fn validate_event_type(raw: &str) -> Result<(), RepositoryError> {
             | EventType::AI_MEMORY_CHANGED
             | EventType::AI_MEMORY_DELETED
             | EventType::AI_APPROVAL_CHANGED
+            | EventType::PLUGIN_INSTALLED
+            | EventType::PLUGIN_REPLACED
+            | EventType::PLUGIN_UNINSTALLED
+            | EventType::PLUGIN_ENABLED
+            | EventType::PLUGIN_DISABLED
+            | EventType::PLUGIN_RETRY_REQUESTED
+            | EventType::PLUGIN_PUBLISHER_TRUSTED
+            | EventType::PLUGIN_PUBLISHER_REVOKED
+            | EventType::PLUGIN_COMMUNITY_POLICY_UPDATED
+            | EventType::PLUGIN_GRANTS_REPLACED
+            | EventType::PLUGIN_GRANTS_REVOKED
+            | EventType::PLUGIN_SETTING_UPDATED
+            | EventType::PLUGIN_SETTING_DELETED
+            | EventType::PLUGIN_HEALTH_CHANGED
     ) {
         Ok(())
     } else {
@@ -1879,6 +1982,9 @@ fn validate_subject(
             parse_canonical_ai_id(id, AiRunId::parse).map(|_| ())
         }
         (Some("ai_response_rewrite"), Some("edit" | "retry" | "regenerate")) => Ok(()),
+        (Some("plugin"), Some(id)) => junban_plugin_sdk::PluginId::parse(id)
+            .map(|_| ())
+            .map_err(storage_error),
         (Some("ai_session_memory"), Some(id)) => {
             let (session, memory) = id.split_once(':').ok_or_else(|| {
                 RepositoryError::Storage("invalid AI session-memory subject".to_owned())
@@ -1893,7 +1999,7 @@ fn validate_subject(
     }
 }
 
-fn validate_committed_event(event: &CommittedEvent) -> Result<(), RepositoryError> {
+pub(crate) fn validate_committed_event(event: &CommittedEvent) -> Result<(), RepositoryError> {
     if event.revision == 0 {
         return Err(RepositoryError::Storage(
             "event revision is zero".to_owned(),
@@ -1904,6 +2010,17 @@ fn validate_committed_event(event: &CommittedEvent) -> Result<(), RepositoryErro
         validate_resource_id(primary.resource_type, &primary.id)?;
     }
     validate_task_ids(&event.affected.task_ids)?;
+    if event.affected.plugin_ids.len() > junban_app::PLUGINS_INSTALLED_MAX
+        || event
+            .affected
+            .plugin_ids
+            .windows(2)
+            .any(|pair| pair[0] >= pair[1])
+    {
+        return Err(RepositoryError::Storage(
+            "event affected plugin IDs exceed the bounded contract".to_owned(),
+        ));
+    }
     for count in [
         event.affected.project_ids.len(),
         event.affected.section_ids.len(),
@@ -1948,6 +2065,87 @@ fn validate_committed_event(event: &CommittedEvent) -> Result<(), RepositoryErro
             }
             ResourceSnapshot::TimeBlock { time_block } => validate_time_block_value(time_block)?,
             ResourceSnapshot::TimeSlot { time_slot } => validate_time_slot_value(time_slot)?,
+            ResourceSnapshot::Plugin { plugin } => {
+                junban_plugin_sdk::PluginId::parse(plugin.plugin_id.to_string())
+                    .map_err(storage_error)?;
+                if event.primary.as_ref().is_none_or(|primary| {
+                    primary.resource_type != ResourceType::Plugin
+                        || primary.id != plugin.plugin_id.as_str()
+                }) {
+                    return Err(RepositoryError::Storage(
+                        "plugin event snapshot identity mismatch".to_owned(),
+                    ));
+                }
+                junban_plugin_sdk::compare_versions(&plugin.version, &plugin.version)
+                    .map_err(storage_error)?;
+                let capabilities_canonical = plugin.requested_capabilities.len()
+                    <= junban_plugin_sdk::PERMISSIONS_MAX
+                    && plugin
+                        .requested_capabilities
+                        .windows(2)
+                        .all(|pair| pair[0] < pair[1]);
+                let granted_capabilities_canonical = plugin.granted_capabilities.len()
+                    <= junban_plugin_sdk::PERMISSIONS_MAX
+                    && plugin
+                        .granted_capabilities
+                        .windows(2)
+                        .all(|pair| pair[0] < pair[1])
+                    && plugin
+                        .granted_capabilities
+                        .iter()
+                        .all(|capability| plugin.requested_capabilities.contains(capability));
+                let dependencies_canonical = plugin.dependencies.len()
+                    <= junban_plugin_sdk::PLUGIN_DEPENDENCIES_MAX
+                    && plugin.dependencies.windows(2).all(|pair| pair[0] < pair[1])
+                    && !plugin.dependencies.contains(&plugin.plugin_id);
+                let runtime_state_consistent = match plugin.runtime_state {
+                    junban_app::PluginRuntimeState::Disabled => {
+                        !plugin.desired_enabled && plugin.last_error_code.is_none()
+                    }
+                    junban_app::PluginRuntimeState::Starting
+                    | junban_app::PluginRuntimeState::Active => {
+                        plugin.desired_enabled && plugin.last_error_code.is_none()
+                    }
+                    junban_app::PluginRuntimeState::Degraded
+                    | junban_app::PluginRuntimeState::Failed => {
+                        plugin.desired_enabled && plugin.last_error_code.is_some()
+                    }
+                    junban_app::PluginRuntimeState::Suspended => {
+                        !plugin.desired_enabled && plugin.last_error_code.is_some()
+                    }
+                    junban_app::PluginRuntimeState::ReverifyRequired => !plugin.desired_enabled,
+                };
+                if plugin.name.is_empty()
+                    || plugin.name.len() > 128
+                    || plugin.name != plugin.name.trim()
+                    || plugin.name.chars().any(|character| {
+                        character.is_control()
+                            || matches!(
+                                character,
+                                '\u{202a}'..='\u{202e}' | '\u{2066}'..='\u{2069}'
+                            )
+                    })
+                    || plugin.version.is_empty()
+                    || plugin.version.len() > 64
+                    || plugin.package_generation == 0
+                    || plugin.package_generation > i64::MAX as u64
+                    || plugin.activation_epoch > i64::MAX as u64
+                    || !capabilities_canonical
+                    || !granted_capabilities_canonical
+                    || !dependencies_canonical
+                    || !runtime_state_consistent
+                    || (plugin.runtime_state == junban_app::PluginRuntimeState::Active
+                        && !plugin.dependencies_satisfied)
+                    || plugin
+                        .last_error_code
+                        .as_deref()
+                        .is_some_and(|code| !plugin_validation::valid_error_code(code))
+                {
+                    return Err(RepositoryError::Storage(
+                        "invalid plugin event snapshot".to_owned(),
+                    ));
+                }
+            }
         }
     }
     Ok(())
@@ -1969,6 +2167,9 @@ fn validate_resource_id(kind: ResourceType, id: &str) -> Result<(), RepositoryEr
         ResourceType::AiSession => parse_canonical_ai_id(id, AiSessionId::parse).map(|_| ()),
         ResourceType::AiMemory => parse_canonical_ai_id(id, AiMemoryId::parse).map(|_| ()),
         ResourceType::AiApproval => parse_canonical_ai_id(id, AiApprovalId::parse).map(|_| ()),
+        ResourceType::Plugin => junban_plugin_sdk::PluginId::parse(id)
+            .map(|_| ())
+            .map_err(storage_error),
         ResourceType::Relation => Ok(()),
         _ => Err(RepositoryError::Storage(
             "invalid event resource id".to_owned(),
@@ -2424,6 +2625,61 @@ fn normalize_runtime_state(connection: &Connection) -> Result<(), RepositoryErro
     Ok(())
 }
 
+/// Disable and invalidate persisted plugin runtime authority on a restore candidate.
+/// This never reads package/component files or constructs a plugin host.
+fn sanitize_restored_plugin_state(
+    connection: &Connection,
+    event_epoch: &str,
+) -> Result<(), RepositoryError> {
+    let transaction = connection.unchecked_transaction().map_err(storage_error)?;
+    let exhausted: bool = transaction
+        .query_row(
+            "SELECT EXISTS(SELECT 1 FROM plugins WHERE activation_epoch = ?1)",
+            [i64::MAX],
+            |row| row.get(0),
+        )
+        .map_err(storage_error)?;
+    if exhausted {
+        return Err(RepositoryError::Storage(
+            "plugin activation epoch exhausted while sanitizing restore candidate".to_owned(),
+        ));
+    }
+    let now = Timestamp::now().to_string();
+    // Invocation rows fence the old activation epoch, so remove them before advancing
+    // plugin epochs in this same transaction.
+    transaction
+        .execute("DELETE FROM plugin_invocations", [])
+        .map_err(storage_error)?;
+    transaction
+        .execute(
+            "UPDATE plugins
+             SET desired_enabled = 0,
+                 activation_epoch = activation_epoch + 1,
+                 runtime_state = 'reverify_required',
+                 failure_count = 0,
+                 last_error_code = NULL,
+                 next_retry_at = NULL,
+                 updated_at = ?1",
+            [now.as_str()],
+        )
+        .map_err(storage_error)?;
+    let head: i64 = transaction
+        .query_row(
+            "SELECT global_revision FROM app_state WHERE singleton = 1",
+            [],
+            |row| row.get(0),
+        )
+        .map_err(storage_error)?;
+    transaction
+        .execute(
+            "UPDATE plugin_event_cursors
+             SET event_epoch = ?1, revision = ?2, resync_required = 1, updated_at = ?3",
+            params![event_epoch, head, now],
+        )
+        .map_err(storage_error)?;
+    transaction.commit().map_err(storage_error)
+}
+
 /// Clear credential bindings, force AI/cloud speech disabled, and recover ephemeral
 /// approval/run authority on a restore candidate. Never touches `ai-secrets.json`.
 fn sanitize_restored_ai_state(connection: &Connection) -> Result<(), RepositoryError> {
@@ -2746,9 +3002,14 @@ fn record_post_copy_epoch(connection: &Connection) -> Result<(), RepositoryError
 mod tests {
     use super::*;
     use crate::ProfileOwner;
-    use junban_app::Repository;
+    use junban_app::{PluginRepository, Repository};
     use junban_domain::{
         OperationId, TaskDraft, TaskTitle, frame_backup_envelope, parse_backup_envelope, sha256_hex,
+    };
+    use junban_plugin_sdk::{
+        Capability, CommandDeclaration, HttpMethod, HttpOrigin, HttpScope, Permission,
+        PermissionScope, Publisher, RuntimeManifest, RuntimeProfile, UnscopedPermission,
+        WitAuthority, scope_hash,
     };
     use std::time::{SystemTime, UNIX_EPOCH};
 
@@ -2811,6 +3072,174 @@ mod tests {
         assert!(dir.path().join("junban.sqlite3").exists());
     }
 
+    #[tokio::test]
+    async fn complete_backup_rejects_malformed_plugin_authority_without_truncation() {
+        let (dir, owner) = temp_profile();
+        seed_plugin_backup_rows(&dir, 2);
+        let connection = Connection::open(dir.path().join(crate::DATABASE_FILE)).unwrap();
+        connection
+            .execute(
+                "UPDATE plugins SET manifest_json = manifest_json || ' '",
+                [],
+            )
+            .unwrap();
+        drop(connection);
+        let repo = owner.repository();
+        assert!(repo.create_backup().await.is_err());
+        let connection = Connection::open(dir.path().join(crate::DATABASE_FILE)).unwrap();
+        let retained: String = connection
+            .query_row(
+                "SELECT manifest_json FROM plugins WHERE plugin_id = 'restore-plugin'",
+                [],
+                |row| row.get(0),
+            )
+            .unwrap();
+        assert!(retained.ends_with(' '));
+    }
+
+    #[tokio::test]
+    async fn restore_disables_and_reverifies_plugins_without_constructing_runtime() {
+        let _serial = RESTORE_FAULT_TEST_LOCK.lock().await;
+        let (dir, owner) = temp_profile();
+        seed_plugin_backup_rows(&dir, 9);
+        let repo = owner.repository();
+        let backup = repo.create_backup().await.unwrap();
+        let candidate = repo.prepare_restore(backup).await.unwrap();
+        let connection = Connection::open(candidate.path()).unwrap();
+        let plugin: (i64, i64, String, i64, Option<String>, Option<String>) = connection
+            .query_row(
+                "SELECT desired_enabled, activation_epoch, runtime_state, failure_count,
+                        last_error_code, next_retry_at
+                 FROM plugins WHERE plugin_id = 'restore-plugin'",
+                [],
+                |row| {
+                    Ok((
+                        row.get(0)?,
+                        row.get(1)?,
+                        row.get(2)?,
+                        row.get(3)?,
+                        row.get(4)?,
+                        row.get(5)?,
+                    ))
+                },
+            )
+            .unwrap();
+        assert_eq!(plugin, (0, 10, "reverify_required".into(), 0, None, None));
+        let invocation_count: i64 = connection
+            .query_row("SELECT COUNT(*) FROM plugin_invocations", [], |row| {
+                row.get(0)
+            })
+            .unwrap();
+        assert_eq!(invocation_count, 0);
+        let (epoch, head): (String, i64) = connection
+            .query_row(
+                "SELECT event_epoch, global_revision FROM app_state WHERE singleton = 1",
+                [],
+                |row| Ok((row.get(0)?, row.get(1)?)),
+            )
+            .unwrap();
+        let cursor: (String, i64, i64) = connection
+            .query_row(
+                "SELECT event_epoch, revision, resync_required
+                 FROM plugin_event_cursors WHERE plugin_id = 'restore-plugin'",
+                [],
+                |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?)),
+            )
+            .unwrap();
+        assert_eq!(cursor, (epoch, head, 1));
+        let preserved: (i64, i64, i64, Vec<u8>, i64, i64) = connection
+            .query_row(
+                "SELECT p.package_generation, s.next_package_generation,
+                        policy.community_enabled, kv.value,
+                        (SELECT COUNT(*) FROM plugin_grants),
+                        (SELECT COUNT(*) FROM plugin_publisher_trust)
+                 FROM plugins AS p
+                 CROSS JOIN plugin_profile_state AS s
+                 CROSS JOIN plugin_policy AS policy
+                 JOIN plugin_kv AS kv ON kv.plugin_id = p.plugin_id
+                 WHERE p.plugin_id = 'restore-plugin'",
+                [],
+                |row| {
+                    Ok((
+                        row.get(0)?,
+                        row.get(1)?,
+                        row.get(2)?,
+                        row.get(3)?,
+                        row.get(4)?,
+                        row.get(5)?,
+                    ))
+                },
+            )
+            .unwrap();
+        assert_eq!(preserved, (1, 2, 1, vec![1, 2], 1, 1));
+        crate::plugin_validation::validate_plugin_authority(&connection).unwrap();
+    }
+
+    #[tokio::test]
+    async fn restore_rejects_plugin_activation_epoch_overflow_before_cutover() {
+        let _serial = RESTORE_FAULT_TEST_LOCK.lock().await;
+        let (dir, owner) = temp_profile();
+        seed_plugin_backup_rows(&dir, i64::MAX);
+        let repo = owner.repository();
+        let epoch_before = repo.get_sync_state().await.unwrap().event_epoch;
+        let backup = repo.create_backup().await.unwrap();
+        assert!(repo.prepare_restore(backup).await.is_err());
+        assert_eq!(
+            repo.get_sync_state().await.unwrap().event_epoch,
+            epoch_before
+        );
+    }
+
+    #[tokio::test]
+    async fn restore_sanitization_advances_to_the_max_epoch_without_overflow() {
+        let _serial = RESTORE_FAULT_TEST_LOCK.lock().await;
+        let (dir, owner) = temp_profile();
+        seed_plugin_backup_rows(&dir, i64::MAX - 1);
+        let repo = owner.repository();
+        let backup = repo.create_backup().await.unwrap();
+        let candidate = repo.prepare_restore(backup).await.unwrap();
+        repo.restore_backup(candidate).await.unwrap();
+
+        let plugin = repo
+            .get_installed_plugin(junban_plugin_sdk::PluginId::parse("restore-plugin").unwrap())
+            .await
+            .unwrap();
+        assert_eq!(plugin.activation_epoch, i64::MAX as u64);
+        assert_eq!(
+            plugin.runtime_state,
+            junban_app::PluginRuntimeState::ReverifyRequired
+        );
+        assert!(!plugin.desired_enabled);
+    }
+
+    #[tokio::test]
+    async fn restore_rejects_malformed_plugin_authority_without_truncating_live() {
+        let _serial = RESTORE_FAULT_TEST_LOCK.lock().await;
+        let (dir, owner) = temp_profile();
+        seed_plugin_backup_rows(&dir, 3);
+        let repo = owner.repository();
+        let epoch_before = repo.get_sync_state().await.unwrap().event_epoch;
+        let backup = repo.create_backup().await.unwrap();
+        let hostile = rewrite_backup_payload(
+            &dir,
+            &backup,
+            "UPDATE plugins SET manifest_json = manifest_json || ' ';",
+        );
+        assert!(matches!(
+            repo.prepare_restore(hostile).await,
+            Err(RepositoryError::Validation(_))
+        ));
+        assert_eq!(
+            repo.get_sync_state().await.unwrap().event_epoch,
+            epoch_before
+        );
+        let connection = Connection::open(dir.path().join(crate::DATABASE_FILE)).unwrap();
+        let count: i64 = connection
+            .query_row("SELECT COUNT(*) FROM plugins", [], |row| row.get(0))
+            .unwrap();
+        assert_eq!(count, 1);
+    }
+
     fn rewrite_backup_payload(dir: &TempDir, backup: &StagedFile, sql: &str) -> StagedFile {
         rewrite_backup_with(dir, backup, |connection| {
             connection.execute_batch(sql).unwrap();
@@ -2818,48 +3247,130 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn restore_repairs_only_known_pre_wave3g_schema_v6_objects() {
+    async fn restore_rejects_each_missing_v6_authority_without_repair_or_cutover() {
         let (dir, owner) = temp_profile();
         let repo = owner.repository();
         let backup = repo.create_backup().await.unwrap();
-        let legacy = rewrite_backup_payload(
-            &dir,
-            &backup,
-            "DROP INDEX idx_ai_messages_daily_briefing_active;
-             DROP INDEX idx_ai_messages_briefing_date;
-             DROP TABLE ai_response_invalidations;",
-        );
+        let live = Connection::open(dir.path().join(crate::DATABASE_FILE)).unwrap();
+        live.execute(
+            "INSERT INTO ai_response_invalidations(
+                run_id, session_id, invalidating_operation_id, expires_at
+             ) VALUES ('retained-run', 'retained-session', 'retained-operation',
+                '2026-08-04T12:00:00Z')",
+            [],
+        )
+        .unwrap();
+        drop(live);
 
-        let candidate = repo.prepare_restore(legacy).await.unwrap();
-        let repaired = Connection::open(candidate.path()).unwrap();
-        let repaired_objects: i64 = repaired
+        for (name, drop_sql) in [
+            (
+                "idx_ai_run_state_state",
+                "DROP INDEX idx_ai_run_state_state;",
+            ),
+            (
+                "idx_ai_messages_daily_briefing_active",
+                "DROP INDEX idx_ai_messages_daily_briefing_active;",
+            ),
+            (
+                "idx_ai_messages_briefing_date",
+                "DROP INDEX idx_ai_messages_briefing_date;",
+            ),
+            (
+                "ai_response_invalidations",
+                "DROP TABLE ai_response_invalidations;",
+            ),
+        ] {
+            let hostile = rewrite_backup_payload(&dir, &backup, drop_sql);
+            assert!(
+                matches!(
+                    repo.prepare_restore(hostile).await,
+                    Err(RepositoryError::Validation(_))
+                ),
+                "{name}"
+            );
+            let live = Connection::open(dir.path().join(crate::DATABASE_FILE)).unwrap();
+            let retained: i64 = live
+                .query_row(
+                    "SELECT COUNT(*) FROM ai_response_invalidations",
+                    [],
+                    |row| row.get(0),
+                )
+                .unwrap();
+            assert_eq!(retained, 1, "{name}");
+            assert_canonical_schema(&live, dir.path()).unwrap();
+        }
+    }
+
+    #[test]
+    fn normal_open_rejects_in_bound_text_plugin_kv_without_repair() {
+        let (dir, owner) = temp_profile();
+        seed_plugin_backup_rows(&dir, 3);
+        let connection = Connection::open(dir.path().join(crate::DATABASE_FILE)).unwrap();
+        connection
+            .pragma_update(None, "ignore_check_constraints", true)
+            .unwrap();
+        connection
+            .execute(
+                "UPDATE plugin_kv SET value = CAST('within-bounds' AS TEXT)
+                 WHERE plugin_id = 'restore-plugin' AND key = 'preserved'",
+                [],
+            )
+            .unwrap();
+        connection
+            .pragma_update(None, "ignore_check_constraints", false)
+            .unwrap();
+        drop(connection);
+        drop(owner);
+
+        assert!(matches!(
+            ProfileOwner::open(dir.path()),
+            Err(crate::OpenError::Database(_))
+        ));
+        let retained = Connection::open(dir.path().join(crate::DATABASE_FILE)).unwrap();
+        let storage_class: String = retained
             .query_row(
-                "SELECT COUNT(*) FROM sqlite_schema WHERE name IN (
-                    'idx_ai_messages_daily_briefing_active',
-                    'idx_ai_messages_briefing_date',
-                    'ai_response_invalidations',
-                    'idx_ai_response_invalidations_session',
-                    'idx_ai_response_invalidations_expiry'
-                 )",
+                "SELECT typeof(value) FROM plugin_kv
+                 WHERE plugin_id = 'restore-plugin' AND key = 'preserved'",
                 [],
                 |row| row.get(0),
             )
             .unwrap();
-        assert_eq!(repaired_objects, 5);
-        drop(repaired);
-        repo.restore_backup(candidate).await.unwrap();
-        drop(repo);
-        drop(owner);
-
-        let reopened = ProfileOwner::open(dir.path()).unwrap();
-        let connection = Connection::open(dir.path().join(crate::DATABASE_FILE)).unwrap();
-        assert_canonical_schema(&connection, dir.path()).unwrap();
-        drop(connection);
-        drop(reopened);
+        assert_eq!(storage_class, "text");
     }
 
     #[tokio::test]
-    async fn restore_rejects_conflicting_known_v6_repair_object() {
+    async fn restore_preflight_rejects_in_bound_text_plugin_kv_without_repair() {
+        let (dir, owner) = temp_profile();
+        seed_plugin_backup_rows(&dir, 3);
+        let repo = owner.repository();
+        let backup = repo.create_backup().await.unwrap();
+        let hostile = rewrite_backup_payload(
+            &dir,
+            &backup,
+            "PRAGMA ignore_check_constraints = ON;
+             UPDATE plugin_kv SET value = CAST('within-bounds' AS TEXT)
+             WHERE plugin_id = 'restore-plugin' AND key = 'preserved';
+             PRAGMA ignore_check_constraints = OFF;",
+        );
+
+        assert!(matches!(
+            repo.prepare_restore(hostile).await,
+            Err(RepositoryError::Validation(_))
+        ));
+        let live = Connection::open(dir.path().join(crate::DATABASE_FILE)).unwrap();
+        let storage_class: String = live
+            .query_row(
+                "SELECT typeof(value) FROM plugin_kv
+                 WHERE plugin_id = 'restore-plugin' AND key = 'preserved'",
+                [],
+                |row| row.get(0),
+            )
+            .unwrap();
+        assert_eq!(storage_class, "blob");
+    }
+
+    #[tokio::test]
+    async fn restore_rejects_conflicting_v6_era_authority_object() {
         let (dir, owner) = temp_profile();
         let repo = owner.repository();
         let epoch_before = repo.get_sync_state().await.unwrap().event_epoch;
@@ -2911,6 +3422,173 @@ mod tests {
             Timestamp::now(),
             1,
         )
+    }
+
+    fn seed_plugin_backup_rows(dir: &TempDir, activation_epoch: i64) {
+        let connection = Connection::open(dir.path().join(crate::DATABASE_FILE)).unwrap();
+        connection
+            .pragma_update(None, "foreign_keys", true)
+            .unwrap();
+        let manifest = RuntimeManifest {
+            schema_version: 1,
+            id: "restore-plugin".into(),
+            name: "Restore plugin".into(),
+            description: "Backup restore fixture".into(),
+            version: "1.0.0".into(),
+            publisher: Publisher {
+                id: "restore-publisher".into(),
+                name: "Restore Publisher".into(),
+                key_id: "22".repeat(32),
+            },
+            license: "MIT".into(),
+            junban_compatibility: "^0.1".into(),
+            wit: WitAuthority {
+                package: "junban:plugin".into(),
+                world: "plugin".into(),
+                version: "0.1.0".into(),
+            },
+            runtime_profile: RuntimeProfile::Typescript,
+            component_sha256: "11".repeat(32),
+            permissions: vec![
+                Permission {
+                    capability: Capability::Commands,
+                    scope: PermissionScope::Unscoped(UnscopedPermission::default()),
+                },
+                Permission {
+                    capability: Capability::Http,
+                    scope: PermissionScope::Http(HttpScope {
+                        origins: vec![HttpOrigin("https://example.test".to_owned())],
+                        methods: vec![HttpMethod::Post],
+                    }),
+                },
+            ],
+            dependencies: Vec::new(),
+            commands: vec![CommandDeclaration {
+                id: "run".into(),
+                title: "Run".into(),
+                description: "Run the backup fixture".into(),
+                icon: None,
+                inputs: Vec::new(),
+            }],
+            subscriptions: Vec::new(),
+            surfaces: Vec::new(),
+            settings: Vec::new(),
+            services: Vec::new(),
+        };
+        let manifest_json = String::from_utf8(manifest.canonical_bytes().unwrap()).unwrap();
+        let permission_hash = {
+            let bytes = manifest.permission_hash().unwrap();
+            bytes
+                .iter()
+                .map(|byte| format!("{byte:02x}"))
+                .collect::<String>()
+        };
+        let (event_epoch, head): (String, i64) = connection
+            .query_row(
+                "SELECT event_epoch, global_revision FROM app_state WHERE singleton = 1",
+                [],
+                |row| Ok((row.get(0)?, row.get(1)?)),
+            )
+            .unwrap();
+        connection
+            .execute(
+                "UPDATE plugin_profile_state
+                 SET next_package_generation = 2, updated_at = '2020-08-04T12:00:00Z'",
+                [],
+            )
+            .unwrap();
+        connection
+            .execute("UPDATE plugin_policy SET community_enabled = 1", [])
+            .unwrap();
+        connection
+            .execute(
+                "INSERT INTO plugins(
+                    plugin_id, package_generation, activation_epoch, package_sha256,
+                    component_sha256, publisher_key_id, version, manifest_json,
+                    permission_hash, compatibility, desired_enabled, runtime_state,
+                    failure_count, last_error_code, next_retry_at, installed_at, updated_at
+                 ) VALUES (?1, 1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, 1, 'failed', 2,
+                    'guest_trap', '2020-08-04T12:01:00Z', ?10, ?10)",
+                params![
+                    manifest.id,
+                    activation_epoch,
+                    "33".repeat(32),
+                    manifest.component_sha256,
+                    manifest.publisher.key_id,
+                    manifest.version,
+                    manifest_json,
+                    permission_hash,
+                    manifest.junban_compatibility,
+                    "2020-08-04T12:00:00Z",
+                ],
+            )
+            .unwrap();
+        let permission = &manifest.permissions[0];
+        let scope_json = serde_json::to_string(&permission.scope).unwrap();
+        let scope_hash = scope_hash(permission)
+            .unwrap()
+            .iter()
+            .map(|byte| format!("{byte:02x}"))
+            .collect::<String>();
+        connection
+            .execute(
+                "INSERT INTO plugin_grants(
+                    plugin_id, package_generation, capability, scope_json, scope_hash,
+                    permission_hash, granted_at
+                 ) VALUES ('restore-plugin', 1, ?1, ?2, ?3, ?4,
+                    '2020-08-04T12:00:00Z')",
+                params![
+                    permission.capability.as_str(),
+                    scope_json,
+                    scope_hash,
+                    permission_hash
+                ],
+            )
+            .unwrap();
+        let public_key = vec![9_u8; 32];
+        connection
+            .execute(
+                "INSERT INTO plugin_publisher_trust(
+                    key_id, public_key, status, trusted_at, revoked_at
+                 ) VALUES (?1, ?2, 'active', '2020-08-04T12:00:00Z', NULL)",
+                params![sha256_hex(&public_key), public_key],
+            )
+            .unwrap();
+        connection
+            .execute(
+                "INSERT INTO plugin_kv(plugin_id, key, value, updated_at)
+                 VALUES ('restore-plugin', 'preserved', X'0102', '2020-08-04T12:00:00Z')",
+                [],
+            )
+            .unwrap();
+        connection
+            .execute(
+                "INSERT INTO plugin_event_cursors(
+                    plugin_id, event_epoch, revision, resync_required, updated_at
+                 ) VALUES ('restore-plugin', ?1, ?2, 0, '2020-08-04T12:00:00Z')",
+                params![event_epoch, head],
+            )
+            .unwrap();
+        if activation_epoch != i64::MAX {
+            connection
+                .execute(
+                    "INSERT INTO plugin_invocations(
+                        operation_id, plugin_id, package_generation, activation_epoch,
+                        hook_kind, entry_id, request_hash, delivery_id, state, error_code,
+                        created_at, updated_at, retain_until
+                     ) VALUES (?1, 'restore-plugin', 1, ?2, 'invoke_command', 'run', ?3, ?4,
+                        'ambiguous_http', 'http_ambiguous', '2020-08-04T12:00:00Z',
+                        '2020-08-04T12:01:00Z', '2020-09-03T12:00:00Z')",
+                    params![
+                        uuid::Uuid::new_v4().to_string(),
+                        activation_epoch,
+                        "44".repeat(32),
+                        uuid::Uuid::new_v4().to_string(),
+                    ],
+                )
+                .unwrap();
+        }
+        crate::plugin_validation::validate_plugin_authority(&connection).unwrap();
     }
 
     fn seed_ai_backup_rows(dir: &TempDir) {

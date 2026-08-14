@@ -30,6 +30,9 @@ struct Config {
 
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
+    #[cfg(feature = "plugin-sdk")]
+    std::hint::black_box(junban_plugin_sdk::product_linkage_authority());
+
     tracing_subscriber::fmt()
         .with_target(false)
         .compact()
@@ -62,6 +65,8 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         &data_dir,
     )?;
     state.recover_ai_dispatches().await?;
+    #[cfg(feature = "plugin-sdk")]
+    state.start_plugin_runtime().await?;
 
     let listener = tokio::net::TcpListener::bind(config.bind).await?;
     let address = listener.local_addr()?;
@@ -96,11 +101,16 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             state
                 .shutdown_ai_runtime(junban_server::AI_SHUTDOWN_DRAIN_DEADLINE)
                 .await;
+            #[cfg(feature = "plugin-sdk")]
+            state.shutdown_plugin_runtime().await;
             state.stop_reminder_coordinator().await;
             drop(owner);
             return Err(error.into());
         }
     };
+    // Router, background owners, and discovery metadata are fully composed. Reclaim
+    // free startup arena pages once before request admission; never from a hot path.
+    state.reclaim_allocator_at_runtime_quiescence();
     let serve_result = axum::serve(listener, app)
         .with_graceful_shutdown({
             let shutdown = shutdown.clone();
@@ -134,6 +144,8 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     state
         .shutdown_ai_runtime(junban_server::AI_SHUTDOWN_DRAIN_DEADLINE)
         .await;
+    #[cfg(feature = "plugin-sdk")]
+    state.shutdown_plugin_runtime().await;
     state.stop_reminder_coordinator().await;
     drop(runtime_metadata);
     drop(owner);
@@ -205,7 +217,24 @@ async fn shutdown_signal() {
         }
     }
 
-    #[cfg(not(unix))]
+    #[cfg(windows)]
+    {
+        let mut ctrl_break = match tokio::signal::windows::ctrl_break() {
+            Ok(signal) => signal,
+            Err(error) => {
+                tracing::error!(%error, "could not install Ctrl-Break handler");
+                ctrl_c.await;
+                return;
+            }
+        };
+
+        tokio::select! {
+            () = ctrl_c => {}
+            _ = ctrl_break.recv() => {}
+        }
+    }
+
+    #[cfg(all(not(unix), not(windows)))]
     {
         ctrl_c.await;
     }

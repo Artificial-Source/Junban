@@ -22,9 +22,11 @@ import {
   MessageSquare,
   Settings,
   GripVertical,
+  Puzzle,
 } from "lucide-react";
 import type { View, AppRoute, NavigateTarget } from "../hooks/useRouting";
 import type { CatalogResponse, ProjectDto, SavedFilterDto } from "../api/client";
+import { PluginSidebarPanels } from "../plugins/contributions";
 
 interface NavItem {
   id: View;
@@ -69,6 +71,13 @@ interface SidebarProps {
   phase2VisualFixture?: boolean;
   /** Align explicit Phase 3 evidence with the legacy plugin row gutter. */
   phase3VisualFixture?: boolean;
+  /** Server-confirmed plugin tool/navigation contributions (namespaced). */
+  pluginTools?: Array<{
+    id: string;
+    label: string;
+    pluginId: string;
+    surfaceId: string;
+  }>;
 }
 
 export function Sidebar({
@@ -85,6 +94,7 @@ export function Sidebar({
   onOpenProjectModal,
   phase2VisualFixture = false,
   phase3VisualFixture = false,
+  pluginTools = [],
 }: SidebarProps) {
   const [projectsExpanded, setProjectsExpanded] = useState(true);
   const [filtersExpanded, setFiltersExpanded] = useState(true);
@@ -414,8 +424,42 @@ export function Sidebar({
                   </button>
                 );
               })}
+              {pluginTools.map((item) => {
+                const isActive =
+                  currentRoute.name === "plugin-view" &&
+                  currentRoute.pluginId === item.pluginId &&
+                  currentRoute.surfaceId === item.surfaceId;
+                return (
+                  <button
+                    key={item.id}
+                    type="button"
+                    onClick={() =>
+                      onNavigate({
+                        name: "plugin-view",
+                        pluginId: item.pluginId,
+                        surfaceId: item.surfaceId,
+                      })
+                    }
+                    aria-current={isActive ? "page" : undefined}
+                    className={`group relative text-left px-3 py-1.5 rounded-md text-sm flex items-center transition-colors ${
+                      phase3VisualFixture && !collapsed ? "ml-[26px] w-[calc(100%-26px)]" : "w-full"
+                    } ${collapsed ? "justify-center" : "gap-3"} ${
+                      isActive
+                        ? "bg-accent-action/10 text-accent-foreground font-medium"
+                        : "text-on-surface-secondary hover:bg-surface-tertiary hover:text-on-surface"
+                    }`}
+                    title={collapsed ? item.label : undefined}
+                  >
+                    <Puzzle size={18} strokeWidth={isActive ? 2.25 : 1.75} />
+                    {!collapsed && <span className="flex-1">{item.label}</span>}
+                  </button>
+                );
+              })}
             </div>
           )}
+
+          {/* Server-confirmed declarative plugin panels (desktop + mobile drawer share this tree). */}
+          {!phase2VisualFixture ? <PluginSidebarPanels collapsed={collapsed} /> : null}
 
           {/* Saved Filters section */}
           {!collapsed && savedFilters.length > 0 && (

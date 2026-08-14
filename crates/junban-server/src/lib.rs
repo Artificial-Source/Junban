@@ -17,11 +17,22 @@ mod dto;
 mod error;
 mod maintenance;
 mod owner_runtime;
+#[cfg(feature = "plugin-sdk")]
+#[allow(dead_code)]
+pub(crate) mod plugin_callbacks;
+#[cfg(feature = "plugin-sdk")]
+pub mod plugin_host_process;
+#[cfg(feature = "plugin-sdk")]
+pub mod plugin_http;
+#[cfg(feature = "plugin-sdk")]
+pub mod plugin_runtime;
 mod reminder_wake;
 mod routes;
 mod routes_ai;
 mod routes_ai_approvals;
 mod routes_ai_turns;
+#[cfg(feature = "plugin-sdk")]
+mod routes_plugins;
 mod routes_voice;
 mod speech_runtime;
 mod sse;
@@ -105,6 +116,8 @@ use crate::routes_ai_approvals::{approve_ai_approval, get_ai_approval, reject_ai
 use crate::routes_ai_turns::{
     create_ai_daily_briefing, edit_ai_response, regenerate_ai_response, retry_ai_response,
 };
+#[cfg(feature = "plugin-sdk")]
+use crate::routes_plugins::*;
 use crate::routes_voice::{create_voice_speech, create_voice_transcription};
 use crate::sse::{AppService, SseConnectionPermit};
 
@@ -451,6 +464,23 @@ pub struct ServerState {
     ai_runtime: Arc<AiRuntimeSupervisor>,
     /// Independent lazy cloud-speech activity and lifecycle authority.
     speech_runtime: Arc<SpeechActivitySupervisor>,
+    /// Lazy plugin parent/child graph. Construction does not start Wasmtime.
+    #[cfg(feature = "plugin-sdk")]
+    pub(crate) plugin_runtime: Arc<plugin_runtime::PluginRuntimeSupervisor>,
+    /// Serializes operator lifecycle changes against contribution reads/actions.
+    #[cfg(feature = "plugin-sdk")]
+    pub(crate) plugin_reconfigure: Arc<AsyncMutex<()>>,
+    /// Durable event wake driver; absent until the graph first leaves Dormant.
+    #[cfg(feature = "plugin-sdk")]
+    plugin_event_worker: Arc<Mutex<Option<RunningPluginEventWorker>>>,
+    /// Counts durable event workers spawned by this state (tests only).
+    #[cfg(all(feature = "plugin-sdk", test))]
+    plugin_event_worker_starts: Arc<AtomicUsize>,
+    /// Counts event-driven runtime reconciliations (tests only).
+    #[cfg(all(feature = "plugin-sdk", test))]
+    plugin_event_reconciliations: Arc<AtomicUsize>,
+    #[cfg(all(feature = "plugin-sdk", test))]
+    plugin_event_reconciled: Arc<Notify>,
     /// Serializes atomic AI/speech lifecycle transitions against shutdown.
     ai_speech_transition: Arc<Mutex<()>>,
     /// Serializes confirmed AI/voice reconfiguration and consistent config reads.
@@ -470,6 +500,12 @@ pub struct ServerState {
 }
 
 struct RunningReminderCoordinator {
+    cancel: CancellationToken,
+    handle: tokio::task::JoinHandle<()>,
+}
+
+#[cfg(feature = "plugin-sdk")]
+struct RunningPluginEventWorker {
     cancel: CancellationToken,
     handle: tokio::task::JoinHandle<()>,
 }
@@ -517,6 +553,11 @@ impl ServerState {
         let reminder_wakes = Arc::new(ReminderWakeHub::new());
         let events = Arc::new(BroadcastEventSink::new(128, Arc::clone(&reminder_wakes)));
         let service = TaskService::new(Arc::new(repository), Arc::clone(&events));
+        #[cfg(feature = "plugin-sdk")]
+        let plugin_runtime = Arc::new(plugin_runtime::PluginRuntimeSupervisor::new(
+            service.clone(),
+            plugin_runtime::PluginHostLaunchPolicy::default(),
+        ));
         let diagnostics = Arc::new(DiagnosticRing::new(DIAGNOSTIC_RING_CAPACITY));
         diagnostics.log(
             DiagnosticSeverity::Info,
@@ -546,6 +587,18 @@ impl ServerState {
             reminder_coordinator_stopped: Arc::new(AtomicBool::new(false)),
             ai_runtime: AiRuntimeSupervisor::new(),
             speech_runtime: Arc::new(SpeechActivitySupervisor::new()),
+            #[cfg(feature = "plugin-sdk")]
+            plugin_runtime,
+            #[cfg(feature = "plugin-sdk")]
+            plugin_reconfigure: Arc::new(AsyncMutex::new(())),
+            #[cfg(feature = "plugin-sdk")]
+            plugin_event_worker: Arc::new(Mutex::new(None)),
+            #[cfg(all(feature = "plugin-sdk", test))]
+            plugin_event_worker_starts: Arc::new(AtomicUsize::new(0)),
+            #[cfg(all(feature = "plugin-sdk", test))]
+            plugin_event_reconciliations: Arc::new(AtomicUsize::new(0)),
+            #[cfg(all(feature = "plugin-sdk", test))]
+            plugin_event_reconciled: Arc::new(Notify::new()),
             ai_speech_transition: Arc::new(Mutex::new(())),
             ai_reconfigure: Arc::new(AsyncMutex::new(())),
             #[cfg(test)]
@@ -668,6 +721,15 @@ impl ServerState {
             .finish_reconfigure(speech_epoch)
             .map_err(|_| ())?;
         self.ai_runtime.finish_reconfigure(ai_epoch).map_err(|_| ())
+    }
+
+    /// Reclaim free allocator pages at a normal-runtime quiescence point.
+    ///
+    /// Production calls this after router/runtime metadata construction and after
+    /// completing a bounded ordinary workload sample. It must never run while a
+    /// request or runtime transition is active.
+    pub fn reclaim_allocator_at_runtime_quiescence(&self) {
+        reclaim_allocator_after_runtime_drop();
     }
 
     /// Test-only observation of successful post-drop allocator reclaim hooks.
@@ -926,6 +988,130 @@ impl ServerState {
         }
     }
 
+    /// Reconcile persisted plugin authority and lazily start its event wake driver.
+    ///
+    /// Production calls this either before request admission or while holding
+    /// `plugin_reconfigure` across an operator transition. Reconciliation-only
+    /// repeated/concurrent calls are supported, and worker ownership is still singular.
+    #[cfg(feature = "plugin-sdk")]
+    pub async fn start_plugin_runtime(&self) -> Result<(), plugin_runtime::PluginRuntimeError> {
+        let snapshot = self.plugin_runtime.reconcile().await?;
+        if snapshot.lifecycle != plugin_runtime::PluginRuntimeLifecycle::Dormant {
+            self.ensure_plugin_event_worker();
+        }
+        Ok(())
+    }
+
+    #[cfg(feature = "plugin-sdk")]
+    fn ensure_plugin_event_worker(&self) {
+        let mut worker = self
+            .plugin_event_worker
+            .lock()
+            .expect("plugin event worker poisoned");
+        if worker.is_some() {
+            return;
+        }
+        let runtime = Arc::clone(&self.plugin_runtime);
+        let transition = Arc::clone(&self.plugin_reconfigure);
+        let mut events = self.events.subscribe();
+        let cancel = self.shutdown.child_token();
+        let worker_cancel = cancel.clone();
+        #[cfg(test)]
+        let reconciliations = Arc::clone(&self.plugin_event_reconciliations);
+        #[cfg(test)]
+        let reconciled = Arc::clone(&self.plugin_event_reconciled);
+        let handle = tokio::spawn(async move {
+            loop {
+                tokio::select! {
+                    () = worker_cancel.cancelled() => break,
+                    event = events.recv() => match event {
+                        Ok(_) | Err(broadcast::error::RecvError::Lagged(_)) => {
+                            let transition_guard = tokio::select! {
+                                biased;
+                                () = worker_cancel.cancelled() => break,
+                                guard = transition.lock() => guard,
+                            };
+                            let _ = runtime.reconcile().await;
+                            drop(transition_guard);
+                            #[cfg(test)]
+                            {
+                                reconciliations.fetch_add(1, Ordering::SeqCst);
+                                reconciled.notify_waiters();
+                            }
+                        }
+                        Err(broadcast::error::RecvError::Closed) => break,
+                    }
+                }
+            }
+        });
+        *worker = Some(RunningPluginEventWorker { cancel, handle });
+        #[cfg(test)]
+        self.plugin_event_worker_starts
+            .fetch_add(1, Ordering::SeqCst);
+    }
+
+    /// Test-only observation of lazy plugin event-worker ownership.
+    #[cfg(all(feature = "plugin-sdk", test))]
+    #[must_use]
+    pub(crate) fn plugin_event_worker_is_running(&self) -> bool {
+        self.plugin_event_worker
+            .lock()
+            .expect("plugin event worker poisoned")
+            .is_some()
+    }
+
+    /// Test-only count of event workers spawned by this state.
+    #[cfg(all(feature = "plugin-sdk", test))]
+    #[must_use]
+    pub(crate) fn plugin_event_worker_starts(&self) -> usize {
+        self.plugin_event_worker_starts.load(Ordering::SeqCst)
+    }
+
+    /// Wait until the event worker completes another reconciliation (tests only).
+    #[cfg(all(feature = "plugin-sdk", test))]
+    pub(crate) async fn wait_for_plugin_event_reconciliation(&self, after: usize) {
+        loop {
+            let notified = self.plugin_event_reconciled.notified();
+            if self.plugin_event_reconciliations.load(Ordering::SeqCst) > after {
+                return;
+            }
+            notified.await;
+        }
+    }
+
+    /// Test-only event-driven reconciliation count.
+    #[cfg(all(feature = "plugin-sdk", test))]
+    #[must_use]
+    pub(crate) fn plugin_event_reconciliations(&self) -> usize {
+        self.plugin_event_reconciliations.load(Ordering::SeqCst)
+    }
+
+    /// Drain the plugin graph and join its event driver. Safe for repeated calls.
+    #[cfg(feature = "plugin-sdk")]
+    pub async fn shutdown_plugin_runtime(&self) {
+        let worker = {
+            let _transition = self.plugin_reconfigure.lock().await;
+            let _ = self.plugin_runtime.shutdown().await;
+            let worker = self
+                .plugin_event_worker
+                .lock()
+                .expect("plugin event worker poisoned")
+                .take();
+            if let Some(worker) = &worker {
+                worker.cancel.cancel();
+            }
+            worker
+        };
+        if let Some(mut worker) = worker
+            && tokio::time::timeout(Duration::from_secs(2), &mut worker.handle)
+                .await
+                .is_err()
+        {
+            worker.handle.abort();
+            let _ = worker.handle.await;
+        }
+    }
+
     /// Synchronously close AI and cloud-speech admission and cancel all provider work.
     ///
     /// The shared transition lock prevents a temporary reconfiguration epoch from
@@ -1050,6 +1236,89 @@ impl AuthLimiter {
             StatusCode::UNAUTHORIZED
         }
     }
+}
+
+#[cfg(feature = "plugin-sdk")]
+fn plugin_route_table() -> Router<ServerState> {
+    Router::new()
+        .route("/api/v1/plugins", get(list_plugins))
+        .route(
+            "/api/v1/plugins/contributions",
+            get(list_plugin_contributions),
+        )
+        .route("/api/v1/plugins/registry", get(list_plugin_registry))
+        .route(
+            "/api/v1/plugins/registry/{plugin_id}",
+            get(get_plugin_registry_entry),
+        )
+        .route(
+            "/api/v1/plugins/registry/{plugin_id}/install",
+            post(install_plugin_registry_entry).layer(DefaultBodyLimit::max(32 * 1024)),
+        )
+        .route(
+            "/api/v1/plugins/community-policy",
+            get(get_plugin_community_policy)
+                .put(set_plugin_community_policy)
+                .layer(DefaultBodyLimit::max(32 * 1024)),
+        )
+        .route("/api/v1/plugins/publishers", get(list_plugin_publishers))
+        .route(
+            "/api/v1/plugins/publishers/{key_id}",
+            axum::routing::put(trust_plugin_publisher)
+                .delete(revoke_plugin_publisher)
+                .layer(DefaultBodyLimit::max(32 * 1024)),
+        )
+        .route(
+            "/api/v1/plugins/packages/inspect",
+            post(inspect_plugin_package)
+                .layer(DefaultBodyLimit::max(junban_plugin_sdk::PACKAGE_BYTES_MAX)),
+        )
+        .route(
+            "/api/v1/plugins/packages/install",
+            post(install_plugin_package)
+                .layer(DefaultBodyLimit::max(junban_plugin_sdk::PACKAGE_BYTES_MAX)),
+        )
+        .route(
+            "/api/v1/plugins/{plugin_id}",
+            get(get_plugin).delete(uninstall_plugin),
+        )
+        .route("/api/v1/plugins/{plugin_id}/enable", post(enable_plugin))
+        .route("/api/v1/plugins/{plugin_id}/disable", post(disable_plugin))
+        .route("/api/v1/plugins/{plugin_id}/retry", post(retry_plugin))
+        .route(
+            "/api/v1/plugins/{plugin_id}/grants",
+            get(list_plugin_grants)
+                .put(replace_plugin_grants)
+                .delete(revoke_plugin_grants)
+                .layer(DefaultBodyLimit::max(32 * 1024)),
+        )
+        .route(
+            "/api/v1/plugins/{plugin_id}/settings",
+            get(list_plugin_settings),
+        )
+        .route(
+            "/api/v1/plugins/{plugin_id}/settings/{key}",
+            axum::routing::put(set_plugin_setting)
+                .delete(delete_plugin_setting)
+                .layer(DefaultBodyLimit::max(64 * 1024)),
+        )
+        .route(
+            "/api/v1/plugins/{plugin_id}/commands/{command_id}",
+            post(invoke_plugin_command).layer(DefaultBodyLimit::max(32 * 1024)),
+        )
+        .route(
+            "/api/v1/plugins/{plugin_id}/surfaces/{surface_id}/render",
+            post(render_plugin_surface).layer(DefaultBodyLimit::max(32 * 1024)),
+        )
+        .route(
+            "/api/v1/plugins/{plugin_id}/surfaces/{surface_id}/actions/{action_id}",
+            post(invoke_plugin_surface_action).layer(DefaultBodyLimit::max(32 * 1024)),
+        )
+}
+
+#[cfg(not(feature = "plugin-sdk"))]
+fn plugin_route_table() -> Router<ServerState> {
+    Router::new()
 }
 
 /// API routes shared by hosted and API-only runtimes (no static asset fallback).
@@ -1334,6 +1603,7 @@ fn api_route_table() -> Router<ServerState> {
             "/api/v1/diagnostics",
             get(get_diagnostics).delete(clear_diagnostics),
         )
+        .merge(plugin_route_table())
         .route("/api", get(api_not_found))
         .route("/api/{*path}", get(api_not_found).fallback(api_not_found))
 }
@@ -2010,7 +2280,8 @@ impl Modify for SecurityAddon {
         routes::get_allowed_hosts,
         routes::put_allowed_hosts,
         routes::get_diagnostics,
-        routes::clear_diagnostics
+        routes::clear_diagnostics,
+        // Plugin paths are merged below when the optional runtime is enabled.
     ),
     components(schemas(
         ErrorEnvelope,
@@ -2229,9 +2500,48 @@ impl Modify for SecurityAddon {
 )]
 struct ApiDoc;
 
+#[cfg(feature = "plugin-sdk")]
+#[derive(OpenApi)]
+#[openapi(paths(
+    routes_plugins::list_plugins,
+    routes_plugins::list_plugin_registry,
+    routes_plugins::get_plugin_registry_entry,
+    routes_plugins::install_plugin_registry_entry,
+    routes_plugins::get_plugin,
+    routes_plugins::inspect_plugin_package,
+    routes_plugins::install_plugin_package,
+    routes_plugins::enable_plugin,
+    routes_plugins::disable_plugin,
+    routes_plugins::retry_plugin,
+    routes_plugins::uninstall_plugin,
+    routes_plugins::list_plugin_publishers,
+    routes_plugins::trust_plugin_publisher,
+    routes_plugins::revoke_plugin_publisher,
+    routes_plugins::get_plugin_community_policy,
+    routes_plugins::set_plugin_community_policy,
+    routes_plugins::list_plugin_grants,
+    routes_plugins::replace_plugin_grants,
+    routes_plugins::revoke_plugin_grants,
+    routes_plugins::list_plugin_settings,
+    routes_plugins::set_plugin_setting,
+    routes_plugins::delete_plugin_setting,
+    routes_plugins::list_plugin_contributions,
+    routes_plugins::render_plugin_surface,
+    routes_plugins::invoke_plugin_command,
+    routes_plugins::invoke_plugin_surface_action
+))]
+struct PluginApiDoc;
+
 #[must_use]
 pub fn openapi_json() -> String {
-    let mut json = ApiDoc::openapi()
+    let document = ApiDoc::openapi();
+    #[cfg(feature = "plugin-sdk")]
+    let document = {
+        let mut document = document;
+        document.merge(PluginApiDoc::openapi());
+        document
+    };
+    let mut json = document
         .to_pretty_json()
         .expect("OpenAPI document is serializable");
     json.push('\n');
@@ -2425,14 +2735,13 @@ impl Drop for RuntimeMetadataFile {
 #[allow(dead_code)]
 fn _touch_headers(_: &HeaderMap) {}
 
-/// Return freeable heap pages to the OS after optional AI/speech runtimes drop.
+/// Return freeable heap pages to the OS at an explicitly quiescent lifecycle boundary.
 ///
-/// First reqwest/rustls/TTS use warms multi-MiB glibc arenas whose free lists
-/// stay in anonymous cgroup memory after Rust `Drop`. Call only after both
-/// supervisors confirm an exact-epoch runtime drop during clean temporary
-/// reconfiguration. Never call on disabled startup, per-request hot paths, or
-/// while holding [`ServerState::ai_speech_transition`] (which would stall
-/// permanent drain). Non-Linux-GNU targets are a documented no-op.
+/// First reqwest/rustls/TTS use and normal startup composition can leave free glibc
+/// arena pages resident. Call only after an exact-epoch optional-runtime drop or at
+/// the final normal startup point immediately before serving. Never call on a
+/// per-request hot path or while holding a runtime transition lock. Non-Linux-GNU
+/// targets are a documented no-op.
 fn reclaim_allocator_after_runtime_drop() {
     #[cfg(all(target_os = "linux", target_env = "gnu"))]
     {

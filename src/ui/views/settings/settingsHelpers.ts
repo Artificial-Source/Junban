@@ -41,6 +41,7 @@ export const SETTINGS_TAB_META: readonly SettingsTabMeta[] = [
   { id: "voice", label: "Voice", subtitle: "Speech & microphone" },
   { id: "keyboard", label: "Keyboard", subtitle: "Shortcuts" },
   { id: "templates", label: "Templates", subtitle: "Repeatable tasks" },
+  { id: "plugins", label: "Extensions", subtitle: "Built-in and community plugins" },
   { id: "data", label: "Data", subtitle: "Backup & transfer" },
   { id: "hosted", label: "Hosted", subtitle: "Tailnet access" },
   { id: "diagnostics", label: "Diagnostics", subtitle: "Server diagnostics" },
@@ -49,6 +50,7 @@ export const SETTINGS_TAB_META: readonly SettingsTabMeta[] = [
 export const MOBILE_SETTINGS_SECTIONS: readonly { label: string; tabs: SettingsTabId[] }[] = [
   { label: "Essentials", tabs: ["essentials", "appearance"] },
   { label: "Advanced", tabs: ["features", "ai", "voice", "keyboard", "templates"] },
+  { label: "Extensions", tabs: ["plugins"] },
   { label: "Data", tabs: ["data", "hosted", "diagnostics"] },
 ];
 

@@ -173,6 +173,163 @@ pub fn classified_routes() -> &'static [ClassifiedRoute] {
             path: "/api/v1/backup/restore",
             access: RouteAccess::OperatorOnly,
         },
+        // Plugin administration and execution are never automation surfaces.
+        #[cfg(feature = "plugin-sdk")]
+        ClassifiedRoute {
+            method: "GET",
+            path: "/api/v1/plugins",
+            access: RouteAccess::OperatorOnly,
+        },
+        #[cfg(feature = "plugin-sdk")]
+        ClassifiedRoute {
+            method: "GET",
+            path: "/api/v1/plugins/registry",
+            access: RouteAccess::OperatorOnly,
+        },
+        #[cfg(feature = "plugin-sdk")]
+        ClassifiedRoute {
+            method: "GET",
+            path: "/api/v1/plugins/registry/{plugin_id}",
+            access: RouteAccess::OperatorOnly,
+        },
+        #[cfg(feature = "plugin-sdk")]
+        ClassifiedRoute {
+            method: "POST",
+            path: "/api/v1/plugins/registry/{plugin_id}/install",
+            access: RouteAccess::OperatorOnly,
+        },
+        #[cfg(feature = "plugin-sdk")]
+        ClassifiedRoute {
+            method: "GET",
+            path: "/api/v1/plugins/{plugin_id}",
+            access: RouteAccess::OperatorOnly,
+        },
+        #[cfg(feature = "plugin-sdk")]
+        ClassifiedRoute {
+            method: "DELETE",
+            path: "/api/v1/plugins/{plugin_id}",
+            access: RouteAccess::OperatorOnly,
+        },
+        #[cfg(feature = "plugin-sdk")]
+        ClassifiedRoute {
+            method: "POST",
+            path: "/api/v1/plugins/packages/inspect",
+            access: RouteAccess::OperatorOnly,
+        },
+        #[cfg(feature = "plugin-sdk")]
+        ClassifiedRoute {
+            method: "POST",
+            path: "/api/v1/plugins/packages/install",
+            access: RouteAccess::OperatorOnly,
+        },
+        #[cfg(feature = "plugin-sdk")]
+        ClassifiedRoute {
+            method: "POST",
+            path: "/api/v1/plugins/{plugin_id}/enable",
+            access: RouteAccess::OperatorOnly,
+        },
+        #[cfg(feature = "plugin-sdk")]
+        ClassifiedRoute {
+            method: "POST",
+            path: "/api/v1/plugins/{plugin_id}/disable",
+            access: RouteAccess::OperatorOnly,
+        },
+        #[cfg(feature = "plugin-sdk")]
+        ClassifiedRoute {
+            method: "POST",
+            path: "/api/v1/plugins/{plugin_id}/retry",
+            access: RouteAccess::OperatorOnly,
+        },
+        #[cfg(feature = "plugin-sdk")]
+        ClassifiedRoute {
+            method: "GET",
+            path: "/api/v1/plugins/publishers",
+            access: RouteAccess::OperatorOnly,
+        },
+        #[cfg(feature = "plugin-sdk")]
+        ClassifiedRoute {
+            method: "PUT",
+            path: "/api/v1/plugins/publishers/{key_id}",
+            access: RouteAccess::OperatorOnly,
+        },
+        #[cfg(feature = "plugin-sdk")]
+        ClassifiedRoute {
+            method: "DELETE",
+            path: "/api/v1/plugins/publishers/{key_id}",
+            access: RouteAccess::OperatorOnly,
+        },
+        #[cfg(feature = "plugin-sdk")]
+        ClassifiedRoute {
+            method: "GET",
+            path: "/api/v1/plugins/community-policy",
+            access: RouteAccess::OperatorOnly,
+        },
+        #[cfg(feature = "plugin-sdk")]
+        ClassifiedRoute {
+            method: "PUT",
+            path: "/api/v1/plugins/community-policy",
+            access: RouteAccess::OperatorOnly,
+        },
+        #[cfg(feature = "plugin-sdk")]
+        ClassifiedRoute {
+            method: "GET",
+            path: "/api/v1/plugins/{plugin_id}/grants",
+            access: RouteAccess::OperatorOnly,
+        },
+        #[cfg(feature = "plugin-sdk")]
+        ClassifiedRoute {
+            method: "PUT",
+            path: "/api/v1/plugins/{plugin_id}/grants",
+            access: RouteAccess::OperatorOnly,
+        },
+        #[cfg(feature = "plugin-sdk")]
+        ClassifiedRoute {
+            method: "DELETE",
+            path: "/api/v1/plugins/{plugin_id}/grants",
+            access: RouteAccess::OperatorOnly,
+        },
+        #[cfg(feature = "plugin-sdk")]
+        ClassifiedRoute {
+            method: "GET",
+            path: "/api/v1/plugins/{plugin_id}/settings",
+            access: RouteAccess::OperatorOnly,
+        },
+        #[cfg(feature = "plugin-sdk")]
+        ClassifiedRoute {
+            method: "PUT",
+            path: "/api/v1/plugins/{plugin_id}/settings/{key}",
+            access: RouteAccess::OperatorOnly,
+        },
+        #[cfg(feature = "plugin-sdk")]
+        ClassifiedRoute {
+            method: "DELETE",
+            path: "/api/v1/plugins/{plugin_id}/settings/{key}",
+            access: RouteAccess::OperatorOnly,
+        },
+        #[cfg(feature = "plugin-sdk")]
+        ClassifiedRoute {
+            method: "GET",
+            path: "/api/v1/plugins/contributions",
+            access: RouteAccess::OperatorOnly,
+        },
+        #[cfg(feature = "plugin-sdk")]
+        ClassifiedRoute {
+            method: "POST",
+            path: "/api/v1/plugins/{plugin_id}/commands/{command_id}",
+            access: RouteAccess::OperatorOnly,
+        },
+        #[cfg(feature = "plugin-sdk")]
+        ClassifiedRoute {
+            method: "POST",
+            path: "/api/v1/plugins/{plugin_id}/surfaces/{surface_id}/render",
+            access: RouteAccess::OperatorOnly,
+        },
+        #[cfg(feature = "plugin-sdk")]
+        ClassifiedRoute {
+            method: "POST",
+            path: "/api/v1/plugins/{plugin_id}/surfaces/{surface_id}/actions/{action_id}",
+            access: RouteAccess::OperatorOnly,
+        },
         // Cloud speech and AI/provider control planes — operator only.
         ClassifiedRoute {
             method: "POST",

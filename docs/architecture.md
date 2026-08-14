@@ -23,17 +23,17 @@ Phases 1 and 2 implement the hosted product in `junban-domain`, `junban-app`, `j
 
 ## Crate boundaries
 
-| Crate                | Responsibility                                                                                                               |
-| -------------------- | ---------------------------------------------------------------------------------------------------------------------------- |
-| `junban-domain`      | Pure task entities, UUID IDs, title validation, civil dates and UTC instants                                                 |
-| `junban-storage`     | SQLite schema/migrations, profile lock, receipts, activity and durable events                                                |
-| `junban-app`         | Framework-free task use cases and application-owned repository/event ports                                                   |
-| `junban-server`      | Axum composition, HTTP DTO/OpenAPI authority, principal/scope auth, static serving, SSE, and reusable API-only owner runtime |
-| `junban-cli`         | Native CLI session, HTTP executor, versioned automation catalog, and human/JSON commands                                     |
-| `junban-mcp`         | Native MCP stdio adapter over the CLI session/catalog (Wave 3 completes tools/resources/prompts)                             |
-| `junban-ai`          | Optional lazy chat/speech provider clients (no default-startup construct)                                                    |
-| `junban-plugin-sdk`  | WIT contract and package types                                                                                               |
-| `junban-plugin-host` | Optional Wasmtime runtime after a measured spike                                                                             |
+| Crate                | Responsibility                                                                                                                                             |
+| -------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `junban-domain`      | Pure task entities, UUID IDs, title validation, civil dates and UTC instants                                                                               |
+| `junban-storage`     | SQLite schema/migrations, profile lock, receipts, activity and durable events                                                                              |
+| `junban-app`         | Framework-free task use cases and application-owned repository/event ports                                                                                 |
+| `junban-server`      | Axum composition, HTTP DTO/OpenAPI authority, principal/scope auth, static serving, SSE, and reusable API-only owner runtime                               |
+| `junban-cli`         | Native CLI session, HTTP executor, versioned automation catalog, and human/JSON commands                                                                   |
+| `junban-mcp`         | Native MCP stdio adapter over the CLI session/catalog (Wave 3 completes tools/resources/prompts)                                                           |
+| `junban-ai`          | Optional lazy chat/speech provider clients (no default-startup construct)                                                                                  |
+| `junban-plugin-sdk`  | Exact WIT, source/runtime manifests, JBP1/JRI1 trust, artifact tooling, capability/dependency inspection, and private protocol contracts; no runtime owner |
+| `junban-plugin-host` | Adjacent on-demand Wasmtime child with selective linking, bounded multi-plugin runtime ownership, typed callbacks, deadlines, and cleanup                  |
 
 Rules:
 
@@ -77,9 +77,15 @@ Mutation tools require an approval bound to canonical tool name and arguments be
 - The production UI is static assets served by the Rust server (Phase 1+).
 - Components should not import backend, storage, or Node APIs.
 
-## Plugin direction
+## Plugin architecture
 
-Portable, capability-limited packages on the Wasmtime Component Model with WASI P2. TypeScript authoring compiles ahead of time and does not imply a resident Node plugin process. Declarative host-rendered UI replaces arbitrary plugin React execution.
+Portable, capability-limited packages use the checked-in `junban:plugin@0.1.0` Component Model WIT. `junban-plugin-sdk` is the pure authority for typed author and runtime manifests, bounded JBP1/JRI1 construction and Ed25519 verification, component import/export inspection, dependencies, capabilities, grants, generated WIT bodies, and the fenced parent/child protocol. The `junban-plugin-artifact` CLI derives and signs packages and indexes; the permanent Python wrapper publicly verifies the source manifests, retained components, signed offline registry, content-addressed packages, public keys, and generated server include table. The SDK constructs no process or Wasmtime object and owns no SQLite, HTTP server, profile path, or credential.
+
+`PluginRuntimeSupervisor` owns one adjacent, on-demand `junban-plugin-host` child for a bounded graph of at most 16 plugins. The parent authenticates the private protocol session, enforces compile/load and command deadlines by kill/reap, serializes lifecycle changes, and fences every generation, activation epoch, runtime session, invocation, callback, and contribution action. Server callback adapters are the capability authority: only manifest-declared and operator-granted task/query/effect, KV, settings, log, HTTPS, clock, and service calls can reach application validation. A lazy event worker starts only when runtime reconciliation leaves a non-dormant graph; ordinary startup with no enabled plugin starts neither worker nor child and does not initialize Wasmtime.
+
+Exact `wasmtime` and `wasmtime-wasi` 36.0.13 remain confined to the child. It re-inspects imports, selectively links only granted Junban interfaces and Rust's exact five frozen WASI 0.2.6 interfaces, and gives TypeScript zero WASI. One Engine owns limited per-plugin Stores; watchdog deadlines, fuel, memory/table/stack/output bounds, cancellation, and failed-Store replacement contain guest work. Wasmtime parallel compilation uses one lazily initialized Rayon pool bounded to two 1-MiB-stack workers. The server owns supervision and static SDK/registry authority but links no Wasmtime.
+
+Operator-only OpenAPI routes expose package inspection/install, local publisher trust, Restricted Mode, dependencies, grants, typed settings, lifecycle, the bundled signed registry, and declarative contributions. The bundled Pomodoro, automation, and TypeScript references execute without runtime Node. The React Extensions UI renders only server-confirmed declarative trees; arbitrary plugin React, HTML, and JavaScript are excluded. Restore drains the supervisor, leaves the runtime dormant, disables every restored plugin, requires package re-verification/resync, and requires explicit permission review before re-enable. Product, operator, author, signing, cleanup, and restore details: [`plugins.md`](plugins.md).
 
 ## Dependency policy
 

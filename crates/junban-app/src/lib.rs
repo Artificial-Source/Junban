@@ -7,6 +7,11 @@ mod ai;
 mod artifact;
 mod error;
 mod event;
+mod plugin;
+mod plugin_delivery;
+mod plugin_event;
+mod plugin_query;
+mod plugin_resync;
 mod ports;
 mod requests;
 mod service;
@@ -29,6 +34,11 @@ pub use event::{
     EVENT_CATCHUP_MAX_COUNT, EVENT_RETAIN_MAX_BYTES, EVENT_RETAIN_MAX_COUNT, EventCatchUp,
     EventType, ResourceRef, ResourceSnapshot, ResourceType, ResyncScope,
 };
+pub use plugin::*;
+pub use plugin_delivery::*;
+pub use plugin_event::*;
+pub use plugin_query::*;
+pub use plugin_resync::*;
 pub use ports::{Repository, RepositoryFuture, SyncState};
 pub use requests::{
     ACTIVITY_PAGE_DEFAULT, ACTIVITY_PAGE_MAX, AppSettings, BulkAction, BulkSchedule, BulkTagChange,

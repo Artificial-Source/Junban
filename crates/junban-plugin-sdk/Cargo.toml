@@ -1,0 +1,48 @@
+[package]
+name = "junban-plugin-sdk"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+rust-version.workspace = true
+repository.workspace = true
+description = "Portable package, WIT, and protocol contracts for Junban plugins"
+publish = false
+
+[features]
+default = []
+artifact-cli = ["dep:clap", "dep:libc"]
+codegen = []
+
+[dependencies]
+base64.workspace = true
+clap = { workspace = true, optional = true }
+ed25519-dalek.workspace = true
+jiff.workspace = true
+semver.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+sha2.workspace = true
+spdx.workspace = true
+thiserror.workspace = true
+uuid.workspace = true
+wasmparser.workspace = true
+wit-parser.workspace = true
+
+[target.'cfg(unix)'.dependencies]
+libc = { workspace = true, optional = true }
+
+[dev-dependencies]
+proptest.workspace = true
+
+[[bin]]
+name = "junban-plugin-body-codegen"
+path = "src/bin/junban-plugin-body-codegen.rs"
+required-features = ["codegen"]
+
+[[bin]]
+name = "junban-plugin-artifact"
+path = "src/bin/junban-plugin-artifact.rs"
+required-features = ["artifact-cli"]
+
+[lints]
+workspace = true

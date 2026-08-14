@@ -1,0 +1,18 @@
+{
+  "schema_version": 1,
+  "artifact": "artifacts/automation.wasm",
+  "size_bytes": 119173,
+  "sha256": "32bfa3ef8887ac19a3a311dcfcc4bb2ea7675dacd4cd7e7c289bd2c68cc55fb0",
+  "source_wit_sha256": "5705801973219a0e6981693653f2caefdf1090345b65494750c8d8a9bf4b15f4",
+  "world_wit_sha256": "ad0e93df9ea1ac592e89fd1c812fefc772e1bddb9d66168fc274bcef8e8a29f7",
+  "imports": [
+    "junban:plugin/types@0.1.0",
+    "wasi:cli/environment@0.2.6",
+    "wasi:cli/exit@0.2.6",
+    "wasi:cli/stderr@0.2.6",
+    "wasi:io/error@0.2.6",
+    "wasi:io/streams@0.2.6"
+  ],
+  "exports": ["junban:plugin/guest@0.1.0"],
+  "reproducibility": "byte-for-byte"
+}

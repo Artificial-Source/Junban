@@ -1,0 +1,21 @@
+[workspace]
+
+[package]
+name = "junban-plugin-sdk-rust-consumer"
+version = "0.0.0"
+edition = "2024"
+rust-version = "1.93"
+publish = false
+
+[lib]
+crate-type = ["cdylib"]
+
+[dependencies]
+wit-bindgen = { version = "=0.51.0", default-features = false, features = ["macros", "realloc"] }
+
+[profile.release]
+opt-level = "s"
+lto = true
+codegen-units = 1
+strip = "symbols"
+panic = "abort"

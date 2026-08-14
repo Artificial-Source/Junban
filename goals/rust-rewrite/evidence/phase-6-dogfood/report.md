@@ -1,6 +1,6 @@
 # Phase 6 dogfood report
 
-Date: 2026-08-03–04  
+Date: 2026-08-03–04
 Scope: enabled AI/chat/tools/approvals, planning integration, voice controls, backup/restore, and disabled-state recovery in the hosted browser product
 
 ## Environment

@@ -49,6 +49,23 @@ This directory contains canonical documentation for the active Rust implementati
 - [`../goals/rust-rewrite/evidence/phase-6-wave-5-local-voice-acceptance-protocol.md`](../goals/rust-rewrite/evidence/phase-6-wave-5-local-voice-acceptance-protocol.md): opt-in real-browser hash-verified Whisper/Kokoro/Piper acceptance protocol and result
 - [`../goals/rust-rewrite/evidence/phase-6-review-ledger.md`](../goals/rust-rewrite/evidence/phase-6-review-ledger.md): Phase 6 specialist findings and closure evidence
 - [`../goals/rust-rewrite/evidence/phase-6-legacy-visual-baseline/README.md`](../goals/rust-rewrite/evidence/phase-6-legacy-visual-baseline/README.md): independent legacy-rendered Phase 6 AI/voice visual authorities and manifest
+- [`../goals/rust-rewrite/evidence/phase-7-context-map.md`](../goals/rust-rewrite/evidence/phase-7-context-map.md): Phase 7 portable-plugin authority, package/trust, runtime, persistence, UI, hostile-test, and evidence contract
+- [`../goals/rust-rewrite/evidence/phase-7-package-contract.md`](../goals/rust-rewrite/evidence/phase-7-package-contract.md): exact JBP1/JRI1 framing, manifest, trust, permissions, dependency, import-validation, registry and publication authority
+- [`../goals/rust-rewrite/evidence/phase-7-wit-contract.md`](../goals/rust-rewrite/evidence/phase-7-wit-contract.md): exact Component Model world composition, typed host/guest interfaces, effects, events, declarative UI and runtime-profile import authority
+- [`../goals/rust-rewrite/evidence/phase-7-schema-contract.md`](../goals/rust-rewrite/evidence/phase-7-schema-contract.md): exact schema-v7 plugin generations, grants, settings/KV, event cursor, invocation, restore, and package reconciliation authority
+- [`../goals/rust-rewrite/evidence/phase-7-host-placement-adr.md`](../goals/rust-rewrite/evidence/phase-7-host-placement-adr.md): accepted Wave 0 host-placement ADR, retained child boundary, and frozen active gates
+- [`../goals/rust-rewrite/evidence/phase-7-host-placement.json`](../goals/rust-rewrite/evidence/phase-7-host-placement.json): authoritative clean idle-host five-sample placement measurements and manual architecture-acceptance metadata
+- [`../goals/rust-rewrite/evidence/phase-7-sdk-matched-release-protocol.md`](../goals/rust-rewrite/evidence/phase-7-sdk-matched-release-protocol.md): exact Wave 1 default-versus-feature-off optimized server linkage and memory protocol
+- [`../goals/rust-rewrite/evidence/phase-7-sdk-matched-release.json`](../goals/rust-rewrite/evidence/phase-7-sdk-matched-release.json): accepted clean exact-commit five-sample SDK matched-release measurements
+- [`../goals/rust-rewrite/evidence/phase-7-wave-1-sdk-outcome.md`](../goals/rust-rewrite/evidence/phase-7-wave-1-sdk-outcome.md): accepted SDK/package/WIT/review/memory subgate and schema-v7 authorization
+- [`../goals/rust-rewrite/evidence/phase-7-wave-1-slice-b.md`](../goals/rust-rewrite/evidence/phase-7-wave-1-slice-b.md): accepted normalized plugin persistence, atomic effect, invocation, receipt, health and staged-package authority
+- [`../goals/rust-rewrite/evidence/phase-7-wave-2-plan.md`](../goals/rust-rewrite/evidence/phase-7-wave-2-plan.md): hostile child-runtime slices, patched Wasmtime LTS decision and Wave 2 validation boundary
+- [`../goals/rust-rewrite/evidence/phase-7-wave-2-slice-2a.md`](../goals/rust-rewrite/evidence/phase-7-wave-2-slice-2a.md): isolated child, strict private-protocol, exact dependency, process, and audit evidence
+- [`../goals/rust-rewrite/evidence/phase-7-process-memory-calibration-plan.md`](../goals/rust-rewrite/evidence/phase-7-process-memory-calibration-plan.md): exact Linux/macOS/Windows child process-memory campaign, raw JSON authorities, macOS cap blocker, and pending hostile-cap protocol
+- [`../goals/rust-rewrite/evidence/phase-7-wave-5-protocol.md`](../goals/rust-rewrite/evidence/phase-7-wave-5-protocol.md): accepted SDK/signing, reference-package, dogfood, cross-platform, clean-candidate, and separate default/Rust/TypeScript closure protocol
+- [`../goals/rust-rewrite/evidence/phase-7-outcome.md`](../goals/rust-rewrite/evidence/phase-7-outcome.md): accepted Phase 7 scope, final review findings, exact dogfood/CI authority, benchmark results, limitations, and later obligations
+- [`../goals/rust-rewrite/evidence/phase-7-review-ledger.md`](../goals/rust-rewrite/evidence/phase-7-review-ledger.md): Phase 7 specialist findings and closure evidence
+- [`../goals/rust-rewrite/evidence/phase-7-legacy-visual-baseline/README.md`](../goals/rust-rewrite/evidence/phase-7-legacy-visual-baseline/README.md): independent legacy-rendered Phase 7 Extensions/plugin visual authorities and manifest
 - [`../dogfood-output/phase-2/report.md`](../dogfood-output/phase-2/report.md): Phase 2 browser and recovery dogfood findings
 - [`performance.md`](performance.md): hosted memory and scale harness commands
 
@@ -57,6 +74,7 @@ This directory contains canonical documentation for the active Rust implementati
 - [`architecture.md`](architecture.md): workspace boundaries and runtime ownership
 - [`security.md`](security.md): standing security posture and supply-chain policy
 - [`ai-and-voice.md`](ai-and-voice.md): optional cloud AI chat, tools/approvals, and browser-local or cloud speech
+- [`plugins.md`](plugins.md): portable package, trust, isolated runtime, registry, and operator API behavior
 - [`cli.md`](cli.md): native CLI setup, catalog, commands, JSON contract, and credentials
 - [`mcp.md`](mcp.md): native MCP stdio server, scopes, resources, prompts, and lifecycle
 - [`accessibility.md`](accessibility.md): accessibility contract for UI phases

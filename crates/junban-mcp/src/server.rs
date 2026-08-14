@@ -18,6 +18,7 @@ use rmcp::{
 };
 use tokio::sync::{Mutex, Notify};
 use tokio_util::sync::CancellationToken;
+#[cfg(unix)]
 use tracing::warn;
 
 use crate::prompts::{self, PromptKind};

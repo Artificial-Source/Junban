@@ -1,0 +1,92 @@
+name: Phase 7 Slice 2E cgroup-v2 memory calibration
+
+on:
+  workflow_dispatch:
+  push:
+    branches:
+      - "phase7-slice2e-memory-calibration/**"
+
+permissions: {}
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  calibrate:
+    name: Calibrate real composition (Linux cgroup v2)
+    runs-on: ubuntu-latest
+    timeout-minutes: 90
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - uses: dtolnay/rust-toolchain@2c7215f132e9ebf062739d9130488b56d53c060c
+        with:
+          toolchain: "1.93.0"
+
+      - name: Prepare systemd cgroup-v2 calibration authority
+        shell: bash
+        run: |
+          set -euo pipefail
+          command -v systemd-run >/dev/null
+          systemctl --version
+
+      - name: Prebuild release calibration binaries
+        run: |
+          cargo build -p junban-plugin-host --release --locked
+          cargo test --release -p junban-server --no-run --locked
+          sudo sync
+          sudo sh -c 'echo 3 > /proc/sys/vm/drop_caches'
+
+      - name: Wait for an idle calibration host
+        shell: bash
+        run: |
+          set -euo pipefail
+          for attempt in {1..30}; do
+            read -r load1 load5 _ < /proc/loadavg
+            if python3 - "${load1}" "${load5}" <<'PY'
+          import sys
+          raise SystemExit(not (float(sys.argv[1]) <= 2.0 and float(sys.argv[2]) <= 2.0))
+          PY
+            then
+              exit 0
+            fi
+            sleep 10
+          done
+          echo "calibration host did not settle below CPU-scaled load thresholds" >&2
+          exit 1
+
+      - name: Run five samples for baseline and each language/scale
+        shell: bash
+        run: |
+          set -euo pipefail
+          unit="junban-slice2e-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}"
+          sudo systemd-run --wait --collect --pipe --quiet \
+            --unit "${unit}" \
+            --property Delegate=yes \
+            --property DelegateSubgroup=supervisor \
+            --property Type=notify \
+            --setenv PATH="${PATH}" \
+            --setenv HOME="${HOME}" \
+            --setenv GITHUB_SHA="${GITHUB_SHA}" \
+            --setenv GITHUB_RUN_ID="${GITHUB_RUN_ID}" \
+            --setenv GITHUB_RUN_ATTEMPT="${GITHUB_RUN_ATTEMPT}" \
+            --setenv JUNBAN_SLICE2E_CGROUP_PARENT=parent \
+            python3 "${GITHUB_WORKSPACE}/scripts/calibrate-phase7-slice2e-cgroup.py" \
+            --privileged-cgroup-migration \
+            --systemd-unit "${unit}.service" \
+            --idle-host-confirmed \
+            --output "${{ runner.temp }}/phase7-slice2e-cgroup-memory.json"
+
+      - name: Upload raw calibration JSON
+        if: always()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: phase7-slice2e-cgroup-memory-${{ github.run_attempt }}
+          path: ${{ runner.temp }}/phase7-slice2e-cgroup-memory.json
+          if-no-files-found: warn
+          retention-days: 14

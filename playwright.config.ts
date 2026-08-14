@@ -60,6 +60,16 @@ export default defineConfig({
       },
     },
     {
+      name: "visual-phase-7",
+      testMatch: /visual-phase-7\.spec\.ts/,
+      use: {
+        ...devices["Desktop Chrome"],
+        viewport: { width: 1280, height: 900 },
+        deviceScaleFactor: 1,
+        reducedMotion: "reduce",
+      },
+    },
+    {
       name: "axe",
       testMatch: /axe\.spec\.ts/,
       use: {

@@ -289,6 +289,62 @@ python3 scripts/check-phase6-enabled-benchmark.py \
 
 Or use `pnpm bench:phase6-enabled:self-check` for the interception preflight. Do not retain contended-host result JSON as accepted evidence.
 
+## Phase 7 SDK matched release (`junban-phase7-sdk-matched-release-v1`)
+
+Protocol authority: [`../goals/rust-rewrite/evidence/phase-7-sdk-matched-release-protocol.md`](../goals/rust-rewrite/evidence/phase-7-sdk-matched-release-protocol.md). Harness: [`../scripts/check-phase7-sdk-matched-release.py`](../scripts/check-phase7-sdk-matched-release.py).
+
+The harness builds optimized `junban-server` binaries into separate default and `--no-default-features` target roots, proves the SDK marker exists only in default and Wasmtime exists in neither Cargo tree/binary, then runs five interleaved copies of the exact frozen Phase 1 workload through `bench-hosted-server.py`. It records current/peak cgroup memory, RSS/PSS, one-process tree, binary size/hash, startup, latency, cleanup, and host cleanliness.
+
+```bash
+python3 scripts/check-phase7-sdk-matched-release.py --self-check
+pnpm build # creates dist/ before host cleanliness sampling
+# Preliminary smoke only:
+python3 scripts/check-phase7-sdk-matched-release.py --quick --output /tmp/phase7-sdk-quick.json
+# Clean parent-run candidate only:
+python3 scripts/check-phase7-sdk-matched-release.py --idle-host-confirmed
+```
+
+The accepted Wave 1 report measured 9.5312 MiB maximum warm current and 9.5820 MiB maximum peak, within the unchanged default 24/32-MiB gate and below feature-off at the median.
+
+## Phase 7 Slice 2E active-plugin calibration
+
+The non-shipped optimized harness constructs the real plugin supervisor with real `AppService`/SQLite and the real sibling host. Linux cgroup-v2 authority uses one fresh leaf per sample, `memory.swap.max=0`, exact file-byte reclaim with `swappiness=0`, one representative invocation per loaded runtime before the ready marker, five samples, and full-lifecycle `memory.peak`. Same-run harness baseline is normalized onto the accepted Wave 1 default-server maxima. Scale 1 is gated; scale 4/16 memory is informational while its functional load/admission/cleanup behavior remains required.
+
+The clean zero-swap campaign at exact `e196313b5a463681254a2401ebc9787f99e97e13` is GitHub Actions run `31629776892`; immutable raw JSON is attached to release/tag `phase7-slice2e-calibration-e196313` with SHA-256 `75b5336589f67fb9106cbda4a7d720517434ab75224b660015dfe646623500e5`. It disproved the Wave 0 projected active gates. Applying the original profile-specific 25%/minimum-headroom rule freezes amended scale-1 current/peak gates:
+
+| Profile               |        Corrected normalized max |     Amended current / peak gate |
+| --------------------- | ------------------------------: | ------------------------------: |
+| Rust                  |  73,342,976 / 105,062,400 bytes |  91,678,720 / 131,328,000 bytes |
+| TypeScript standalone | 553,934,848 / 645,459,968 bytes | 692,418,560 / 806,824,960 bytes |
+
+These active-only gates do not change the ordinary no-plugin 24-MiB current / 32-MiB peak ceiling. Exact amended-head run `31634972732` attempt 1 passed at `67a7f89e1b72676b7ab0d36b050358f16d401da4`, measuring normalized Rust 73,666,560/105,299,968 bytes and TypeScript 528,908,288/651,735,040 bytes current/peak. Immutable raw JSON is release/tag `phase7-slice2e-calibration-67a7f89`, SHA-256 `9fb264569f47c10b3338728707aa94a9c47d11bd1d70acf6b7cffd4174aa6982`; focused final recheck reported no material finding. Wave 5 must replace normalized harness evidence with product-integrated default/Rust/TypeScript evidence.
+
+## Phase 7 Wave 5 integrated closure
+
+The Wave 5 collector rebuilds the clean candidate in place, builds the exact frozen Phase 6 base in an isolated detached worktree, then records separate five-sample default, Rust, and TypeScript product reports. Linux cgroup-v2 samples require zero swap and successful exact file-only reclaim; report validation independently recomputes raw aggregates, process composition, cleanup, identities, and the unchanged frozen budgets.
+
+```bash
+# Diagnostic smoke; output must be outside the checkout.
+pnpm bench:phase7-wave5:quick -- --output-dir /tmp/junban-p7-wave5-quick
+pnpm check:phase7-wave5-preliminary-evidence -- /tmp/junban-p7-wave5-quick
+
+# Closure collection and validation require a clean candidate and nonquick reports.
+pnpm bench:phase7-wave5 -- --output-dir /tmp/junban-p7-wave5
+pnpm check:phase7-wave5-evidence -- /tmp/junban-p7-wave5
+```
+
+Quick or dirty reports are preliminary only and can never satisfy the closure checker. The Linux/macOS/Windows exact-reference matrix exercises optimized product APIs and runtime cleanup but intentionally makes no Linux cgroup-memory claim.
+
+The accepted clean-candidate campaign at `7ac35e3588a0521671de19ac16bfa4ffc4ddd9f7` is GitHub Actions run `31770557554`. All five samples per report had zero swap, exact file-only reclaim, no runtime Node process, and complete cleanup. The independent evidence checker accepted:
+
+| Profile    |                   Maximum warm/current |      Maximum peak |      Frozen current / peak gate |
+| ---------- | -------------------------------------: | ----------------: | ------------------------------: |
+| Default    | 5,541,888 bytes; 5,484,544-byte median |   8,220,672 bytes |   25,165,824 / 33,554,432 bytes |
+| Rust       |                       29,319,168 bytes |  32,632,832 bytes |  91,678,720 / 131,328,000 bytes |
+| TypeScript |                      611,205,120 bytes | 715,870,208 bytes | 692,418,560 / 806,824,960 bytes |
+
+Machine-readable authorities are [`phase-7-default-benchmark.json`](../goals/rust-rewrite/evidence/phase-7-default-benchmark.json), [`phase-7-rust-benchmark.json`](../goals/rust-rewrite/evidence/phase-7-rust-benchmark.json), and [`phase-7-typescript-benchmark.json`](../goals/rust-rewrite/evidence/phase-7-typescript-benchmark.json). The full accepted scope, product dogfood, cross-platform matrices, reviews, and limitations are recorded in the [Phase 7 outcome](../goals/rust-rewrite/evidence/phase-7-outcome.md).
+
 ## Measurement rules
 
 - Optimized release binaries are authoritative. Development servers are not.
@@ -299,7 +355,7 @@ Or use `pnpm bench:phase6-enabled:self-check` for the interception preflight. Do
 ## Default-path discipline
 
 - Do not initialize AI provider clients, local voice engines, or Wasmtime during ordinary task-server startup.
-- Plugin runtime stays unloaded when no plugin is active.
+- Plugin runtime stays unloaded when no plugin is active. Ordinary `junban-server` must not link Wasmtime; the accepted Wave 0 child-process placement evidence/ADR lives under `goals/rust-rewrite/evidence/phase-7-host-placement*`, and the superseded probe crate is deleted.
 - Avoid eager dependency aggregation that quietly reintroduces idle cost.
 
 ## Phase expectations

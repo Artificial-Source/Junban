@@ -161,7 +161,7 @@ fn ai_effect(
     }
 }
 
-fn ensure_quota_row(tx: &rusqlite::Transaction<'_>) -> Result<(), RepositoryError> {
+fn ensure_quota_row(tx: &rusqlite::Connection) -> Result<(), RepositoryError> {
     tx.execute(
         "INSERT OR IGNORE INTO ai_quota(
             singleton, session_count, total_content_bytes, memory_count, memory_content_bytes,
@@ -183,7 +183,7 @@ struct AiQuota {
     pending_approval_content_bytes: u64,
 }
 
-fn load_quota(tx: &rusqlite::Transaction<'_>) -> Result<AiQuota, RepositoryError> {
+fn load_quota(tx: &rusqlite::Connection) -> Result<AiQuota, RepositoryError> {
     ensure_quota_row(tx)?;
     tx.query_row(
         "SELECT session_count, total_content_bytes, memory_count, memory_content_bytes,
@@ -204,7 +204,7 @@ fn load_quota(tx: &rusqlite::Transaction<'_>) -> Result<AiQuota, RepositoryError
     .map_err(storage_error)
 }
 
-fn save_quota(tx: &rusqlite::Transaction<'_>, quota: &AiQuota) -> Result<(), RepositoryError> {
+fn save_quota(tx: &rusqlite::Connection, quota: &AiQuota) -> Result<(), RepositoryError> {
     tx.execute(
         "UPDATE ai_quota SET
             session_count = ?1,
@@ -235,7 +235,7 @@ fn quota_err(field: &'static str) -> RepositoryError {
 }
 
 fn replace_streaming_assistant_content(
-    tx: &rusqlite::Transaction<'_>,
+    tx: &rusqlite::Connection,
     assistant_message_id: &str,
     session_id: AiSessionId,
     turn_id: AiTurnId,
@@ -3873,7 +3873,7 @@ fn canonicalize_optional_json(
 }
 
 fn expire_bound_run_approval(
-    tx: &rusqlite::Transaction<'_>,
+    tx: &rusqlite::Connection,
     approval_id: &str,
     run_id: AiRunId,
     session_id: AiSessionId,
@@ -3958,7 +3958,7 @@ fn legal_run_transition(from: AiRunPhase, to: AiRunPhase) -> bool {
 }
 
 fn validate_run_approval_binding(
-    tx: &rusqlite::Transaction<'_>,
+    tx: &rusqlite::Connection,
     run_id: AiRunId,
     session_id: AiSessionId,
     turn_id: AiTurnId,
@@ -4036,7 +4036,7 @@ pub(crate) fn has_undo_record(
 }
 
 fn expire_pending_approvals_for_session(
-    tx: &rusqlite::Transaction<'_>,
+    tx: &rusqlite::Connection,
     session_id: AiSessionId,
     now: Timestamp,
 ) -> Result<(), RepositoryError> {
@@ -4050,7 +4050,7 @@ fn expire_pending_approvals_for_session(
 }
 
 fn recompute_pending_approval_quota(
-    tx: &rusqlite::Transaction<'_>,
+    tx: &rusqlite::Connection,
     quota: &mut AiQuota,
 ) -> Result<(), RepositoryError> {
     let (count, bytes): (i64, i64) = tx

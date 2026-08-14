@@ -8,6 +8,10 @@ mod detail_ops;
 mod helpers;
 mod migration;
 mod ops_types;
+mod package_store;
+mod plugin_ops;
+mod plugin_query_ops;
+mod plugin_validation;
 mod query_ops;
 mod reminder_ops;
 mod rows;
@@ -22,6 +26,7 @@ mod undo_ops;
 
 pub use ai_secrets::{AiSecretStore, AiSecretStoreError};
 pub use junban_app::AiSecretBytes;
+pub use package_store::{PackageStoreError, PluginPackageStore};
 
 use std::{
     collections::HashSet,
@@ -42,13 +47,14 @@ use jiff::{Timestamp, civil::Date};
 use junban_app::{
     AiCredentialBindResult, AiCredentialBindingTarget, AiMemoryCursor, AiMemoryListPage,
     AiSessionCursor, AiSessionListPage, AppSettings, BulkAction, CatalogSnapshot, CommentPatch,
-    CommittedMutation, EventCatchUp, ExportFormat, MoveTarget, PreparedAiResponse, ProjectDraft,
-    ProjectListPage, ProjectPatch, ReorderScope, ReplanPastBlocksAction, ReplanPastBlocksPreview,
-    Repository, RepositoryError, RepositoryFuture, ReserveDailyAiResponseRequest,
-    RewriteAiResponseRequest, SavedFilterDraft, SavedFilterPatch, SectionDraft, SectionPatch,
-    SettingsPatch, StagedFile, SyncState, TagDraft, TagListPage, TagPatch, TaskListAsOf,
-    TaskListPage, TaskPatch, TemplateApply, TemplateDraft, TemplatePatch, TemporalContext,
-    TimeBlockPatch, TimeBlockRangePatch, TimeSlotPatch, TimeblockingRangePage,
+    CommittedMutation, EventCatchUp, ExportFormat, MoveTarget, PluginCatalogQuery,
+    PluginQueryError, PluginQueryFuture, PluginQueryRepository, PluginRepository, PluginTaskQuery,
+    PreparedAiResponse, ProjectDraft, ProjectListPage, ProjectPatch, ReorderScope,
+    ReplanPastBlocksAction, ReplanPastBlocksPreview, Repository, RepositoryError, RepositoryFuture,
+    ReserveDailyAiResponseRequest, RewriteAiResponseRequest, SavedFilterDraft, SavedFilterPatch,
+    SectionDraft, SectionPatch, SettingsPatch, StagedFile, SyncState, TagDraft, TagListPage,
+    TagPatch, TaskListAsOf, TaskListPage, TaskPatch, TemplateApply, TemplateDraft, TemplatePatch,
+    TemporalContext, TimeBlockPatch, TimeBlockRangePatch, TimeSlotPatch, TimeblockingRangePage,
     TimeblockingRangeQuery,
 };
 use junban_domain::{
@@ -61,6 +67,7 @@ use junban_domain::{
     TaskDraft, TaskId, TaskQuery, TaskRelation, TemplateId, TimeBlockDraft, TimeBlockId,
     TimeSlotDraft, TimeSlotId, TransferApply, TransferFormat, TransferPreview,
 };
+use junban_plugin_sdk::private_body_types::{ProjectPage, TagPage, TaskPage};
 use rusqlite::Connection;
 use thiserror::Error;
 use tokio::sync::oneshot;
@@ -73,6 +80,8 @@ const RECOVERY_CUTOVER_FILE: &str = "recovery-cutover.json";
 const RECOVERY_MARKER_VERSION: u8 = 1;
 const RECOVERY_CUTOVER_VERSION: u8 = 1;
 const BUSY_TIMEOUT: Duration = Duration::from_millis(2_500);
+/// Bounds pending commands retained ahead of the single SQLite owner.
+const WORKER_QUEUE_CAPACITY: usize = 8;
 
 #[derive(Debug, serde::Serialize, serde::Deserialize)]
 #[serde(deny_unknown_fields)]
@@ -373,15 +382,77 @@ pub fn remove_private_file_durable(path: &Path) -> io::Result<()> {
     sync_directory(path.parent().unwrap_or_else(|| Path::new(".")))
 }
 
-#[cfg(unix)]
+#[cfg(any(target_os = "linux", target_os = "android"))]
+fn publish_file(source: &Path, destination: &Path, overwrite: bool) -> io::Result<()> {
+    if overwrite {
+        return fs::rename(source, destination);
+    }
+
+    use std::{ffi::CString, os::unix::ffi::OsStrExt};
+
+    let source = CString::new(source.as_os_str().as_bytes())
+        .map_err(|_| io::Error::new(io::ErrorKind::InvalidInput, "source path contains NUL"))?;
+    let destination = CString::new(destination.as_os_str().as_bytes()).map_err(|_| {
+        io::Error::new(io::ErrorKind::InvalidInput, "destination path contains NUL")
+    })?;
+    // SAFETY: both C strings are NUL-terminated and remain live for the call.
+    #[allow(unsafe_code)]
+    let renamed = unsafe {
+        libc::renameat2(
+            libc::AT_FDCWD,
+            source.as_ptr(),
+            libc::AT_FDCWD,
+            destination.as_ptr(),
+            libc::RENAME_NOREPLACE,
+        )
+    };
+    if renamed == 0 {
+        Ok(())
+    } else {
+        Err(io::Error::last_os_error())
+    }
+}
+
+#[cfg(target_vendor = "apple")]
+fn publish_file(source: &Path, destination: &Path, overwrite: bool) -> io::Result<()> {
+    if overwrite {
+        return fs::rename(source, destination);
+    }
+
+    use std::{ffi::CString, os::unix::ffi::OsStrExt};
+
+    let source = CString::new(source.as_os_str().as_bytes())
+        .map_err(|_| io::Error::new(io::ErrorKind::InvalidInput, "source path contains NUL"))?;
+    let destination = CString::new(destination.as_os_str().as_bytes()).map_err(|_| {
+        io::Error::new(io::ErrorKind::InvalidInput, "destination path contains NUL")
+    })?;
+    // SAFETY: both C strings are NUL-terminated and remain live for this call.
+    #[allow(unsafe_code)]
+    let renamed =
+        unsafe { libc::renamex_np(source.as_ptr(), destination.as_ptr(), libc::RENAME_EXCL) };
+    if renamed == 0 {
+        Ok(())
+    } else {
+        Err(io::Error::last_os_error())
+    }
+}
+
+#[cfg(all(
+    unix,
+    not(any(target_os = "linux", target_os = "android")),
+    not(target_vendor = "apple")
+))]
 fn publish_file(source: &Path, destination: &Path, overwrite: bool) -> io::Result<()> {
     if overwrite {
         fs::rename(source, destination)
     } else {
-        // A same-directory hard link is an atomic no-replace publication. Remove
-        // the temporary name only after the destination name exists.
-        fs::hard_link(source, destination)?;
-        fs::remove_file(source)
+        // Junban does not publish immutable private artifacts through a temporary
+        // hard link. Unsupported Unix targets fail closed until they provide an
+        // atomic no-replace rename primitive.
+        Err(io::Error::new(
+            io::ErrorKind::Unsupported,
+            "atomic no-replace publication is unavailable",
+        ))
     }
 }
 
@@ -424,13 +495,14 @@ fn publish_file(source: &Path, destination: &Path, overwrite: bool) -> io::Resul
 
 #[cfg(not(any(unix, windows)))]
 fn publish_file(source: &Path, destination: &Path, overwrite: bool) -> io::Result<()> {
-    if !overwrite && destination.exists() {
-        return Err(io::Error::new(
-            io::ErrorKind::AlreadyExists,
-            "destination exists",
-        ));
+    if overwrite {
+        fs::rename(source, destination)
+    } else {
+        Err(io::Error::new(
+            io::ErrorKind::Unsupported,
+            "atomic no-replace publication is unavailable",
+        ))
     }
-    fs::rename(source, destination)
 }
 
 fn persist_recovery_required(profile_dir: &Path) -> Result<(), RepositoryError> {
@@ -848,7 +920,7 @@ pub struct SqliteRepository {
 
 struct Worker {
     _lock: File,
-    sender: Mutex<Option<mpsc::Sender<Command>>>,
+    sender: Mutex<Option<mpsc::SyncSender<Command>>>,
     join: Mutex<Option<thread::JoinHandle<()>>>,
 }
 
@@ -872,7 +944,7 @@ impl SqliteRepository {
                 ))
             })?
             .to_path_buf();
-        let (sender, receiver) = mpsc::channel();
+        let (sender, receiver) = mpsc::sync_channel(WORKER_QUEUE_CAPACITY);
         let (ready_sender, ready_receiver) = mpsc::sync_channel(1);
         let join = thread::Builder::new()
             .name("junban-sqlite".to_owned())
@@ -880,8 +952,25 @@ impl SqliteRepository {
                 let connection = open_connection(&database_path);
                 match connection {
                     Ok(mut connection) => {
-                        let _ = ready_sender.send(Ok(()));
-                        run_worker(&mut connection, profile_dir, receiver);
+                        let startup = PluginPackageStore::open_for_reconciliation(&profile_dir)
+                            .map_err(|error| RepositoryError::Storage(error.to_string()))
+                            .and_then(|store| {
+                                plugin_ops::reconcile_packages(
+                                    &mut connection,
+                                    &store,
+                                    Timestamp::now(),
+                                )?;
+                                Ok(store)
+                            });
+                        match startup {
+                            Ok(package_store) => {
+                                let _ = ready_sender.send(Ok(()));
+                                run_worker(&mut connection, profile_dir, package_store, receiver);
+                            }
+                            Err(error) => {
+                                let _ = ready_sender.send(Err(error.to_string()));
+                            }
+                        }
                     }
                     Err(error) => {
                         let _ = ready_sender.send(Err(error.to_string()));
@@ -927,12 +1016,94 @@ impl SqliteRepository {
                 RepositoryError::Storage("database worker has stopped".to_owned())
             })?;
             let (reply_sender, reply_receiver) = oneshot::channel();
-            sender
-                .send(command(reply_sender))
-                .map_err(|_| RepositoryError::Storage("database worker has stopped".to_owned()))?;
+            match sender.try_send(command(reply_sender)) {
+                Ok(()) => {}
+                Err(std::sync::mpsc::TrySendError::Full(_)) => {
+                    return Err(RepositoryError::Storage(
+                        "database worker queue is full".to_owned(),
+                    ));
+                }
+                Err(std::sync::mpsc::TrySendError::Disconnected(_)) => {
+                    return Err(RepositoryError::Storage(
+                        "database worker has stopped".to_owned(),
+                    ));
+                }
+            }
             reply_receiver
                 .await
                 .map_err(|_| RepositoryError::Storage("database worker did not reply".to_owned()))?
+        })
+    }
+
+    fn plugin_query_request<T>(
+        &self,
+        operation: impl FnOnce(
+            &Connection,
+            &Path,
+            &mut plugin_query_ops::PluginQueryKeyring,
+        ) -> Result<T, PluginQueryError>
+        + Send
+        + 'static,
+    ) -> PluginQueryFuture<'_, T>
+    where
+        T: Send + 'static,
+    {
+        let sender = self
+            .worker
+            .sender
+            .lock()
+            .expect("worker sender poisoned")
+            .as_ref()
+            .cloned();
+        Box::pin(async move {
+            let sender = sender.ok_or(PluginQueryError::Unavailable)?;
+            let (reply_sender, reply_receiver) = oneshot::channel();
+            match sender.try_send(Command::PluginQuery {
+                job: Box::new(move |connection, profile_dir, keys| {
+                    let _ = reply_sender.send(operation(connection, profile_dir, keys));
+                }),
+            }) {
+                Ok(()) => {}
+                Err(
+                    std::sync::mpsc::TrySendError::Full(_)
+                    | std::sync::mpsc::TrySendError::Disconnected(_),
+                ) => {
+                    return Err(PluginQueryError::Unavailable);
+                }
+            }
+            reply_receiver
+                .await
+                .map_err(|_| PluginQueryError::Unavailable)?
+        })
+    }
+
+    fn plugin_request<T>(
+        &self,
+        operation: impl FnOnce(&mut Connection, &PluginPackageStore) -> Result<T, RepositoryError>
+        + Send
+        + 'static,
+    ) -> RepositoryFuture<'_, T>
+    where
+        T: Send + 'static,
+    {
+        self.request(move |reply| Command::Plugin {
+            job: Box::new(move |connection, store| {
+                let _ = reply.send(operation(connection, store));
+            }),
+        })
+    }
+
+    #[cfg(test)]
+    fn block_worker(
+        &self,
+        entered: std::sync::mpsc::Sender<()>,
+        release: std::sync::mpsc::Receiver<()>,
+    ) -> RepositoryFuture<'_, ()> {
+        self.plugin_request(move |_, _| {
+            let _ = entered.send(());
+            release
+                .recv()
+                .map_err(|_| RepositoryError::Storage("test worker release dropped".to_owned()))
         })
     }
 
@@ -952,6 +1123,455 @@ macro_rules! mut_cmd {
     ($self:ident, $variant:ident { $($field:ident),* }) => {
         $self.request(move |reply| Command::$variant { $($field,)* reply })
     };
+}
+
+impl PluginQueryRepository for SqliteRepository {
+    fn query_plugin_tasks(&self, query: PluginTaskQuery) -> PluginQueryFuture<'_, TaskPage> {
+        self.plugin_query_request(move |connection, profile_dir, keys| {
+            plugin_query_ops::query_tasks(connection, profile_dir, keys, query)
+        })
+    }
+
+    fn query_plugin_projects(
+        &self,
+        query: PluginCatalogQuery,
+    ) -> PluginQueryFuture<'_, ProjectPage> {
+        self.plugin_query_request(move |connection, profile_dir, keys| {
+            plugin_query_ops::query_projects(connection, profile_dir, keys, query)
+        })
+    }
+
+    fn query_plugin_tags(&self, query: PluginCatalogQuery) -> PluginQueryFuture<'_, TagPage> {
+        self.plugin_query_request(move |connection, profile_dir, keys| {
+            plugin_query_ops::query_tags(connection, profile_dir, keys, query)
+        })
+    }
+}
+
+impl PluginRepository for SqliteRepository {
+    fn publish_plugin_package(
+        &self,
+        staged: StagedFile,
+    ) -> RepositoryFuture<'_, junban_app::PluginPackageAuthority> {
+        self.plugin_request(move |_, store| {
+            store
+                .publish(staged)
+                .map_err(|error| RepositoryError::Storage(error.to_string()))
+        })
+    }
+
+    fn install_plugin_admission(
+        &self,
+        operation_id: OperationId,
+        admission: junban_app::PluginPackageAdmission,
+        request: junban_app::InstallPluginRequest,
+        now: Timestamp,
+    ) -> RepositoryFuture<'_, junban_app::PluginMutationOutcome> {
+        self.plugin_request(move |connection, store| {
+            plugin_ops::install_plugin_admission(
+                connection,
+                store,
+                operation_id,
+                admission,
+                request,
+                now,
+            )
+        })
+    }
+
+    fn install_bundled_plugin_admission(
+        &self,
+        operation_id: OperationId,
+        admission: junban_app::VerifiedBundledPluginAdmission,
+        replace_existing: bool,
+        allow_downgrade: bool,
+        now: Timestamp,
+    ) -> RepositoryFuture<'_, junban_app::PluginMutationOutcome> {
+        self.plugin_request(move |connection, store| {
+            plugin_ops::install_bundled_plugin_admission(
+                connection,
+                store,
+                operation_id,
+                admission,
+                replace_existing,
+                allow_downgrade,
+                now,
+            )
+        })
+    }
+
+    fn reconcile_plugin_packages(
+        &self,
+        now: Timestamp,
+    ) -> RepositoryFuture<'_, junban_app::PluginPackageReconciliation> {
+        self.plugin_request(move |connection, store| {
+            plugin_ops::reconcile_packages(connection, store, now)
+        })
+    }
+
+    fn get_installed_plugin_profile(
+        &self,
+    ) -> RepositoryFuture<'_, junban_app::InstalledPluginProfile> {
+        self.plugin_request(|connection, _| plugin_ops::get_installed_plugin_profile(connection))
+    }
+
+    fn open_plugin_component_sources(
+        &self,
+        selected: Vec<junban_app::PluginComponentSelection>,
+    ) -> RepositoryFuture<'_, Vec<junban_app::OpenedPluginComponentSource>> {
+        self.plugin_request(move |connection, store| {
+            plugin_ops::open_plugin_component_sources(connection, store, selected)
+        })
+    }
+
+    fn get_installed_plugin(
+        &self,
+        plugin_id: junban_plugin_sdk::PluginId,
+    ) -> RepositoryFuture<'_, junban_app::InstalledPlugin> {
+        self.plugin_request(move |connection, _| {
+            plugin_ops::get_installed_plugin(connection, plugin_id)
+        })
+    }
+
+    fn install_plugin(
+        &self,
+        operation_id: OperationId,
+        request: junban_app::InstallPluginRequest,
+        now: Timestamp,
+    ) -> RepositoryFuture<'_, junban_app::PluginMutationOutcome> {
+        self.plugin_request(move |connection, store| {
+            plugin_ops::install_plugin(connection, store, operation_id, request, now)
+        })
+    }
+
+    fn uninstall_plugin(
+        &self,
+        operation_id: OperationId,
+        plugin_id: junban_plugin_sdk::PluginId,
+        now: Timestamp,
+    ) -> RepositoryFuture<'_, junban_app::PluginMutationOutcome> {
+        self.plugin_request(move |connection, store| {
+            plugin_ops::uninstall_plugin(connection, store, operation_id, plugin_id, now)
+        })
+    }
+
+    fn set_plugin_desired_enabled(
+        &self,
+        operation_id: OperationId,
+        plugin_id: junban_plugin_sdk::PluginId,
+        enabled: bool,
+        now: Timestamp,
+    ) -> RepositoryFuture<'_, junban_app::PluginMutationOutcome> {
+        self.plugin_request(move |connection, store| {
+            plugin_ops::set_plugin_desired_enabled(
+                connection,
+                store,
+                operation_id,
+                plugin_id,
+                enabled,
+                now,
+            )
+        })
+    }
+
+    fn retry_plugin(
+        &self,
+        operation_id: OperationId,
+        plugin_id: junban_plugin_sdk::PluginId,
+        now: Timestamp,
+    ) -> RepositoryFuture<'_, CommittedMutation> {
+        self.plugin_request(move |connection, store| {
+            plugin_ops::retry_plugin(connection, store, operation_id, plugin_id, now)
+        })
+    }
+
+    fn list_publisher_trust(&self) -> RepositoryFuture<'_, Vec<junban_app::PublisherTrust>> {
+        self.plugin_request(|connection, _| plugin_ops::list_publisher_trust(connection))
+    }
+
+    fn trust_publisher(
+        &self,
+        operation_id: OperationId,
+        request: junban_app::TrustPublisherRequest,
+        now: Timestamp,
+    ) -> RepositoryFuture<'_, CommittedMutation> {
+        self.plugin_request(move |connection, _| {
+            plugin_ops::trust_publisher(connection, operation_id, request, now)
+        })
+    }
+
+    fn revoke_publisher(
+        &self,
+        operation_id: OperationId,
+        key_id: junban_plugin_sdk::Sha256Digest,
+        now: Timestamp,
+    ) -> RepositoryFuture<'_, CommittedMutation> {
+        self.plugin_request(move |connection, _| {
+            plugin_ops::revoke_publisher(connection, operation_id, key_id, now)
+        })
+    }
+
+    fn get_community_plugin_policy(
+        &self,
+    ) -> RepositoryFuture<'_, junban_app::CommunityPluginPolicy> {
+        self.plugin_request(|connection, _| plugin_ops::get_community_plugin_policy(connection))
+    }
+
+    fn set_community_plugin_policy(
+        &self,
+        operation_id: OperationId,
+        enabled: bool,
+        now: Timestamp,
+    ) -> RepositoryFuture<'_, CommittedMutation> {
+        self.plugin_request(move |connection, _| {
+            plugin_ops::set_community_plugin_policy(connection, operation_id, enabled, now)
+        })
+    }
+
+    fn list_plugin_grants(
+        &self,
+        plugin_id: junban_plugin_sdk::PluginId,
+    ) -> RepositoryFuture<'_, Vec<junban_app::PluginGrant>> {
+        self.plugin_request(move |connection, _| {
+            plugin_ops::list_plugin_grants(connection, plugin_id)
+        })
+    }
+
+    fn replace_plugin_grants(
+        &self,
+        operation_id: OperationId,
+        request: junban_app::ReplacePluginGrantsRequest,
+        now: Timestamp,
+    ) -> RepositoryFuture<'_, CommittedMutation> {
+        self.plugin_request(move |connection, _| {
+            plugin_ops::replace_plugin_grants(connection, operation_id, request, now)
+        })
+    }
+
+    fn revoke_plugin_grants(
+        &self,
+        operation_id: OperationId,
+        request: junban_app::RevokePluginGrantsRequest,
+        now: Timestamp,
+    ) -> RepositoryFuture<'_, CommittedMutation> {
+        self.plugin_request(move |connection, _| {
+            plugin_ops::revoke_plugin_grants(connection, operation_id, request, now)
+        })
+    }
+
+    fn list_plugin_settings(
+        &self,
+        plugin_id: junban_plugin_sdk::PluginId,
+    ) -> RepositoryFuture<'_, Vec<junban_app::PluginSetting>> {
+        self.plugin_request(move |connection, _| {
+            plugin_ops::list_plugin_settings(connection, plugin_id)
+        })
+    }
+
+    fn replay_plugin_mutation(
+        &self,
+        identity: junban_app::PluginMutationRequestIdentity,
+        now: Timestamp,
+    ) -> RepositoryFuture<'_, Option<CommittedMutation>> {
+        self.plugin_request(move |connection, _| {
+            plugin_ops::replay_plugin_mutation(connection, identity, now)
+        })
+    }
+
+    fn set_plugin_setting(
+        &self,
+        operation_id: OperationId,
+        request: junban_app::SetPluginSettingRequest,
+        now: Timestamp,
+    ) -> RepositoryFuture<'_, CommittedMutation> {
+        self.plugin_request(move |connection, _| {
+            plugin_ops::set_plugin_setting(connection, operation_id, request, now)
+        })
+    }
+
+    fn delete_plugin_setting(
+        &self,
+        operation_id: OperationId,
+        request: junban_app::DeletePluginSettingRequest,
+        now: Timestamp,
+    ) -> RepositoryFuture<'_, CommittedMutation> {
+        self.plugin_request(move |connection, _| {
+            plugin_ops::delete_plugin_setting(connection, operation_id, request, now)
+        })
+    }
+
+    fn list_plugin_kv(
+        &self,
+        plugin_id: junban_plugin_sdk::PluginId,
+    ) -> RepositoryFuture<'_, Vec<junban_app::PluginKvEntry>> {
+        self.plugin_request(move |connection, _| plugin_ops::list_plugin_kv(connection, plugin_id))
+    }
+
+    fn get_plugin_cursor(
+        &self,
+        plugin_id: junban_plugin_sdk::PluginId,
+    ) -> RepositoryFuture<'_, junban_app::PluginEventCursor> {
+        self.plugin_request(move |connection, _| {
+            plugin_ops::get_plugin_cursor(connection, plugin_id)
+        })
+    }
+
+    fn open_plugin_resync_session(
+        &self,
+        request: junban_app::BeginPluginResyncRequest,
+        now: Timestamp,
+    ) -> RepositoryFuture<'_, junban_app::PluginResyncSession> {
+        self.plugin_request(move |connection, _| {
+            plugin_ops::open_plugin_resync_session(connection, request, now)
+        })
+    }
+
+    fn list_plugin_resync_page(
+        &self,
+        request: junban_app::PluginResyncPageRequest,
+        now: Timestamp,
+    ) -> RepositoryFuture<'_, junban_app::PluginResyncPage> {
+        self.plugin_request(move |connection, _| {
+            plugin_ops::list_plugin_resync_page(connection, request, now)
+        })
+    }
+
+    fn finalize_plugin_resync(
+        &self,
+        request: junban_app::FinalizePluginResyncRequest,
+        now: Timestamp,
+    ) -> RepositoryFuture<'_, junban_app::FinalizePluginResyncOutcome> {
+        self.plugin_request(move |connection, _| {
+            plugin_ops::finalize_plugin_resync(connection, request, now)
+        })
+    }
+
+    fn mark_plugin_retention_loss(
+        &self,
+        request: junban_app::MarkPluginRetentionLossRequest,
+        now: Timestamp,
+    ) -> RepositoryFuture<'_, junban_app::PluginEventCursor> {
+        self.plugin_request(move |connection, _| {
+            plugin_ops::mark_plugin_retention_loss(connection, request, now)
+        })
+    }
+
+    fn mark_plugin_invalidating_event(
+        &self,
+        request: junban_app::MarkPluginInvalidatingEventRequest,
+        now: Timestamp,
+    ) -> RepositoryFuture<'_, junban_app::PluginEventCursor> {
+        self.plugin_request(move |connection, _| {
+            plugin_ops::mark_plugin_invalidating_event(connection, request, now)
+        })
+    }
+
+    fn verified_skip_plugin_cursor(
+        &self,
+        request: junban_app::VerifiedPluginCursorSkipRequest,
+        now: Timestamp,
+    ) -> RepositoryFuture<'_, junban_app::PluginEventCursor> {
+        self.plugin_request(move |connection, _| {
+            plugin_ops::verified_skip_plugin_cursor(connection, request, now)
+        })
+    }
+
+    fn replay_completed_plugin_operator(
+        &self,
+        identity: junban_app::PluginOperatorRequestIdentity,
+        now: Timestamp,
+    ) -> RepositoryFuture<'_, Option<junban_app::CommittedPluginInvocation>> {
+        self.plugin_request(move |connection, _| {
+            plugin_ops::replay_completed_plugin_operator(connection, identity, now)
+        })
+    }
+
+    fn reserve_authorized_plugin_invocation(
+        &self,
+        request: junban_app::AuthorizedReservePluginInvocationRequest,
+        now: Timestamp,
+    ) -> RepositoryFuture<'_, junban_app::ReservedPluginInvocation> {
+        self.plugin_request(move |connection, _| {
+            plugin_ops::reserve_authorized_plugin_invocation(connection, request, now)
+        })
+    }
+
+    fn transition_authorized_plugin_invocation(
+        &self,
+        request: junban_app::AuthorizedTransitionPluginInvocationRequest,
+        now: Timestamp,
+    ) -> RepositoryFuture<'_, junban_app::PluginInvocation> {
+        self.plugin_request(move |connection, _| {
+            plugin_ops::transition_authorized_plugin_invocation(connection, request, now)
+        })
+    }
+
+    fn list_plugin_invocations(&self) -> RepositoryFuture<'_, Vec<junban_app::PluginInvocation>> {
+        self.plugin_request(|connection, _| plugin_ops::list_plugin_invocations(connection))
+    }
+
+    fn complete_authorized_plugin_invocation(
+        &self,
+        request: junban_app::CompletePluginInvocationRequest,
+        now: Timestamp,
+    ) -> RepositoryFuture<'_, junban_app::CommittedPluginInvocation> {
+        self.plugin_request(move |connection, _| {
+            plugin_ops::complete_authorized_plugin_invocation(connection, request, now)
+        })
+    }
+
+    fn commit_authorized_plugin_invocation(
+        &self,
+        request: junban_app::AuthorizedPlannedPluginInvocationCommit,
+        now: Timestamp,
+    ) -> RepositoryFuture<'_, junban_app::CommittedPluginInvocation> {
+        self.plugin_request(move |connection, _| {
+            plugin_ops::commit_authorized_plugin_invocation(connection, request, now)
+        })
+    }
+
+    fn retry_due_plugin(
+        &self,
+        operation_id: OperationId,
+        request: junban_app::DuePluginRetryRequest,
+        now: Timestamp,
+    ) -> RepositoryFuture<'_, CommittedMutation> {
+        self.plugin_request(move |connection, _| {
+            plugin_ops::retry_due_plugin(connection, operation_id, request, now)
+        })
+    }
+
+    fn complete_plugin_activation(
+        &self,
+        operation_id: OperationId,
+        request: junban_app::CompletePluginActivationRequest,
+        now: Timestamp,
+    ) -> RepositoryFuture<'_, CommittedMutation> {
+        self.plugin_request(move |connection, _| {
+            plugin_ops::complete_plugin_activation(connection, operation_id, request, now)
+        })
+    }
+
+    fn record_plugin_attempt_failure(
+        &self,
+        operation_id: OperationId,
+        request: junban_app::RecordPluginAttemptFailureRequest,
+        now: Timestamp,
+    ) -> RepositoryFuture<'_, CommittedMutation> {
+        self.plugin_request(move |connection, _| {
+            plugin_ops::record_plugin_attempt_failure(connection, operation_id, request, now)
+        })
+    }
+
+    fn fence_plugin_graph(
+        &self,
+        request: junban_app::PluginGraphFenceRequest,
+        now: Timestamp,
+    ) -> RepositoryFuture<'_, junban_app::PluginGraphFenceOutcome> {
+        self.plugin_request(move |connection, _| {
+            plugin_ops::fence_plugin_graph(connection, request, now)
+        })
+    }
 }
 
 impl Repository for SqliteRepository {
@@ -2412,8 +3032,18 @@ impl Repository for SqliteRepository {
     }
 }
 
+type PluginJob = Box<dyn FnOnce(&mut Connection, &PluginPackageStore) + Send>;
+type PluginQueryJob =
+    Box<dyn FnOnce(&Connection, &Path, &mut plugin_query_ops::PluginQueryKeyring) + Send>;
+
 #[allow(clippy::large_enum_variant)]
 enum Command {
+    Plugin {
+        job: PluginJob,
+    },
+    PluginQuery {
+        job: PluginQueryJob,
+    },
     CreateTask {
         operation_id: OperationId,
         task_id: TaskId,
@@ -3101,10 +3731,16 @@ enum Command {
 fn run_worker(
     connection: &mut Connection,
     profile_dir: PathBuf,
+    package_store: PluginPackageStore,
     receiver: mpsc::Receiver<Command>,
 ) {
+    let mut plugin_query_keys = plugin_query_ops::PluginQueryKeyring::default();
     for command in receiver {
         match command {
+            Command::Plugin { job } => job(connection, &package_store),
+            Command::PluginQuery { job } => {
+                job(connection, &profile_dir, &mut plugin_query_keys);
+            }
             Command::CreateTask {
                 operation_id,
                 task_id,

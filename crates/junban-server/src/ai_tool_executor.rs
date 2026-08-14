@@ -2724,6 +2724,7 @@ fn resource_type_kind(resource_type: junban_app::ResourceType) -> &'static str {
         junban_app::ResourceType::AiSession => "ai_session",
         junban_app::ResourceType::AiMemory => "ai_memory",
         junban_app::ResourceType::AiApproval => "ai_approval",
+        junban_app::ResourceType::Plugin => "plugin",
     }
 }
 

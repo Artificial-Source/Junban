@@ -1,0 +1,17 @@
+{
+  "schemaVersion": 1,
+  "artifact": "artifacts/import-typescript.wasm",
+  "sizeBytes": 14975434,
+  "sha256": "9cc84add66d2f6371af013724bee0bbc93ef0c2958b37bc81471b8835ac3f132",
+  "sourceWitSha256": "5705801973219a0e6981693653f2caefdf1090345b65494750c8d8a9bf4b15f4",
+  "worldWitSha256": "f39df9cdcd7cd9c582526c5aac0b113231cc93abfe72dc618b2eeaf961a79753",
+  "node": "24.13.1",
+  "npm": "11.18.0",
+  "typescript": "6.0.3",
+  "jco": "1.26.1",
+  "componentizeJs": "0.22.0",
+  "wasi": "disabled-all",
+  "imports": ["junban:plugin/types@0.1.0"],
+  "exports": ["junban:plugin/guest@0.1.0"],
+  "reproducibility": "structural-not-byte"
+}

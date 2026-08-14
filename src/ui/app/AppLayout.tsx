@@ -32,6 +32,13 @@ import { ViewSkeleton } from "../components/Skeleton";
 import { TaskDetailPanel } from "../components/TaskDetailPanel";
 import { Phase2TaskDetailVisualFixture } from "../components/Phase2TaskDetailVisualFixture";
 import { CommandPalette, type Command } from "../components/CommandPalette";
+import {
+  pluginCommandPaletteEntries,
+  pluginNavItems,
+  PluginStatusBar,
+  PluginViewHost,
+} from "../plugins/contributions";
+import { usePlugins } from "../plugins/PluginProvider";
 import { SearchModal } from "../components/SearchModal";
 import { QuickAddModal } from "../components/QuickAddModal";
 import { AddProjectModal } from "../components/AddProjectModal";
@@ -113,6 +120,11 @@ export function AppLayout() {
     registerTaskEventHandler,
     settings,
   } = useWorkspace();
+  const {
+    contributions: pluginContributions,
+    invokeCommand: invokePluginCommand,
+    handlePluginEvent,
+  } = usePlugins();
   const features = settings?.features;
   // The immutable Phase 3 focus scene predates persisted feature visibility.
   const focusModeEnabled = phase3VisualFixture || (features?.focus_mode_enabled ?? false);
@@ -243,6 +255,16 @@ export function AppLayout() {
       void playSound(soundEvent, notifications.volume_percent);
     });
   }, [anyVisualFixture, notifications, registerTaskEventHandler]);
+
+  // Plugin product events drop contribution authority and refresh.
+  useEffect(() => {
+    if (anyVisualFixture) return;
+    return registerTaskEventHandler((event) => {
+      if (typeof event.event_type === "string" && event.event_type.startsWith("plugin.")) {
+        handlePluginEvent(event.event_type);
+      }
+    });
+  }, [anyVisualFixture, registerTaskEventHandler, handlePluginEvent]);
 
   // Keep every background sibling out of the accessibility and focus trees while
   // a drawer, panel, loading cover, or modal owns interaction. Overlay hosts
@@ -693,6 +715,22 @@ export function AppLayout() {
                 },
               ]
             : []),
+          {
+            id: "settings-plugins",
+            name: "Go to Extensions",
+            callback: () => handleNavigate({ name: "settings", tab: "plugins" }),
+          },
+          ...pluginCommandPaletteEntries(pluginContributions, invokePluginCommand),
+          ...pluginNavItems(pluginContributions).map((item) => ({
+            id: item.id,
+            name: `Go to ${item.label} (plugin)`,
+            callback: () =>
+              handleNavigate({
+                name: "plugin-view",
+                pluginId: item.pluginId,
+                surfaceId: item.surfaceId,
+              }),
+          })),
         ]
       : []),
   ];
@@ -750,6 +788,12 @@ export function AppLayout() {
               onOpenProjectModal={() => setProjectModalOpen(true)}
               phase2VisualFixture={phase2VisualFixture}
               phase3VisualFixture={phase3VisualFixture}
+              pluginTools={pluginNavItems(pluginContributions).map((item) => ({
+                id: item.id,
+                label: item.label,
+                pluginId: item.pluginId,
+                surfaceId: item.surfaceId,
+              }))}
             />
           </ErrorBoundary>
         </div>
@@ -912,11 +956,37 @@ export function AppLayout() {
                     />
                   </Suspense>
                 )}
+                {route.name === "plugin-view" && (
+                  <PluginViewHost
+                    contribution={
+                      pluginContributions.find(
+                        (c) =>
+                          c.kind === "view" &&
+                          c.pluginId === route.pluginId &&
+                          c.localId === route.surfaceId,
+                      ) ?? {
+                        contributionId: `${route.pluginId}:${route.surfaceId}`,
+                        pluginId: route.pluginId,
+                        localId: route.surfaceId,
+                        kind: "view",
+                        title: route.surfaceId,
+                        description: null,
+                        location: "workspace",
+                        actions: [],
+                        packageGeneration: 0,
+                        activationEpoch: 0,
+                        hostSessionId: "",
+                      }
+                    }
+                  />
+                )}
               </div>
             </ErrorBoundary>
           </div>
         </main>
       </div>
+
+      {!phase2VisualFixture && !anyVisualFixture ? <PluginStatusBar /> : null}
 
       {/* Mobile drawer */}
       {isMobile && (
@@ -948,6 +1018,12 @@ export function AppLayout() {
               }}
               phase2VisualFixture={phase2VisualFixture}
               phase3VisualFixture={phase3VisualFixture}
+              pluginTools={pluginNavItems(pluginContributions).map((item) => ({
+                id: item.id,
+                label: item.label,
+                pluginId: item.pluginId,
+                surfaceId: item.surfaceId,
+              }))}
             />
           </MobileDrawer>
         </div>

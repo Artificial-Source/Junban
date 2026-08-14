@@ -19,6 +19,7 @@ export type SettingsTabId =
   | "voice"
   | "keyboard"
   | "templates"
+  | "plugins"
   | "data"
   | "hosted"
   | "diagnostics";
@@ -31,6 +32,7 @@ export const SETTINGS_TAB_IDS: readonly SettingsTabId[] = [
   "voice",
   "keyboard",
   "templates",
+  "plugins",
   "data",
   "hosted",
   "diagnostics",
@@ -54,7 +56,8 @@ export type View =
   | "stats"
   | "dopamine-menu"
   | "timeblocking"
-  | "ai-chat";
+  | "ai-chat"
+  | "plugin-view";
 
 /** Structured application route (never the Settings overlay itself). */
 export type AppRoute =
@@ -74,7 +77,8 @@ export type AppRoute =
   | { name: "stats" }
   | { name: "dopamine-menu" }
   | { name: "timeblocking" }
-  | { name: "ai-chat" };
+  | { name: "ai-chat" }
+  | { name: "plugin-view"; pluginId: string; surfaceId: string };
 
 /** Settings overlay location derived from the URL. */
 export type SettingsLocation =
@@ -196,6 +200,15 @@ export function parseRoute(path: string): AppRoute | null {
 
   const segments = normalized.split("/").filter(Boolean);
 
+  // Namespaced plugin views — never share first-party path roots.
+  if (segments[0] === "ext" && segments.length === 3) {
+    const pluginId = segments[1]!;
+    const surfaceId = segments[2]!;
+    if (!pluginId || !surfaceId) return null;
+    if (pluginId.includes("/") || surfaceId.includes("/")) return null;
+    return { name: "plugin-view", pluginId, surfaceId };
+  }
+
   if (segments[0] === "filters" && segments[1] === "saved" && segments.length === 3) {
     const filterId = segments[2]!;
     if (!isUuid(filterId)) return null;
@@ -268,6 +281,8 @@ export function routeToPath(route: AppRoute): string {
       return "/timeblocking";
     case "ai-chat":
       return "/ai-chat";
+    case "plugin-view":
+      return `/ext/${encodeURIComponent(route.pluginId)}/${encodeURIComponent(route.surfaceId)}`;
   }
 }
 
@@ -292,6 +307,7 @@ export function viewToRoute(view: View): AppRoute | null {
     case "saved-filter":
     case "project":
     case "task":
+    case "plugin-view":
       return null;
   }
 }

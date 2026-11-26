@@ -2063,7 +2063,7 @@ async fn exec_apply_auto_schedule_day<R: Repository, E: EventSink>(
     }
 
     let mut created = Vec::with_capacity(prepared.len());
-    for (item, prior) in prepared.into_iter().zip(recovered.into_iter()) {
+    for (item, prior) in prepared.into_iter().zip(recovered) {
         let mutation = if let Some(mutation) = prior {
             mutation
         } else {

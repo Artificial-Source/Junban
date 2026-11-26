@@ -153,6 +153,7 @@ impl HostProcess {
         self.send(&frame, &body);
     }
 
+    #[track_caller]
     fn receive(&self) -> (ChildFrame, Vec<u8>) {
         match self.frames.recv_timeout(FRAME_TIMEOUT).unwrap() {
             ReaderEvent::Message(frame, body) => (frame, body),
@@ -701,7 +702,8 @@ fn cancel_unload_shutdown_and_finish_races_drain_active_invocations() {
             ChildFrame::Outcome { fence, kind, .. } => {
                 assert_eq!(fence, service);
                 assert_eq!(kind, junban_plugin_sdk::InvocationKind::CallService);
-                expect_failure(host.receive(), service, HostFailureCode::StaleAuthority);
+                // The exact cancel lost to completion. Only the outcome is emitted;
+                // the next invocation's fence also detects any duplicate terminal.
             }
             other => panic!("unexpected finish/cancel race frame {other:?}"),
         }

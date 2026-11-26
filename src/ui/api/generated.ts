@@ -2009,7 +2009,7 @@ export interface components {
       default_energy?: number | null;
       enabled: boolean;
       model?: string | null;
-      provider?: null | components["schemas"]["AiProviderPresetDto"];
+      provider?: components["schemas"]["AiProviderPresetDto"] | null;
       smart_endpoint: boolean;
     };
     AiConfigPutRequest: {
@@ -2032,13 +2032,13 @@ export interface components {
       utf8_bytes: number;
     };
     AiCredentialBindingResponse: {
-      credential?: null | components["schemas"]["AiCredentialMetadataDto"];
+      credential?: components["schemas"]["AiCredentialMetadataDto"] | null;
       target: components["schemas"]["AiCredentialTargetDto"];
     };
     AiCredentialBindingsDto: {
-      ai_provider?: null | components["schemas"]["AiCredentialMetadataDto"];
-      voice_stt?: null | components["schemas"]["AiCredentialMetadataDto"];
-      voice_tts?: null | components["schemas"]["AiCredentialMetadataDto"];
+      ai_provider?: components["schemas"]["AiCredentialMetadataDto"] | null;
+      voice_stt?: components["schemas"]["AiCredentialMetadataDto"] | null;
+      voice_tts?: components["schemas"]["AiCredentialMetadataDto"] | null;
     };
     AiCredentialMetadataDto: {
       /** Format: uuid */
@@ -2198,7 +2198,7 @@ export interface components {
       default_energy?: number | null;
       enabled: boolean;
       model?: string | null;
-      provider?: null | components["schemas"]["AiProviderPresetDto"];
+      provider?: components["schemas"]["AiProviderPresetDto"] | null;
       smart_endpoint: boolean;
     };
     AiToolEventDto: {
@@ -2321,7 +2321,7 @@ export interface components {
       deadline?: string | null;
       /** Format: date */
       due_date?: string | null;
-      due_time?: null | components["schemas"]["LocalDueTimeDto"];
+      due_time?: components["schemas"]["LocalDueTimeDto"] | null;
       someday?: boolean | null;
     };
     BulkTagChangeDto: {
@@ -2403,11 +2403,11 @@ export interface components {
       occurred_at: string;
       /** Format: uuid */
       operation_id: string;
-      primary?: null | components["schemas"]["ResourceRefDto"];
+      primary?: components["schemas"]["ResourceRefDto"] | null;
       resync: components["schemas"]["ResyncScopeDto"];
       /** Format: int64 */
       revision: number;
-      snapshot?: null | components["schemas"]["ResourceSnapshotDto"];
+      snapshot?: components["schemas"]["ResourceSnapshotDto"] | null;
     };
     CommunityPolicyBody: {
       enabled: boolean;
@@ -2475,7 +2475,7 @@ export interface components {
       parent_id?: string | null;
       /** Format: int64 */
       sort_order?: number | null;
-      view?: null | components["schemas"]["ProjectViewDto"];
+      view?: components["schemas"]["ProjectViewDto"] | null;
     };
     CreateSavedFilterRequest: {
       color?: string | null;
@@ -2506,7 +2506,7 @@ export interface components {
       dread?: number | null;
       /** Format: date */
       due_date?: string | null;
-      due_time?: null | components["schemas"]["LocalDueTimeDto"];
+      due_time?: components["schemas"]["LocalDueTimeDto"] | null;
       /** Format: int32 */
       estimated_minutes?: number | null;
       /** Format: uuid */
@@ -2637,7 +2637,7 @@ export interface components {
     EatTheFrogResponse: {
       /** Format: int64 */
       revision: number;
-      task?: null | components["schemas"]["TaskDto"];
+      task?: components["schemas"]["TaskDto"] | null;
     };
     EditAiResponseRequest: {
       /** Format: uuid */
@@ -2802,7 +2802,7 @@ export interface components {
       provider: components["schemas"]["AiProviderPresetDto"];
     };
     MoveTaskRequest: {
-      order?: null | components["schemas"]["OrderAnchorDto"];
+      order?: components["schemas"]["OrderAnchorDto"] | null;
       /** Format: uuid */
       parent_id?: string | null;
       /** Format: uuid */
@@ -2820,7 +2820,7 @@ export interface components {
     /** @description Mutation responses carry exactly one committed event. `newly_committed` is never exposed. */
     MutationResponse: {
       event: components["schemas"]["CommittedEventDto"];
-      uncomplete_outcome?: null | components["schemas"]["UncompleteOutcomeDto"];
+      uncomplete_outcome?: components["schemas"]["UncompleteOutcomeDto"] | null;
     };
     NameMappingDto: {
       from: string;
@@ -2916,7 +2916,7 @@ export interface components {
       parent_id?: string | null;
       /** Format: int64 */
       sort_order?: number | null;
-      view?: null | components["schemas"]["ProjectViewDto"];
+      view?: components["schemas"]["ProjectViewDto"] | null;
     };
     PatchSavedFilterRequest: {
       color?: string | null;
@@ -2932,13 +2932,13 @@ export interface components {
       sort_order?: number | null;
     };
     PatchSettingsRequest: {
-      appearance?: null | components["schemas"]["AppearanceSettingsDto"];
-      date_time?: null | components["schemas"]["DateTimeSettingsDto"];
-      features?: null | components["schemas"]["FeatureSettingsDto"];
+      appearance?: components["schemas"]["AppearanceSettingsDto"] | null;
+      date_time?: components["schemas"]["DateTimeSettingsDto"] | null;
+      features?: components["schemas"]["FeatureSettingsDto"] | null;
       keyboard_shortcuts?: components["schemas"]["KeyboardShortcutDto"][] | null;
-      notifications?: null | components["schemas"]["NotificationSettingsDto"];
-      planning?: null | components["schemas"]["PlanningSettingsDto"];
-      task_defaults?: null | components["schemas"]["TaskDefaultsDto"];
+      notifications?: components["schemas"]["NotificationSettingsDto"] | null;
+      planning?: components["schemas"]["PlanningSettingsDto"] | null;
+      task_defaults?: components["schemas"]["TaskDefaultsDto"] | null;
     };
     PatchTagRequest: {
       color?: string | null;
@@ -2954,7 +2954,7 @@ export interface components {
       dread?: number | null;
       /** Format: date */
       due_date?: string | null;
-      due_time?: null | components["schemas"]["LocalDueTimeDto"];
+      due_time?: components["schemas"]["LocalDueTimeDto"] | null;
       /** Format: int32 */
       estimated_minutes?: number | null;
       /** Format: uuid */
@@ -3019,7 +3019,7 @@ export interface components {
       /** Format: int32 */
       capacity_minutes: number;
       nudge_rules: components["schemas"]["NudgeRuleSettingsDto"][];
-      work_hours?: null | components["schemas"]["WorkHoursDto"];
+      work_hours?: components["schemas"]["WorkHoursDto"] | null;
     };
     PluginBooleanSettingSchemaDto: {
       default: boolean;
@@ -3498,8 +3498,8 @@ export interface components {
       state: components["schemas"]["ReminderOccurrenceStateDto"];
       /** Format: uuid */
       task_id: string;
-      terminal_channel?: null | components["schemas"]["ReminderChannelDto"];
-      terminal_error_code?: null | components["schemas"]["ReminderFailureCodeDto"];
+      terminal_channel?: components["schemas"]["ReminderChannelDto"] | null;
+      terminal_error_code?: components["schemas"]["ReminderFailureCodeDto"] | null;
       /** Format: date-time */
       updated_at: string;
     };
@@ -3807,7 +3807,7 @@ export interface components {
       dread?: number | null;
       /** Format: date */
       due_date?: string | null;
-      due_time?: null | components["schemas"]["LocalDueTimeDto"];
+      due_time?: components["schemas"]["LocalDueTimeDto"] | null;
       /** Format: int32 */
       estimated_minutes?: number | null;
       /** Format: uuid */
@@ -4073,7 +4073,7 @@ export interface components {
       /** Format: int32 */
       created_count: number;
       daily: components["schemas"]["WeeklyDayStatsDto"][];
-      dominant_completion_bucket?: null | components["schemas"]["CompletionTimeBucketDto"];
+      dominant_completion_bucket?: components["schemas"]["CompletionTimeBucketDto"] | null;
       neglected_projects: components["schemas"]["NeglectedProjectFactDto"][];
       overdue_task_ids: string[];
       overdue_tasks: components["schemas"]["TaskDto"][];

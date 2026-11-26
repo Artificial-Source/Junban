@@ -88,8 +88,7 @@ export function CalendarWeekView({
                   }`}
                 >
                   {weekday}
-                </span>
-                {" "}
+                </span>{" "}
                 <span
                   className={`mt-0.5 flex h-8 w-8 items-center justify-center rounded-full text-lg font-semibold ${
                     isToday ? "bg-accent-action text-on-accent-action" : "text-on-surface"

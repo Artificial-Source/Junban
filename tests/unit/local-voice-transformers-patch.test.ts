@@ -27,6 +27,9 @@ describe("transformers CDN patch", () => {
       throw new Error("unexpected network during transformers import");
     });
     vi.stubGlobal("fetch", fetchSpy);
+    // jsdom supplies window but still exposes Node process.release. Select the
+    // same WASM backend the browser bundle uses in the shipped web worker.
+    vi.stubGlobal("process", Object.create(process, { release: { value: undefined } }));
 
     try {
       const transformers = await import("@huggingface/transformers");

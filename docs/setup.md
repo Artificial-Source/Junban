@@ -2,11 +2,11 @@
 
 ## Prerequisites
 
-| Tool    | Requirement                                           |
-| ------- | ----------------------------------------------------- |
-| Rust    | **1.100.0** pinned by `rust-toolchain.toml`              |
+| Tool    | Requirement                                            |
+| ------- | ------------------------------------------------------ |
+| Rust    | **1.100.0** pinned by `rust-toolchain.toml`            |
 | Node.js | **26.13.1** pinned by `.node-version` (frontend only)  |
-| pnpm    | **12.23.0** (`packageManager` field in `package.json`)  |
+| pnpm    | **12.23.0** (`packageManager` field in `package.json`) |
 
 Install Rust from [rustup](https://rustup.rs/). The workspace toolchain file installs `rustfmt` and `clippy` automatically.
 

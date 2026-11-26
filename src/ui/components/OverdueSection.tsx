@@ -121,8 +121,7 @@ export function OverdueSection({
                   }`}
                 >
                   {task.title}
-                </span>
-                {" "}
+                </span>{" "}
                 <span className="mt-0.5 flex items-center gap-1 text-xs font-medium text-error">
                   <Calendar size={11} aria-hidden="true" />
                   {formatDate(task.due_date!)}

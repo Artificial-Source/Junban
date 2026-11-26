@@ -96,7 +96,7 @@ describe("local voice ordinary module load", () => {
     for (const source of files) {
       for (const pkg of ENGINE_PACKAGES) {
         const staticImport = new RegExp(
-          `^\\s*import\\s+[^;]*from\\s+["']${pkg.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}["']`,
+          `^\\s*import\\s+(?!type\\b)[^;]*from\\s+["']${pkg.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}["']`,
           "m",
         );
         expect(source).not.toMatch(staticImport);

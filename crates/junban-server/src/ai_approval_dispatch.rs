@@ -256,7 +256,7 @@ async fn approve_worker(
         return Err(junban_app::AppError::Conflict);
     }
     let settings = state.service.get_settings().await?;
-    let context = ToolExecContext::with_confirmed_settings(jiff::Zoned::now(), &settings);
+    let context = ToolExecContext::with_confirmed_settings(jiff::ZonedDateTime::now(), &settings);
 
     let mut approved_content = assistant.content;
     let dispatch_operation_id = if recovering_dispatch {
@@ -481,7 +481,7 @@ async fn recover_one_dispatch(state: &ServerState, approval: AiToolApproval) -> 
         .get_settings()
         .await
         .map_err(ai_recovery_error)?;
-    let context = ToolExecContext::with_confirmed_settings(jiff::Zoned::now(), &settings);
+    let context = ToolExecContext::with_confirmed_settings(jiff::ZonedDateTime::now(), &settings);
     let result = bound_chat_result(
         execute_tool_recovery(&state.service, &action, &context, dispatch_operation_id)
             .await

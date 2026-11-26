@@ -958,7 +958,8 @@ async fn orchestrate(
                     break;
                 }
             };
-            let context = ToolExecContext::with_confirmed_settings(jiff::Zoned::now(), &settings);
+            let context =
+                ToolExecContext::with_confirmed_settings(jiff::ZonedDateTime::now(), &settings);
             Some(bound_chat_read_result(
                 execute_tool(&durable.service, &action, &context, None).await,
             ))

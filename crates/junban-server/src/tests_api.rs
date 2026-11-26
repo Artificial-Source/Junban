@@ -3259,7 +3259,7 @@ async fn timeblocking_routes_require_auth() {
 #[tokio::test]
 async fn time_block_list_defaults_and_rejects_invalid_windows() {
     let context = TestContext::new();
-    let today = jiff::Zoned::now().date().to_string();
+    let today = jiff::ZonedDateTime::now().date().to_string();
     let _ = create_block(
         &context,
         block_payload("Focus", &today, "09:00:00", "10:00:00"),
@@ -3513,7 +3513,7 @@ async fn time_block_replan_is_idempotent_and_supports_actions() {
     let context = TestContext::new();
 
     // Seed unlocked past blocks relative to server-local today.
-    let today = jiff::Zoned::now().date();
+    let today = jiff::ZonedDateTime::now().date();
     let yesterday = today.checked_sub(1.day()).unwrap();
     let two_days_ago = today.checked_sub(2.days()).unwrap();
 
@@ -3727,7 +3727,7 @@ async fn time_block_replan_is_idempotent_and_supports_actions() {
 #[tokio::test]
 async fn time_block_replan_rejects_a_stale_server_preview() {
     let context = TestContext::new();
-    let today = jiff::Zoned::now().date();
+    let today = jiff::ZonedDateTime::now().date();
     let yesterday = today.checked_sub(1.day()).unwrap();
 
     create_block(
@@ -4653,7 +4653,7 @@ async fn planning_daily_and_end_of_day_use_injected_dates() {
     assert_eq!(completed.status(), StatusCode::OK);
 
     // End-of-day win bucketing uses server-zone completed_at; use server-local today for wins.
-    let today = jiff::Zoned::now().date().to_string();
+    let today = jiff::ZonedDateTime::now().date().to_string();
     let today_focus = seed_task_with(
         &context,
         "Today focus",
@@ -4783,7 +4783,7 @@ async fn planning_weekly_sunday_and_monday_windows() {
 #[tokio::test]
 async fn stats_formula_streak_and_range_bounds() {
     let context = TestContext::new();
-    let today = jiff::Zoned::now().date();
+    let today = jiff::ZonedDateTime::now().date();
     let today_s = today.to_string();
 
     let with_est = seed_task_with(
@@ -4828,7 +4828,7 @@ async fn stats_formula_streak_and_range_bounds() {
 #[tokio::test]
 async fn nudges_stable_order_and_truncation_flags() {
     let context = TestContext::new();
-    let today = jiff::Zoned::now().date();
+    let today = jiff::ZonedDateTime::now().date();
     let today_s = today.to_string();
     // Overdue pending.
     let overdue_day = today.checked_sub(2.days()).unwrap().to_string();
@@ -4895,7 +4895,7 @@ async fn nudges_stable_order_and_truncation_flags() {
 #[tokio::test]
 async fn motivation_ordering_and_temporal_defaults() {
     let context = TestContext::new();
-    let today = jiff::Zoned::now().date().to_string();
+    let today = jiff::ZonedDateTime::now().date().to_string();
 
     let frog = seed_task_with(
         &context,
@@ -5919,7 +5919,7 @@ fn ai_sse_envelopes(bytes: &[u8]) -> Vec<Value> {
 
 async fn exact_auto_schedule_apply_fixture(context: &TestContext) -> (String, String) {
     let settings = context.state.service.get_settings().await.unwrap();
-    let date = jiff::Zoned::now().date().to_string();
+    let date = jiff::ZonedDateTime::now().date().to_string();
     create_task_payload(
         context,
         json!({
@@ -5935,7 +5935,7 @@ async fn exact_auto_schedule_apply_fixture(context: &TestContext) -> (String, St
     )
     .unwrap();
     let execution_context = crate::ai_tool_executor::ToolExecContext::with_confirmed_settings(
-        jiff::Zoned::now(),
+        jiff::ZonedDateTime::now(),
         &settings,
     );
     let preview = crate::ai_tool_executor::execute_tool(

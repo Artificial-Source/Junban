@@ -2,7 +2,7 @@
 
 use std::sync::Arc;
 
-use jiff::{Timestamp, Zoned, civil::Date, tz::TimeZone};
+use jiff::{Timestamp, ZonedDateTime, civil::Date, tz::TimeZone};
 use junban_domain::{
     AiApprovalId, AiCredentialId, AiMemory, AiMemoryId, AiMessage, AiMessageId, AiRunId,
     AiRunState, AiSecretMetadata, AiSession, AiSessionId, AiToolApproval, AppSettings,
@@ -383,7 +383,7 @@ where
 
     /// Phase 1-compatible unfiltered list.
     pub async fn list_tasks_simple(&self) -> Result<TaskListPage, AppError> {
-        let as_of = TaskListAsOf::from_zoned(&Zoned::now())?;
+        let as_of = TaskListAsOf::from_zoned(&ZonedDateTime::now())?;
         self.list_tasks(TaskQuery::new().with_limit(100)?, as_of)
             .await
     }
@@ -1867,7 +1867,7 @@ where
     /// Samples the current system IANA zone on each read; zone is not persisted.
     pub async fn temporal_settings_from_store(&self) -> Result<TemporalSettings, AppError> {
         let settings = self.get_settings().await?;
-        let time_zone = Zoned::now()
+        let time_zone = ZonedDateTime::now()
             .time_zone()
             .iana_name()
             .unwrap_or("UTC")

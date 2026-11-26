@@ -314,13 +314,13 @@ impl NudgeFacts {
 /// dates into the planning helpers that accept dates directly.
 #[must_use]
 pub fn civil_date_in_zone(instant: Timestamp, zone: &TimeZone) -> Date {
-    instant.to_zoned(zone.clone()).date()
+    instant.to_zoned_datetime(zone.clone()).date()
 }
 
 /// Local wall-clock hour (0..=23) of an instant in the supplied timezone.
 #[must_use]
 pub fn civil_hour_in_zone(instant: Timestamp, zone: &TimeZone) -> i8 {
-    instant.to_zoned(zone.clone()).hour()
+    instant.to_zoned_datetime(zone.clone()).hour()
 }
 
 // ── Matrix ──────────────────────────────────────────────────────────────────

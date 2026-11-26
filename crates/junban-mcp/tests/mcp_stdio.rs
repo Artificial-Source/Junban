@@ -141,7 +141,7 @@ fn initialize(stdin: &mut impl Write, reader: &mut impl BufRead, deadline: Insta
     );
     let init = read_rpc_line(reader, deadline);
     assert_eq!(init["id"], 1);
-    assert!(init.get("result").is_some(), "{init}");
+    assert_eq!(init["result"]["protocolVersion"], "2025-11-25", "{init}");
     write_rpc(
         stdin,
         &json!({

@@ -13,7 +13,6 @@ use junban_plugin_sdk::{
     decode_child_frame, decode_host_call_request, decode_invocation_outcome, encode_parent_frame,
     inspect_component_for_runtime, private_body_types as body, validate_child_body,
 };
-use sha2::{Digest, Sha256};
 
 const SESSION: &str = "00000000-0000-4000-8000-000000000001";
 const RUST_COMPONENT: &[u8] =
@@ -334,7 +333,7 @@ fn fence(invocation: u64) -> AuthorityFence {
 }
 
 fn sha256(bytes: &[u8]) -> String {
-    format!("{:x}", Sha256::digest(bytes))
+    junban_plugin_sdk::Sha256Digest::of(bytes).into_string()
 }
 
 fn expect_capability(frame: ChildFrame, bytes: &[u8]) -> (CallbackFence, HostCallRequest) {

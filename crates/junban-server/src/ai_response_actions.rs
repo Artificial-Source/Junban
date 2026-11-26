@@ -77,7 +77,7 @@ pub(crate) async fn daily_briefing(
         .await;
     }
 
-    let briefing_date = jiff::Zoned::now().date().to_string();
+    let briefing_date = jiff::ZonedDateTime::now().date().to_string();
     let history = load_recent_messages(&state.service, session_id)
         .await
         .map_err(|error| ApiError::from_app(error, &request_id))?;

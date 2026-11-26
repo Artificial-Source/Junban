@@ -3876,7 +3876,7 @@ where
 }
 
 fn default_time_zone_name(request_id: &RequestId) -> Result<TimeZoneName, ApiError> {
-    let now = jiff::Zoned::now();
+    let now = jiff::ZonedDateTime::now();
     let name = now.time_zone().iana_name().unwrap_or("UTC");
     TimeZoneName::new(name.to_owned()).map_err(|e| validation_error(e, request_id))
 }

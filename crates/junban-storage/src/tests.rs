@@ -510,7 +510,7 @@ async fn restart_preserves_tasks_receipts_events_and_deleted_replays() {
     }
     assert_eq!(
         repository
-            .delete_task(delete_op, id, Timestamp::now())
+            .delete_task(delete_op, id, now().checked_add(1.seconds()).unwrap())
             .await
             .unwrap(),
         deleted
@@ -3394,6 +3394,19 @@ async fn create_with_remind_at(repo: &SqliteRepository, title: &str, remind_at: 
     create_draft(repo, draft).await
 }
 
+// Exercise the normal list-and-compact command at the fixture's logical time.
+fn list_task_reminders_at(
+    repo: &SqliteRepository,
+    task_id: TaskId,
+    at: Timestamp,
+) -> RepositoryFuture<'_, Vec<ReminderOccurrence>> {
+    repo.request(move |reply| Command::ListTaskReminders {
+        task_id,
+        now: at,
+        reply,
+    })
+}
+
 #[tokio::test]
 async fn reminder_create_patch_clear_complete_delete_sync() {
     let directory = TestDir::new();
@@ -3401,7 +3414,7 @@ async fn reminder_create_patch_clear_complete_delete_sync() {
     let repo = owner.repository();
 
     let id = create_with_remind_at(&repo, "remind me", "2026-07-28T15:00:00Z").await;
-    let rows = repo.list_task_reminders(id).await.unwrap();
+    let rows = list_task_reminders_at(&repo, id, now()).await.unwrap();
     assert_eq!(rows.len(), 1);
     assert_eq!(rows[0].state, ReminderOccurrenceState::Pending);
     assert_eq!(rows[0].remind_at.to_string(), "2026-07-28T15:00:00Z");
@@ -3418,7 +3431,7 @@ async fn reminder_create_patch_clear_complete_delete_sync() {
     )
     .await
     .unwrap();
-    let rows = repo.list_task_reminders(id).await.unwrap();
+    let rows = list_task_reminders_at(&repo, id, now()).await.unwrap();
     assert_eq!(rows.len(), 2);
     let pending: Vec<_> = rows
         .iter()
@@ -3444,7 +3457,7 @@ async fn reminder_create_patch_clear_complete_delete_sync() {
     .await
     .unwrap();
     assert!(
-        repo.list_task_reminders(id)
+        list_task_reminders_at(&repo, id, now())
             .await
             .unwrap()
             .iter()
@@ -3467,7 +3480,7 @@ async fn reminder_create_patch_clear_complete_delete_sync() {
         .await
         .unwrap();
     assert!(
-        repo.list_task_reminders(id)
+        list_task_reminders_at(&repo, id, now())
             .await
             .unwrap()
             .iter()
@@ -3476,10 +3489,16 @@ async fn reminder_create_patch_clear_complete_delete_sync() {
 
     // Delete cascades occurrence rows.
     let id2 = create_with_remind_at(&repo, "gone", "2026-07-28T18:00:00Z").await;
-    assert_eq!(repo.list_task_reminders(id2).await.unwrap().len(), 1);
+    assert_eq!(
+        list_task_reminders_at(&repo, id2, now())
+            .await
+            .unwrap()
+            .len(),
+        1
+    );
     repo.delete_task(operation(), id2, now()).await.unwrap();
     assert_eq!(
-        repo.list_task_reminders(id2).await,
+        list_task_reminders_at(&repo, id2, now()).await,
         Err(RepositoryError::NotFound)
     );
 }
@@ -3874,7 +3893,11 @@ async fn reminder_snooze_dismiss_idempotent_restart_and_undo() {
         )
         .await
         .unwrap();
-    // Exact retry / restart replay.
+    // Restart before retrying so this verifies persisted receipt replay.
+    drop(repo);
+    drop(owner);
+    let owner = ProfileOwner::open(&directory.0).unwrap();
+    let repo = owner.repository();
     let replay = repo
         .reschedule_reminder(
             snooze_op,
@@ -3895,8 +3918,7 @@ async fn reminder_snooze_dismiss_idempotent_restart_and_undo() {
             .to_string(),
         "2026-07-28T16:00:00Z"
     );
-    let pending = repo
-        .list_task_reminders(id)
+    let pending = list_task_reminders_at(&repo, id, now())
         .await
         .unwrap()
         .into_iter()
@@ -3917,7 +3939,7 @@ async fn reminder_snooze_dismiss_idempotent_restart_and_undo() {
         "2026-07-28T15:00:00Z"
     );
     assert!(
-        repo.list_task_reminders(id)
+        list_task_reminders_at(&repo, id, now())
             .await
             .unwrap()
             .iter()
@@ -3931,7 +3953,7 @@ async fn reminder_snooze_dismiss_idempotent_restart_and_undo() {
     repo.dismiss_reminder(dismiss_op, id, now()).await.unwrap();
     assert_eq!(repo.get_task(id).await.unwrap().remind_at, None);
     assert!(
-        repo.list_task_reminders(id)
+        list_task_reminders_at(&repo, id, now())
             .await
             .unwrap()
             .iter()
@@ -3959,7 +3981,7 @@ async fn reminder_snooze_dismiss_idempotent_restart_and_undo() {
     )
     .await
     .unwrap();
-    let rows = repo.list_task_reminders(id2).await.unwrap();
+    let rows = list_task_reminders_at(&repo, id2, now()).await.unwrap();
     assert!(rows.iter().any(|row| {
         row.remind_at.to_string() == "2026-07-28T11:00:00Z"
             && row.state == ReminderOccurrenceState::Claimed
@@ -4188,7 +4210,7 @@ async fn reminder_terminal_compaction_bounds_and_preserves_live_intent() {
     let directory = TestDir::new();
     let owner = ProfileOwner::open(&directory.0).unwrap();
     let repo = owner.repository();
-    let t0: Timestamp = "2026-07-28T12:00:00Z".parse().unwrap();
+    let t0 = now();
 
     let live = create_with_remind_at(&repo, "live", "2026-07-28T11:00:00Z").await;
     let claimed_id = create_with_remind_at(&repo, "claimed", "2026-07-28T10:00:00Z").await;
@@ -4245,13 +4267,13 @@ async fn reminder_terminal_compaction_bounds_and_preserves_live_intent() {
     // Control-plane compaction must not churn the user revision.
     assert_eq!(repo.diagnostics().await.unwrap().revision, before_rev);
 
-    let live_rows = repo.list_task_reminders(live).await.unwrap();
+    let live_rows = list_task_reminders_at(&repo, live, t0).await.unwrap();
     assert!(live_rows.iter().any(|row| {
         row.state == ReminderOccurrenceState::Pending
             && row.remind_at.to_string() == "2026-07-28T11:00:00Z"
     }));
     assert_eq!(
-        repo.list_task_reminders(claimed_id).await.unwrap()[0].state,
+        list_task_reminders_at(&repo, claimed_id, t0).await.unwrap()[0].state,
         ReminderOccurrenceState::Delivered
     );
 
@@ -4271,23 +4293,38 @@ async fn reminder_terminal_compaction_bounds_and_preserves_live_intent() {
     let pruned_by_count = TaskId::parse("00000000-0000-4000-8000-000000000032").unwrap(); // i=50
     let kept_newest = TaskId::parse("00000000-0000-4000-8000-000000000833").unwrap(); // i=2099
     assert!(
-        repo.list_task_reminders(aged_id).await.unwrap().is_empty(),
+        list_task_reminders_at(&repo, aged_id, t0)
+            .await
+            .unwrap()
+            .is_empty(),
         "rows older than 90 days must be pruned"
     );
     assert!(
-        repo.list_task_reminders(pruned_by_count)
+        list_task_reminders_at(&repo, pruned_by_count, t0)
             .await
             .unwrap()
             .is_empty(),
         "oldest terminal audit beyond the 2000-row ceiling must be pruned"
     );
     assert_eq!(
-        repo.list_task_reminders(kept_newest).await.unwrap().len(),
+        list_task_reminders_at(&repo, kept_newest, t0)
+            .await
+            .unwrap()
+            .len(),
         1,
         "newest terminal audit rows must be retained"
     );
     // Snapshot for the live task cannot retain unbounded historical terminals.
-    assert!(repo.list_task_reminders(live).await.unwrap().len() <= 2);
+    assert!(list_task_reminders_at(&repo, live, t0).await.unwrap().len() <= 2);
+
+    // Once under the count ceiling, only aging can evict the newest row.
+    let after_retention = t0.checked_add((90 * 24).hours()).unwrap();
+    assert!(
+        list_task_reminders_at(&repo, kept_newest, after_retention)
+            .await
+            .unwrap()
+            .is_empty()
+    );
 }
 
 #[tokio::test]

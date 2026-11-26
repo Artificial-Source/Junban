@@ -914,7 +914,7 @@ pub fn count_tasks(profile_dir: impl AsRef<Path>) -> Result<u32, SeedError> {
 
 /// Resolve the default civil "today" for seeding from the host clock.
 pub fn host_as_of_date() -> Result<Date, SeedError> {
-    Ok(jiff::Zoned::now().date())
+    Ok(jiff::ZonedDateTime::now().date())
 }
 
 #[cfg(test)]

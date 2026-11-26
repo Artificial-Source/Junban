@@ -11,7 +11,7 @@ use rmcp::{
         GetPromptResult, ListPromptsResult, ListResourceTemplatesResult, ListResourcesResult,
         ListToolsResult, PaginatedRequestParams, ProgressNotificationParam,
         ReadResourceRequestParams, ReadResourceResponse, ReadResourceResult, Resource,
-        ResourceContents, ResourceTemplate, ServerCapabilities, ServerInfo,
+        ResourceContents, ResourceTemplate, ServerCapabilities, ServerConfig,
     },
     service::RequestContext,
     transport::stdio,
@@ -185,8 +185,8 @@ impl From<CallOutcome> for SessionAccess {
 }
 
 impl ServerHandler for JunbanMcpServer {
-    fn get_info(&self) -> ServerInfo {
-        ServerInfo::new(
+    fn get_info(&self) -> ServerConfig {
+        ServerConfig::new(
             ServerCapabilities::builder()
                 .enable_tools()
                 .enable_resources()

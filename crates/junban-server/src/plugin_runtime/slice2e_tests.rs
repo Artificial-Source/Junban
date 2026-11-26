@@ -1760,7 +1760,7 @@ async fn phase7_slice2e_real_production_composition() {
             "schema_version": 1,
             "status": "passed",
             "cases": CASE_INVENTORY,
-            "wasmtime": "36.0.13",
+            "wasmtime": "36.0.23",
             "process_model": "one-on-demand-child-per-profile",
             "fixture_profiles": ["rust", "typescript"],
             "scales": [1, 4, 16],

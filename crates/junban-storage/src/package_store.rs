@@ -483,7 +483,16 @@ fn verify_open_digest(
         .read(&mut trailing)
         .map_err(|_| PackageStoreError::Io)?
         != 0
-        || format!("{:x}", hasher.finalize()) != expected.as_str()
+    {
+        return Err(PackageStoreError::AuthorityMismatch);
+    }
+
+    const HEX: &[u8; 16] = b"0123456789abcdef";
+    let digest = hasher.finalize();
+    if !digest
+        .iter()
+        .zip(expected.as_str().as_bytes().as_chunks::<2>().0)
+        .all(|(&byte, pair)| *pair == [HEX[(byte >> 4) as usize], HEX[(byte & 0x0f) as usize]])
     {
         return Err(PackageStoreError::AuthorityMismatch);
     }

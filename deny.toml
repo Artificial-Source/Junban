@@ -4,6 +4,11 @@ all-features = true
 [advisories]
 version = 2
 yanked = "deny"
+unmaintained = "all"
+unsound = "all"
+# Informational only: rmcp 3.11.0 requires chrono and no patched chrono exists.
+# Remove when rmcp drops chrono: https://github.com/modelcontextprotocol/rust-sdk/issues/1469
+ignore = ["RUSTSEC-2026-0543"]
 
 [licenses]
 version = 2
@@ -18,6 +23,8 @@ allow = [
   "Unlicense",
   "Zlib",
 ]
+# reqwest's platform verifier distributes Mozilla CA certificate data under CDLA.
+exceptions = [{ crate = "webpki-root-certs", allow = ["CDLA-Permissive-2.0"] }]
 
 [bans]
 multiple-versions = "warn"

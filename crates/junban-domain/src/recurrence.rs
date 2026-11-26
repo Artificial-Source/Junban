@@ -143,7 +143,7 @@ fn next_due_basis(
 }
 
 fn civil_start_of_day(date: Date, server_zone: &TimeZone) -> Result<Timestamp, ValidationError> {
-    date.to_zoned(server_zone.clone())
+    date.to_zoned_datetime(server_zone.clone())
         .map(|zoned| zoned.timestamp())
         .map_err(|_| ValidationError::Invalid {
             field: "due_date",
@@ -261,10 +261,12 @@ pub fn resolve_due_instant(
             reason: "unknown IANA timezone",
         })?;
     let civil = due_date.to_datetime(due_time.time);
-    let zoned = zone.to_zoned(civil).map_err(|_| ValidationError::Invalid {
-        field: "due_time",
-        reason: "civil datetime cannot be resolved in timezone",
-    })?;
+    let zoned = zone
+        .to_zoned_datetime(civil)
+        .map_err(|_| ValidationError::Invalid {
+            field: "due_time",
+            reason: "civil datetime cannot be resolved in timezone",
+        })?;
     Ok(zoned.timestamp())
 }
 

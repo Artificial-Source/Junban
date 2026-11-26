@@ -129,9 +129,9 @@ When STT/TTS is **Browser**, you may optionally download and select pinned local
 
 | Package id                    | Role      | Engine pin                           | License (package)                         |
 | ----------------------------- | --------- | ------------------------------------ | ----------------------------------------- |
-| `whisper-tiny.en-q4`          | Local STT | `@huggingface/transformers@3.8.1`    | OpenAI-Whisper-MIT                        |
+| `whisper-tiny.en-q4`          | Local STT | `@huggingface/transformers@4.3.2`    | OpenAI-Whisper-MIT                        |
 | `kokoro-82m-v1-q8`            | Local TTS | `kokoro-js@1.2.1`                    | Apache-2.0                                |
-| `piper-en_US-ljspeech-medium` | Local TTS | `@mintplex-labs/piper-tts-web@1.0.4` | MIT (LJ Speech source data public domain) |
+| `piper-en_US-ljspeech-medium` | Local TTS | `@mintplex-labs/piper-tts-web@1.0.5` | MIT (LJ Speech source data public domain) |
 
 Rules:
 

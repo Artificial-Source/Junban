@@ -1,7 +1,7 @@
 /**
  * Compile-time alignment against installed package types (not imported at runtime).
- * Ensures Wave 4g call shapes match Transformers.js 3.8.1, kokoro-js 1.2.1, and
- * @mintplex-labs/piper-tts-web 1.0.4 without pulling engines into ordinary chunks.
+ * Checks the call shapes of Transformers.js, Kokoro, and Piper without
+ * pulling the engines into ordinary chunks.
  */
 
 import type { pipeline as TransformersPipeline, RawAudio } from "@huggingface/transformers";
@@ -31,7 +31,7 @@ export type PiperSessionCreate = typeof TtsSession.create;
 export type PiperCreateOptions = {
   voiceId: "en_US-ljspeech-medium";
   wasmPaths: {
-    onnxWasm: string;
+    onnxWasm: { mjs: string; wasm: string };
     piperData: string;
     piperWasm: string;
   };
@@ -54,7 +54,7 @@ const _kokoroOpts: KokoroLoadOptionsAlign & KokoroOptionsArg = {
 const _kokoroVoice: KokoroGenerateOptions = { voice: "af_heart" };
 const _piperOpts: PiperCreateOptions & PiperOptionsArg = {
   voiceId: "en_US-ljspeech-medium",
-  wasmPaths: { onnxWasm: "/", piperData: "/", piperWasm: "/" },
+  wasmPaths: { onnxWasm: { mjs: "/", wasm: "/" }, piperData: "/", piperWasm: "/" },
 };
 
 void _whisperTask;

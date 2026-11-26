@@ -26,7 +26,7 @@ The retired implementation is private and archived. It is not a supported downlo
 Requirements:
 
 - Rust **1.100.0** (see `rust-toolchain.toml`)
-- Node.js **>= 22.12** and pnpm **10.29.1** for frontend build/test only
+- Node.js **26.13.1** and pnpm **12.23.0** for frontend build/test only
 
 ```bash
 pnpm install

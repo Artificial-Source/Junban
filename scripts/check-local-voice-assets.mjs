@@ -165,10 +165,10 @@ walk(path.join(root, "src"), (full, entry) => {
 const pkg = JSON.parse(read(path.join(root, "package.json")));
 const deps = pkg.dependencies ?? {};
 const expected = {
-  "@huggingface/transformers": "3.8.1",
-  "@ricky0123/vad-web": "0.0.30",
+  "@huggingface/transformers": "4.3.2",
+  "@ricky0123/vad-web": "0.0.31",
   "kokoro-js": "1.2.1",
-  "@mintplex-labs/piper-tts-web": "1.0.4",
+  "@mintplex-labs/piper-tts-web": "1.0.5",
 };
 for (const [name, version] of Object.entries(expected)) {
   if (deps[name] !== version) {

@@ -6,11 +6,13 @@
  * no network model fallback. Synthesis uses q8/wasm and only af_heart.
  */
 
+import type { RawAudio } from "@huggingface/transformers";
+import type { KokoroTTS as KokoroModel } from "kokoro-js";
 import { getLocalVoicePackage } from "../manifest.ts";
 import { LocalVoiceClientError, validatePcmAudioOut, validateSynthesisText } from "../protocol.ts";
 import { loadKokoroRuntimeAssets } from "../same-origin-assets.ts";
-import { createVerifiedTransformersCache } from "../verified-model-cache.ts";
 import { reverifyCachedPackage, streamVerifiedFile } from "../verify-fetch.ts";
+import { configureVerifiedTransformers } from "./configure-transformers.ts";
 
 export const KOKORO_PACKAGE_ID = "kokoro-82m-v1-q8";
 export const KOKORO_VOICE_ID = "af_heart" as const;
@@ -37,24 +39,6 @@ export type KokoroEngineHandle = {
   readonly voiceId: typeof KOKORO_VOICE_ID;
   synthesize: (text: string) => Promise<KokoroAudioResult>;
   dispose: () => Promise<void>;
-};
-
-type KokoroTTSInstance = {
-  model: { dispose?: () => Promise<unknown> };
-  generate: (
-    text: string,
-    options?: { voice?: string; speed?: number },
-  ) => Promise<{ audio: Float32Array; sampling_rate: number }>;
-};
-
-type KokoroModule = {
-  KokoroTTS: {
-    from_pretrained: (
-      modelId: string,
-      options: { dtype: "q8"; device: "wasm" },
-    ) => Promise<KokoroTTSInstance>;
-  };
-  env?: { wasmPaths?: string };
 };
 
 /**
@@ -139,54 +123,18 @@ export async function loadKokoroEngine(
 
   await seedKokoroVoiceCache(options);
 
-  const kokoro = (await import("kokoro-js")) as unknown as KokoroModule;
-  if (kokoro.env && typeof kokoro.env === "object") {
-    // kokoro-js historically accepted a directory string; pass mjs URL directory
-    // only as a last-resort hint — transformers backends below are authoritative.
-    kokoro.env.wasmPaths = assets.ortWasmBaseUrl;
-  }
-
-  // Bind the transformers instance Kokoro shares when reachable.
-  try {
-    const transformers = await import("@huggingface/transformers");
-    // allowLocalModels required for custom-cache reads; remote stays denied.
-    transformers.env.allowRemoteModels = false;
-    transformers.env.allowLocalModels = true;
-    transformers.env.useBrowserCache = false;
-    transformers.env.useCustomCache = true;
-    transformers.env.customCache = createVerifiedTransformersCache(KOKORO_PACKAGE_ID);
-    const backends = transformers.env.backends as {
-      onnx?: {
-        wasm?: {
-          wasmPaths?: string | { mjs?: string; wasm?: string };
-          numThreads?: number;
-        };
-      };
-    };
-    if (!backends.onnx) {
-      backends.onnx = { wasm: {} };
-    }
-    backends.onnx.wasm = backends.onnx.wasm ?? {};
-    backends.onnx.wasm.wasmPaths = {
-      mjs: assets.ortWasmPaths.mjs,
-      wasm: assets.ortWasmPaths.wasm,
-    };
-    if (typeof SharedArrayBuffer === "undefined") {
-      backends.onnx.wasm.numThreads = 1;
-    }
-  } catch {
-    // If transformers is only reachable inside kokoro's bundle, the verified
-    // voice seed + wasmPaths above still apply.
-  }
+  const transformers = await import("@huggingface/transformers");
+  configureVerifiedTransformers(transformers.env, KOKORO_PACKAGE_ID, assets.ortWasmPaths);
+  const { KokoroTTS } = await import("kokoro-js");
 
   if (options.signal?.aborted) {
     throw new LocalVoiceClientError("aborted");
   }
 
-  let tts: KokoroTTSInstance;
+  let tts: KokoroModel;
   try {
     // kokoro-js does not forward revision; verified cache maps resolve/main → pin.
-    tts = await kokoro.KokoroTTS.from_pretrained(pkg.repo, {
+    tts = await KokoroTTS.from_pretrained(pkg.repo, {
       dtype: KOKORO_DTYPE,
       device: KOKORO_DEVICE,
     });
@@ -209,7 +157,7 @@ export async function loadKokoroEngine(
       if (!validated.ok) {
         throw new LocalVoiceClientError(validated.code);
       }
-      let raw: { audio: Float32Array; sampling_rate: number };
+      let raw: RawAudio;
       try {
         raw = await tts.generate(validated.text, { voice: KOKORO_VOICE_ID });
       } catch {
@@ -220,6 +168,9 @@ export async function loadKokoroEngine(
           ? raw.sampling_rate
           : KOKORO_SAMPLE_RATE_HZ;
       const pcm = raw.audio;
+      if (!(pcm instanceof Float32Array)) {
+        throw new LocalVoiceClientError("infer_failed");
+      }
       const out = validatePcmAudioOut(pcm, sampleRate, 1);
       if (!out.ok) {
         throw new LocalVoiceClientError(out.code);

@@ -706,10 +706,7 @@ test("visual phase-3: task-reminder-recurrence-desktop-light", async ({ page }) 
   });
   await dismissNudges(page);
   await page
-    .getByRole("button", {
-      name: /Edit task: Ship v1\.1 release documentation|Task: Ship v1\.1 release documentation/,
-    })
-    .first()
+    .getByRole("button", { name: /^Ship v1\.1 release documentation(?: |$)/ })
     .click();
   const dialog = page.getByRole("dialog", {
     name: /Task: Ship v1\.1 release documentation/,

@@ -131,21 +131,26 @@ jobs:
         if: runner.os == 'Windows'
         run: cargo test --locked -p junban-server --test windows_process_lifecycle -- --test-threads=1
 
-      - uses: pnpm/action-setup@73e46992e05b19abd31f2f3c20e0e7370d762115 # v6.1.1
-        with:
-          version: 10.29.1
-
+      # The retained TypeScript guest has a separate, exact toolchain.
       - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
         with:
           node-version: 24.13.1
-          cache: pnpm
+          package-manager-cache: false
 
-      - name: Install exact JavaScript build tools
+      - name: Record exact guest build tools
         shell: bash
         run: |
           npm install --global npm@11.18.0
           test "$(npm --version)" = "11.18.0"
-          pnpm install --frozen-lockfile
+          python -c "import os; print('JUNBAN_REFERENCE_JS_PATH=' + os.environ['PATH'])" >> "$GITHUB_ENV"
+
+      - uses: pnpm/action-setup@73e46992e05b19abd31f2f3c20e0e7370d762115 # v6.1.1
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version-file: .node-version
+          cache: pnpm
+
+      - run: pnpm install --frozen-lockfile
 
       - name: Build and exercise exact references through optimized product APIs
         run: python3 scripts/check-phase7-reference-matrix.py
@@ -177,7 +182,7 @@ jobs:
       - name: Install pinned supply-chain tools
         uses: taiki-e/install-action@893d6ee8d714b6c7dfe2bcd94e5759e9a7958a7e # v2.90.10
         with:
-          tool: cargo-audit@0.22.2,cargo-deny@0.20.2
+          tool: cargo-audit@0.23.0,cargo-deny@0.22.1
           checksum: "true"
           fallback: none
 
@@ -203,12 +208,10 @@ jobs:
           toolchain: "1.100.0"
 
       - uses: pnpm/action-setup@73e46992e05b19abd31f2f3c20e0e7370d762115 # v6.1.1
-        with:
-          version: 10.29.1
 
       - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
         with:
-          node-version: 22.12.0
+          node-version-file: .node-version
           cache: pnpm
 
       - name: Install
@@ -236,12 +239,10 @@ jobs:
           toolchain: "1.100.0"
 
       - uses: pnpm/action-setup@73e46992e05b19abd31f2f3c20e0e7370d762115 # v6.1.1
-        with:
-          version: 10.29.1
 
       - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
         with:
-          node-version: 22.12.0
+          node-version-file: .node-version
           cache: pnpm
 
       - name: Install JavaScript dependencies

@@ -53,11 +53,7 @@ import {
 } from "./client";
 
 function setLocation(hash: string, search = "") {
-  vi.stubGlobal("location", {
-    hash,
-    pathname: "/today",
-    search,
-  });
+  history.replaceState(null, "", `/today${search}${hash}`);
 }
 
 function jsonResponse(status: number, body: unknown): Response {
@@ -110,10 +106,13 @@ describe("fragment token bootstrap", () => {
   beforeEach(() => {
     sessionStorage.clear();
     localStorage.clear();
-    vi.stubGlobal("history", { ...history, replaceState: vi.fn() });
+    vi.spyOn(history, "replaceState");
   });
 
-  afterEach(() => vi.unstubAllGlobals());
+  afterEach(() => {
+    vi.restoreAllMocks();
+    history.replaceState(null, "", "/");
+  });
 
   it("accepts one decoded fragment token, strips query tokens, and uses session storage only", () => {
     setLocation("#access_token=test%2Dsecret+token", "?view=compact&access_token=query-token");

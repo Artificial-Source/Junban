@@ -29,7 +29,7 @@ function hfFile(
 
 const WHISPER_REPO = "onnx-community/whisper-tiny.en";
 const WHISPER_REVISION = "2575352d61be1bf7225cf8f8b268a4678025fc58";
-const WHISPER_ENGINE_VERSION = "@huggingface/transformers@3.8.1";
+const WHISPER_ENGINE_VERSION = "@huggingface/transformers@4.3.2";
 
 const KOKORO_REPO = "onnx-community/Kokoro-82M-v1.0-ONNX";
 const KOKORO_REVISION = "1939ad2a8e416c0acfeecc08a694d14ef25f2231";
@@ -37,7 +37,7 @@ const KOKORO_ENGINE_VERSION = "kokoro-js@1.2.1";
 
 const PIPER_REPO = "rhasspy/piper-voices";
 const PIPER_REVISION = "9f967d15e9ccdf43078586d1476ee70f314401bd";
-const PIPER_ENGINE_VERSION = "@mintplex-labs/piper-tts-web@1.0.4";
+const PIPER_ENGINE_VERSION = "@mintplex-labs/piper-tts-web@1.0.5";
 
 const WHISPER_TINY_EN_Q4: LocalVoicePackage = {
   id: "whisper-tiny.en-q4",

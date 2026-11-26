@@ -1,2 +1,33 @@
 packages:
   - "."
+
+overrides:
+  brace-expansion: 5.1.0
+  js-yaml: 4.3.2
+  # Kokoro and its verified-cache setup must use the same Transformers instance.
+  "kokoro-js>@huggingface/transformers": 4.3.2
+  # Piper and VAD share one matching WASM-only ONNX Runtime asset pair.
+  "@mintplex-labs/piper-tts-web>onnxruntime-web": 1.31.1
+  "@ricky0123/vad-web>onnxruntime-web": 1.31.1
+  # This generator still uses the TypeScript 5 JavaScript compiler API.
+  "openapi-typescript@7.13.0>typescript:peer": "-"
+  sharp: 0.35.5
+  "@tailwindcss/node>source-map-js": 1.2.4
+
+packageExtensions:
+  openapi-typescript@7.13.0:
+    dependencies:
+      typescript: 5.9.3
+
+patchedDependencies:
+  "@huggingface/transformers@4.3.2": patches/@huggingface__transformers@4.3.2.patch
+  "@mintplex-labs/piper-tts-web@1.0.5": patches/@mintplex-labs__piper-tts-web@1.0.5.patch
+  kokoro-js@1.2.1: patches/kokoro-js@1.2.1.patch
+  # Preserve approved glyph geometry across the v1 icon redesign.
+  lucide-react@1.79.0: patches/lucide-react@1.79.0.patch
+
+# This app uses the prebuilt packages and browser WASM, not Node inference.
+allowBuilds:
+  onnxruntime-node: false
+  protobufjs: false
+  sharp: false

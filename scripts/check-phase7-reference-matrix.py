@@ -68,14 +68,18 @@ def adapt_command(
 
 
 def run(
-    command: list[str], *, cwd: Path = ROOT, timeout: float = 3600, capture: bool = False
+    command: list[str], *, cwd: Path = ROOT, timeout: float = 3600, capture: bool = False,
+    path: str | None = None,
 ) -> subprocess.CompletedProcess[str]:
-    adapted = adapt_command(command, system=platform.system())
+    adapted = adapt_command(
+        command, system=platform.system(), resolver=lambda name: shutil.which(name, path=path)
+    )
     try:
         completed = subprocess.run(
             adapted,
             cwd=cwd,
             check=False,
+            env={**os.environ, "PATH": path} if path is not None else None,
             timeout=timeout,
             text=True,
             stdout=subprocess.PIPE if capture else None,
@@ -149,8 +153,10 @@ def build_references() -> dict[str, Any]:
         }
 
     typescript = REFERENCES / "import-typescript"
-    run(["npm", "ci"], cwd=typescript, timeout=1200)
-    checked = run(["npm", "run", "check"], cwd=typescript, timeout=1200, capture=True)
+    # The signed guest has its own reproducible Node/npm toolchain, independent of React.
+    guest_path = os.environ.get("JUNBAN_REFERENCE_JS_PATH")
+    run(["npm", "ci"], cwd=typescript, timeout=1200, path=guest_path)
+    checked = run(["npm", "run", "check"], cwd=typescript, timeout=1200, capture=True, path=guest_path)
     output_lines = [line.strip() for line in checked.stdout.splitlines() if line.strip()]
     build_check: Any = None
     for line in reversed(output_lines):

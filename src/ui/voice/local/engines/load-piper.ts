@@ -7,9 +7,10 @@
  * voice — never HFC or package defaults.
  */
 
+import type { TtsSession as PiperSession } from "@mintplex-labs/piper-tts-web";
 import { getLocalVoicePackage } from "../manifest.ts";
 import { LocalVoiceClientError, validateSynthesisText, validateWavAudioOut } from "../protocol.ts";
-import { loadPiperRuntimeAssets } from "../same-origin-assets.ts";
+import { loadPiperRuntimeAssets, type OrtWasmPaths } from "../same-origin-assets.ts";
 import { openVerifiedFile, reverifyCachedPackage } from "../verify-fetch.ts";
 
 export const PIPER_PACKAGE_ID = "piper-en_US-ljspeech-medium";
@@ -24,7 +25,7 @@ export type PiperLoadOptions = {
 };
 
 export type PiperWasmPaths = {
-  readonly onnxWasm: string;
+  readonly onnxWasm: OrtWasmPaths;
   readonly piperData: string;
   readonly piperWasm: string;
 };
@@ -43,26 +44,6 @@ export type PiperEngineHandle = {
   readonly wasmPaths: PiperWasmPaths;
   synthesize: (text: string) => Promise<PiperAudioResult>;
   dispose: () => Promise<void>;
-};
-
-type TtsSessionInstance = {
-  predict: (text: string) => Promise<Blob>;
-  voiceId: string;
-};
-
-type PiperModule = {
-  TtsSession: {
-    create: (options: {
-      voiceId: string;
-      wasmPaths: {
-        onnxWasm: string;
-        piperData: string;
-        piperWasm: string;
-      };
-    }) => Promise<TtsSessionInstance>;
-    _instance?: TtsSessionInstance | null;
-  };
-  download: (voiceId: string) => Promise<void>;
 };
 
 async function writePiperPackageOpfs(fileName: string, file: File): Promise<void> {
@@ -115,11 +96,11 @@ export async function loadPiperEngine(options: PiperLoadOptions = {}): Promise<P
     throw new LocalVoiceClientError("aborted");
   }
 
-  const piper = (await import("@mintplex-labs/piper-tts-web")) as unknown as PiperModule;
+  const { TtsSession } = await import("@mintplex-labs/piper-tts-web");
 
   const wasmPaths = {
     // Object form required under Vite content-hashing (directory prefixes 404).
-    onnxWasm: assets.ortWasmPaths as unknown as string,
+    onnxWasm: assets.ortWasmPaths,
     piperData: assets.piperDataUrl,
     piperWasm: assets.piperWasmUrl,
   };
@@ -129,9 +110,9 @@ export async function loadPiperEngine(options: PiperLoadOptions = {}): Promise<P
     throw new LocalVoiceClientError("unsupported");
   }
 
-  let session: TtsSessionInstance;
+  let session: PiperSession;
   try {
-    session = await piper.TtsSession.create({
+    session = await TtsSession.create({
       voiceId: PIPER_VOICE_ID,
       wasmPaths,
     });
@@ -189,7 +170,7 @@ export async function loadPiperEngine(options: PiperLoadOptions = {}): Promise<P
       disposed = true;
       // Destroy session singleton so a later load cannot reuse a stale instance.
       try {
-        piper.TtsSession._instance = null;
+        TtsSession._instance = null;
       } catch {
         // ignore
       }

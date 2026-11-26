@@ -111,7 +111,6 @@ export function OverdueSection({
               <button
                 type="button"
                 onClick={() => onSelectTask(task.id)}
-                aria-label={`Edit task: ${task.title}`}
                 className="min-w-0 flex-1 rounded text-left focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-focus"
               >
                 <span
@@ -123,6 +122,7 @@ export function OverdueSection({
                 >
                   {task.title}
                 </span>
+                {" "}
                 <span className="mt-0.5 flex items-center gap-1 text-xs font-medium text-error">
                   <Calendar size={11} aria-hidden="true" />
                   {formatDate(task.due_date!)}

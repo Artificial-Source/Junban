@@ -11,6 +11,7 @@ export default defineConfig({
   retries: 0,
   workers: 1,
   reporter: "list",
+  updateSnapshots: "none",
   use: {
     baseURL: "http://127.0.0.1:4299",
     trace: "on-first-retry",

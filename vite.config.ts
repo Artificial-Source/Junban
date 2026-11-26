@@ -11,27 +11,25 @@ function resolveFrom(specifier: string, fromPackage: string): string {
   return createRequire(parent).resolve(specifier);
 }
 
-// Transitive ORT assets stay unpinned in package.json; Vite only needs absolute
-// paths so dynamic voice loaders can emit same-origin URLs.
+// Resolve assets from the same ORT installations as the engine imports; the
+// Transformers runtime differs from the shared Piper/VAD runtime.
 const ortVadWasm = resolveFrom("onnxruntime-web/ort-wasm-simd-threaded.wasm", "@ricky0123/vad-web");
 const ortVadMjs = resolveFrom("onnxruntime-web/ort-wasm-simd-threaded.mjs", "@ricky0123/vad-web");
 const ortVadWasmDir = path.dirname(ortVadWasm);
 
-const transformersRoot = path.dirname(path.dirname(require.resolve("@huggingface/transformers")));
-const transformersPackageRoot = transformersRoot.endsWith(`${path.sep}dist`)
-  ? path.dirname(transformersRoot)
-  : transformersRoot;
-const transformersOrtWasm = path.join(
-  transformersPackageRoot,
-  "dist",
-  "ort-wasm-simd-threaded.jsep.wasm",
+const transformersPackage = "@huggingface/transformers";
+const transformersWeb = path.join(
+  path.dirname(require.resolve(transformersPackage)),
+  "transformers.web.js",
 );
-const transformersOrtMjs = path.join(
-  transformersPackageRoot,
-  "dist",
-  "ort-wasm-simd-threaded.jsep.mjs",
+const transformersOrtWasm = resolveFrom(
+  "onnxruntime-web/ort-wasm-simd-threaded.wasm",
+  transformersPackage,
 );
-const transformersWeb = path.join(transformersPackageRoot, "dist", "transformers.web.js");
+const transformersOrtMjs = resolveFrom(
+  "onnxruntime-web/ort-wasm-simd-threaded.mjs",
+  transformersPackage,
+);
 
 /**
  * Rolldown does not reliably apply string aliases when the import carries `?url`

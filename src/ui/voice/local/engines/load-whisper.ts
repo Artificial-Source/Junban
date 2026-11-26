@@ -7,6 +7,7 @@
  * only through the returned handle — never at module evaluation.
  */
 
+import type { AutomaticSpeechRecognitionPipeline } from "@huggingface/transformers";
 import { getLocalVoicePackage } from "../manifest.ts";
 import {
   boundTranscript,
@@ -15,8 +16,8 @@ import {
   validateWhisperPcm,
 } from "../protocol.ts";
 import { loadWhisperRuntimeAssets } from "../same-origin-assets.ts";
-import { createVerifiedTransformersCache } from "../verified-model-cache.ts";
 import { reverifyCachedPackage } from "../verify-fetch.ts";
+import { configureVerifiedTransformers } from "./configure-transformers.ts";
 
 export const WHISPER_PACKAGE_ID = "whisper-tiny.en-q4";
 export const WHISPER_DTYPE = "q4" as const;
@@ -36,13 +37,6 @@ export type WhisperEngineHandle = {
   transcribe: (samples: Float32Array) => Promise<string>;
   /** Dispose retained pipeline state. Does not delete verified model store. */
   dispose: () => Promise<void>;
-};
-
-type AsrPipeline = ((
-  audio: Float32Array,
-  options?: Record<string, unknown>,
-) => Promise<{ text?: string } | Array<{ text?: string }>>) & {
-  dispose?: () => Promise<void>;
 };
 
 /**
@@ -69,52 +63,15 @@ export async function loadWhisperEngine(
   options.onProgress?.(pkg.files.length, pkg.files.length);
 
   const transformers = await import("@huggingface/transformers");
-  // Fail closed: no remote or loose /models filesystem fetch. Custom cache alone
-  // serves verified OPFS bytes (transformers requires allowLocalModels OR
-  // allowRemoteModels true at config-check time — local stays true but every
-  // lookup is satisfied by customCache before getFile runs).
-  transformers.env.allowRemoteModels = false;
-  transformers.env.allowLocalModels = true;
-  transformers.env.useBrowserCache = false;
-  transformers.env.useCustomCache = true;
-  transformers.env.customCache = createVerifiedTransformersCache(WHISPER_PACKAGE_ID);
-
-  // Import succeeds with the package's same-origin inert wasmPaths sentinel; overwrite
-  // it with Vite-emitted hashed mjs+wasm URLs before any pipeline/session is created.
-  const backends = transformers.env.backends as {
-    onnx?: {
-      wasm?: {
-        wasmPaths?: string | { mjs?: string; wasm?: string };
-        numThreads?: number;
-      };
-    };
-  };
-  if (!backends.onnx) {
-    backends.onnx = { wasm: {} };
-  }
-  backends.onnx.wasm = backends.onnx.wasm ?? {};
-  backends.onnx.wasm.wasmPaths = {
-    mjs: assets.ortWasmPaths.mjs,
-    wasm: assets.ortWasmPaths.wasm,
-  };
-  // Fail closed to single-thread when SharedArrayBuffer is unavailable (no COOP/COEP).
-  if (typeof SharedArrayBuffer === "undefined") {
-    backends.onnx.wasm.numThreads = 1;
-  }
+  configureVerifiedTransformers(transformers.env, WHISPER_PACKAGE_ID, assets.ortWasmPaths);
 
   if (options.signal?.aborted) {
     throw new LocalVoiceClientError("aborted");
   }
 
-  let pipeline: AsrPipeline;
+  let pipeline: AutomaticSpeechRecognitionPipeline;
   try {
-    // Cast through unknown: the transformers Pipeline union is too large for tsc.
-    const createPipeline = transformers.pipeline as unknown as (
-      task: typeof WHISPER_TASK,
-      model: string,
-      options: { dtype: typeof WHISPER_DTYPE; revision: string; device: typeof WHISPER_DEVICE },
-    ) => Promise<AsrPipeline>;
-    pipeline = await createPipeline(WHISPER_TASK, pkg.repo, {
+    pipeline = await transformers.pipeline(WHISPER_TASK, pkg.repo, {
       dtype: WHISPER_DTYPE,
       revision: pkg.revision,
       device: WHISPER_DEVICE,

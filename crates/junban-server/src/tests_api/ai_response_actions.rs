@@ -77,7 +77,7 @@ async fn daily_briefing_is_assistant_only_and_replays_after_disable() {
         .collect();
     assert_eq!(user_messages.len(), 1);
     let daily_instruction = user_messages[0]["content"].as_str().unwrap();
-    let today = jiff::Zoned::now().date().to_string();
+    let today = jiff::ZonedDateTime::now().date().to_string();
     assert!(daily_instruction.contains(&today));
     assert!(daily_instruction.contains("read-only plan_my_day tool first"));
     assert!(daily_instruction.contains("Do not apply or claim to apply"));

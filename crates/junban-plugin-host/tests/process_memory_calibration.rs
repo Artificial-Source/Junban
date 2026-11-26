@@ -25,7 +25,6 @@ use junban_plugin_sdk::{
     validate_child_body,
 };
 use serde::Serialize;
-use sha2::{Digest, Sha256};
 
 const SESSION: &str = "00000000-0000-4000-8000-000000000001";
 const WARM_UP_RUNS: usize = 1;
@@ -711,7 +710,7 @@ fn sample_process(_pid: u32) -> Result<MemoryMetrics, String> {
 }
 
 fn sha256(bytes: &[u8]) -> String {
-    format!("{:x}", Sha256::digest(bytes))
+    junban_plugin_sdk::Sha256Digest::of(bytes).into_string()
 }
 
 fn file_sha256(path: &Path) -> String {
@@ -834,7 +833,7 @@ fn calibration_campaign() {
             sha256: file_sha256(executable),
         },
         engine: EngineRecord {
-            wasmtime: "36.0.13",
+            wasmtime: "36.0.23",
             memory_reservation_bytes: WASMTIME_MEMORY_RESERVATION_BYTES,
             memory_guard_bytes: WASMTIME_MEMORY_GUARD_BYTES,
             memory_reservation_for_growth_bytes: WASMTIME_MEMORY_RESERVATION_FOR_GROWTH_BYTES,

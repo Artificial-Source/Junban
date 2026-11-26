@@ -776,6 +776,7 @@ Track findings by stable ID as open, fixed, rejected or deferred with reasons. A
   - [x] Wave 4 preserved Extensions/contribution UI: exact authority fences, scoped permission review, all plugin event invalidation, accessible uninstall confirmation, browser enable/disable, safe declarative contributions, plugin/frontend tests, TypeScript checking, and 13 immutable visuals pass. Focused frontend/accessibility recheck accepts `P7-W4-REV-001`–`005` as fixed; baseline PNGs are unchanged. Final exact-head Phase 7 CI remains later.
   - [x] Wave 5 protocol/recheck: [`evidence/phase-7-wave-5-protocol.md`](evidence/phase-7-wave-5-protocol.md) records SDK-owned typed source-manifest and permanent pack-sign-verify/public-checker tooling before ceremony, disposable-key preflight and public checks before one-time-key destruction, exact separate five-sample default/Rust/TypeScript corpora and byte budgets, and clean-candidate invalidation/single-commit/final-CI rules. `P7-W5-PLAN-001`–`003` are fixed and closed after the focused recheck approved the corrected protocol.
   - [x] Wave 5 implementation and Phase 7 closure: finalized signed references/registry, public-only checks, Linux/macOS/Windows reference and composition matrices, authoritative product dogfood, separate clean-candidate default/Rust/TypeScript reports, final security approval, docs/outcome, one squashed Phase commit, and exact-head final CI.
+- [x] 2026-11-25: refreshed host build toolchains and removed all 34 baseline Rust vulnerabilities; [Wave 1 evidence](evidence/wave-1-refresh.md) tracks validation and the sole upstream maintenance exception.
 - [ ] Phase 8 implementation.
 - [ ] Phase 9 implementation.
 - [x] User requested sequential execution through a new Phase 10 without pausing at phase boundaries.
@@ -837,6 +838,12 @@ Track findings by stable ID as open, fixed, rejected or deferred with reasons. A
 
 ## Decision log
 
+- 2026-11-25 (owner): push work branches, test macOS and Windows on GitHub, and open stacked PRs for owner review. Do not merge into `main` or merge the existing Dependabot PRs.
+- 2026-11-25 (owner): refresh Rust to stable 1.100, Rust and frontend dependencies, and Actions; fix every security advisory. Preserve existing visual baselines during dependency upgrades.
+- 2026-11-25 (owner): reviewed visible changes and new features are explicitly approved for the overnight run. When an intentional design change lands, record the approval here and update its matching immutable baseline.
+- 2026-11-25 (owner): do not publish, tag, or release. OS builds are unsigned and must be documented as such. Use only a throwaway updater test key; create the real key with the owner later.
+- 2026-11-25 (owner): retain the hosted 24 MiB maximum warm / 32 MiB peak ceilings and target about 150 MB or less for the entire Linux desktop process tree.
+- 2026-11-25 (orchestrator): retain released rmcp rather than vendoring an MCP SDK solely for transitive chrono's unmaintained notice. The only permitted advisory exception is RUSTSEC-2026-0543; remove it once rmcp drops chrono. No vulnerability exceptions.
 - 2026-07-28: chose a fresh repository because there are no active users or compatibility obligations and the existing architecture would make a clean Rust runtime harder to achieve.
 - 2026-07-28: preserved the React design as a non-negotiable product contract.
 - 2026-07-28: chose SQLite as the only live store and Markdown as import/export.

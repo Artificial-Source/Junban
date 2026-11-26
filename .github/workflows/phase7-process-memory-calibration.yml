@@ -29,18 +29,16 @@ jobs:
           test "$(git rev-parse 6401108b31e7768048d154c8b14662bb3a2e9bb1^{tree})" = \
             "13edb8869d2a01a3b8a33dc0f57a97bb64cdf94f"
 
-      - uses: dtolnay/rust-toolchain@2c7215f132e9ebf062739d9130488b56d53c060c
+      - uses: dtolnay/rust-toolchain@df2a88e9fe4098bad09cb42c3dec7187f15861fc
         with:
-          toolchain: "1.93.0"
+          toolchain: "1.100.0"
           targets: wasm32-wasip2
 
-      - uses: pnpm/action-setup@0ebf47130e4866e96fce0953f49152a61190b271 # v6.0.9
-        with:
-          version: 10.29.1
+      - uses: pnpm/action-setup@73e46992e05b19abd31f2f3c20e0e7370d762115 # v6.1.1
 
-      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
         with:
-          node-version: 24.13.1
+          node-version-file: .node-version
           cache: pnpm
 
       - name: Install exact build tools
@@ -75,7 +73,7 @@ jobs:
 
       - name: Upload authoritative performance reports
         if: always()
-        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: phase7-wave5-performance-${{ github.run_attempt }}
           path: ${{ runner.temp }}/phase7-wave5-performance

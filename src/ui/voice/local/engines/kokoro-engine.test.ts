@@ -3,17 +3,16 @@ import { installMemoryOpfs } from "../opfs-mock.ts";
 const fromPretrained = vi.fn();
 const generate = vi.fn();
 const modelDispose = vi.fn(async () => undefined);
-const kokoroEnv = { wasmPaths: "" };
 
 vi.mock("kokoro-js", () => ({
   KokoroTTS: { from_pretrained: (...args: unknown[]) => fromPretrained(...args) },
-  env: kokoroEnv,
 }));
 
 const transformersEnv = {
   allowRemoteModels: true,
   allowLocalModels: false,
   useBrowserCache: true,
+  useWasmCache: true,
   useCustomCache: false,
   customCache: null as unknown,
   backends: { onnx: { wasm: { wasmPaths: "/sentinel/" } } },
@@ -27,8 +26,8 @@ vi.mock("../same-origin-assets.ts", () => ({
   loadKokoroRuntimeAssets: async () => ({
     ortWasmBaseUrl: "/assets/ort-kokoro/",
     ortWasmPaths: {
-      mjs: "/assets/ort-kokoro/ort-wasm-simd-threaded.jsep.mjs",
-      wasm: "/assets/ort-kokoro/ort-wasm-simd-threaded.jsep.wasm",
+      mjs: "/assets/ort-kokoro/ort-wasm-simd-threaded.mjs",
+      wasm: "/assets/ort-kokoro/ort-wasm-simd-threaded.wasm",
     },
   }),
 }));
@@ -39,7 +38,7 @@ describe("kokoro engine owner", () => {
     fromPretrained.mockReset();
     generate.mockReset();
     modelDispose.mockReset();
-    kokoroEnv.wasmPaths = "";
+    transformersEnv.useWasmCache = true;
     vi.resetModules();
 
     // Minimal Cache API
@@ -101,9 +100,13 @@ describe("kokoro engine owner", () => {
     expect(fromPretrained).toHaveBeenCalledWith(pkg.repo, { dtype: "q8", device: "wasm" });
     expect(handle.voiceId).toBe("af_heart");
     expect(KOKORO_VOICE_ID).toBe("af_heart");
-    expect(kokoroEnv.wasmPaths).toBe("/assets/ort-kokoro/");
+    expect(transformersEnv.backends.onnx.wasm.wasmPaths).toEqual({
+      mjs: "/assets/ort-kokoro/ort-wasm-simd-threaded.mjs",
+      wasm: "/assets/ort-kokoro/ort-wasm-simd-threaded.wasm",
+    });
     expect(transformersEnv.allowRemoteModels).toBe(false);
     expect(transformersEnv.allowLocalModels).toBe(true);
+    expect(transformersEnv.useWasmCache).toBe(false);
     expect(transformersEnv.useCustomCache).toBe(true);
 
     const audio = await handle.synthesize("Hello there");

@@ -328,7 +328,7 @@ test("visual phase-2: cancelled-desktop-light", async ({ page }) => {
 test("visual phase-2: task-detail-desktop-dark", async ({ page }) => {
   await openView(page, "/today?visual-fixture=phase-2&phase2-detail-fixture=1", "dark");
   await expect(page.getByText("Ship v1.1 release documentation")).toBeVisible();
-  await page.getByRole("button", { name: "Edit task: Ship v1.1 release documentation" }).click();
+  await page.getByRole("button", { name: /^Ship v1\.1 release documentation / }).click();
   const dialog = page.getByRole("dialog", { name: /Ship v1.1 release documentation/ });
   await expect(dialog).toBeVisible({ timeout: 10_000 });
   await expect(dialog.getByText("Publish cohesive v1.1 documentation")).toBeVisible();

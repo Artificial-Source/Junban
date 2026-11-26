@@ -169,7 +169,6 @@ export function TaskItem({
         type="button"
         data-task-focus-control
         data-task-id={task.id}
-        aria-label={`Task: ${task.title}${isMultiSelected ? ", selected" : ""}`}
         onClick={() => onSelect(task.id)}
         onKeyDown={(e) => {
           if (!onMultiSelect) return;
@@ -236,7 +235,7 @@ export function TaskItem({
                     isOverdue ? "text-error font-medium" : "text-on-surface-muted"
                   }`}
                 >
-                  <Calendar size={11} />
+                  <Calendar size={11} aria-hidden="true" />
                   {formatDate(task.due_date)}
                 </span>
               )}
@@ -255,6 +254,7 @@ export function TaskItem({
             </div>
           )}
         </div>
+        {isMultiSelected && <span className="sr-only">, selected</span>}
       </button>
 
       {/* Sibling actions */}

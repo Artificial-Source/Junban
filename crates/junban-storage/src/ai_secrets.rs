@@ -11,7 +11,7 @@ use std::{
     sync::RwLock,
 };
 
-use hmac::{Hmac, Mac};
+use hmac::{Hmac, KeyInit, Mac};
 use jiff::Timestamp;
 use junban_app::AiSecretBytes;
 use junban_domain::{
@@ -573,6 +573,30 @@ mod tests {
         assert!(AiSecretStore::load(&profile).is_err());
 
         fs::remove_dir_all(profile).unwrap();
+    }
+
+    #[test]
+    fn receipt_and_cursor_mac_match_v1_vectors() {
+        let store = AiSecretStore {
+            path: PathBuf::new(),
+            verification_key: Some(
+                "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef".into(),
+            ),
+            secrets: RwLock::new(BTreeMap::new()),
+        };
+        assert_eq!(
+            store.receipt_verifier(&sample_secret()).unwrap(),
+            "d4ae05df123e322c31e62f6e1887b65cfdff9c342729f9e875ef7a27594b26eb"
+        );
+
+        let key = store.plugin_query_cursor_key().unwrap();
+        let body = b"fixture-secret-material";
+        let mac = key.mac(body).unwrap();
+        assert_eq!(
+            hex_encode(&mac),
+            "b2b93fd1ded7538eb26b576f3a85b0860a5d4b0c82b80bb5226163f1f38794ee"
+        );
+        assert!(key.verify(body, &mac).unwrap());
     }
 
     #[test]

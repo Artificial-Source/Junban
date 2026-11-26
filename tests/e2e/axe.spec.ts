@@ -182,7 +182,7 @@ test("keyboard: task dialog traps focus, escapes, and restores its opener", asyn
   await authenticate(page, "/today");
 
   const opener = page.getByRole("button", {
-    name: "Edit task: Review accessibility audit findings",
+    name: /^Review accessibility audit findings(?: |$)/,
   });
   await opener.click();
   const dialog = page.getByRole("dialog", { name: /Task: Review accessibility audit findings/ });
@@ -350,6 +350,11 @@ async function expectDialogShellIsolation(
 test("axe: Calendar desktop has no serious/critical violations", async ({ page }) => {
   await page.setViewportSize({ width: 1440, height: 900 });
   await authenticate(page, "/calendar");
+  await expect(
+    page.getByRole("button", {
+      name: /^(Sun|Mon|Tue|Wed|Thu|Fri|Sat) \d{1,2} [A-Za-z]+ \d{4}$/i,
+    }),
+  ).toHaveCount(7);
   await expectNoSeriousAxe(page);
 });
 

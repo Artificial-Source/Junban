@@ -9,6 +9,7 @@ use jiff::Timestamp;
 use junban_domain::{Task, TaskStatus, format_reminder_timestamp};
 use rusqlite::{
     Connection, MAIN_DB, OpenFlags, OptionalExtension, Transaction, TransactionBehavior,
+    backup::NO_PROGRESS,
 };
 
 use crate::ops_types::{Inverse, PostImage};
@@ -1681,7 +1682,7 @@ fn create_verified_pre_migration_backup(
         fs::remove_file(&backup_path).map_err(io_to_sqlite)?;
     }
 
-    if let Err(error) = connection.backup(MAIN_DB, &backup_path, None) {
+    if let Err(error) = connection.backup(MAIN_DB, &backup_path, NO_PROGRESS) {
         let _ = fs::remove_file(&backup_path);
         return Err(error);
     }

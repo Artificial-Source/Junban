@@ -23,9 +23,9 @@ jobs:
         with:
           persist-credentials: false
 
-      - uses: dtolnay/rust-toolchain@2c7215f132e9ebf062739d9130488b56d53c060c
+      - uses: dtolnay/rust-toolchain@df2a88e9fe4098bad09cb42c3dec7187f15861fc
         with:
-          toolchain: "1.93.0"
+          toolchain: "1.100.0"
           components: rustfmt, clippy
 
       - name: Format
@@ -58,9 +58,9 @@ jobs:
         with:
           persist-credentials: false
 
-      - uses: dtolnay/rust-toolchain@2c7215f132e9ebf062739d9130488b56d53c060c
+      - uses: dtolnay/rust-toolchain@df2a88e9fe4098bad09cb42c3dec7187f15861fc
         with:
-          toolchain: "1.93.0"
+          toolchain: "1.100.0"
 
       - name: Run launched-child containment matrix
         shell: bash
@@ -83,9 +83,9 @@ jobs:
         with:
           persist-credentials: false
 
-      - uses: dtolnay/rust-toolchain@2c7215f132e9ebf062739d9130488b56d53c060c
+      - uses: dtolnay/rust-toolchain@df2a88e9fe4098bad09cb42c3dec7187f15861fc
         with:
-          toolchain: "1.93.0"
+          toolchain: "1.100.0"
 
       - name: Build and test plugin artifact CLI
         run: |
@@ -101,7 +101,7 @@ jobs:
 
       - name: Upload conformance evidence
         if: always()
-        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: phase7-slice2e-${{ matrix.os }}-${{ github.run_attempt }}
           path: target/phase7-slice2e/result.json
@@ -123,36 +123,41 @@ jobs:
         with:
           persist-credentials: false
 
-      - uses: dtolnay/rust-toolchain@2c7215f132e9ebf062739d9130488b56d53c060c
+      - uses: dtolnay/rust-toolchain@df2a88e9fe4098bad09cb42c3dec7187f15861fc
         with:
-          toolchain: "1.93.0"
+          toolchain: "1.100.0"
 
       - name: Run Windows Ctrl-Break lifecycle regression
         if: runner.os == 'Windows'
         run: cargo test --locked -p junban-server --test windows_process_lifecycle -- --test-threads=1
 
-      - uses: pnpm/action-setup@0ebf47130e4866e96fce0953f49152a61190b271 # v6.0.9
-        with:
-          version: 10.29.1
-
-      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+      # The retained TypeScript guest has a separate, exact toolchain.
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
         with:
           node-version: 24.13.1
-          cache: pnpm
+          package-manager-cache: false
 
-      - name: Install exact JavaScript build tools
+      - name: Record exact guest build tools
         shell: bash
         run: |
           npm install --global npm@11.18.0
           test "$(npm --version)" = "11.18.0"
-          pnpm install --frozen-lockfile
+          python -c "import os; print('JUNBAN_REFERENCE_JS_PATH=' + os.environ['PATH'])" >> "$GITHUB_ENV"
+
+      - uses: pnpm/action-setup@73e46992e05b19abd31f2f3c20e0e7370d762115 # v6.1.1
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version-file: .node-version
+          cache: pnpm
+
+      - run: pnpm install --frozen-lockfile
 
       - name: Build and exercise exact references through optimized product APIs
         run: python3 scripts/check-phase7-reference-matrix.py
 
       - name: Upload exact-reference evidence
         if: always()
-        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: phase7-reference-matrix-${{ matrix.os }}-${{ github.run_attempt }}
           path: target/phase7-reference-matrix/result.json
@@ -170,14 +175,14 @@ jobs:
         with:
           persist-credentials: false
 
-      - uses: dtolnay/rust-toolchain@2c7215f132e9ebf062739d9130488b56d53c060c
+      - uses: dtolnay/rust-toolchain@df2a88e9fe4098bad09cb42c3dec7187f15861fc
         with:
-          toolchain: "1.93.0"
+          toolchain: "1.100.0"
 
       - name: Install pinned supply-chain tools
-        uses: taiki-e/install-action@18b1216eba7f8039b0f8d131d5473787f0edce68 # v2.85.3
+        uses: taiki-e/install-action@893d6ee8d714b6c7dfe2bcd94e5759e9a7958a7e # v2.90.10
         with:
-          tool: cargo-audit@0.22.2,cargo-deny@0.20.2
+          tool: cargo-audit@0.23.0,cargo-deny@0.22.1
           checksum: "true"
           fallback: none
 
@@ -198,17 +203,15 @@ jobs:
         with:
           persist-credentials: false
 
-      - uses: dtolnay/rust-toolchain@2c7215f132e9ebf062739d9130488b56d53c060c
+      - uses: dtolnay/rust-toolchain@df2a88e9fe4098bad09cb42c3dec7187f15861fc
         with:
-          toolchain: "1.93.0"
+          toolchain: "1.100.0"
 
-      - uses: pnpm/action-setup@0ebf47130e4866e96fce0953f49152a61190b271 # v6.0.9
-        with:
-          version: 10.29.1
+      - uses: pnpm/action-setup@73e46992e05b19abd31f2f3c20e0e7370d762115 # v6.1.1
 
-      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
         with:
-          node-version: 22.12.0
+          node-version-file: .node-version
           cache: pnpm
 
       - name: Install
@@ -231,17 +234,15 @@ jobs:
         with:
           persist-credentials: false
 
-      - uses: dtolnay/rust-toolchain@2c7215f132e9ebf062739d9130488b56d53c060c
+      - uses: dtolnay/rust-toolchain@df2a88e9fe4098bad09cb42c3dec7187f15861fc
         with:
-          toolchain: "1.93.0"
+          toolchain: "1.100.0"
 
-      - uses: pnpm/action-setup@0ebf47130e4866e96fce0953f49152a61190b271 # v6.0.9
-        with:
-          version: 10.29.1
+      - uses: pnpm/action-setup@73e46992e05b19abd31f2f3c20e0e7370d762115 # v6.1.1
 
-      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
         with:
-          node-version: 22.12.0
+          node-version-file: .node-version
           cache: pnpm
 
       - name: Install JavaScript dependencies
@@ -295,7 +296,7 @@ jobs:
 
       - name: Upload Playwright failure evidence
         if: failure()
-        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: playwright-failure-${{ github.run_attempt }}
           path: |

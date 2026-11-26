@@ -11,5 +11,7 @@ export default defineConfig({
   test: {
     include: ["src/**/*.test.{ts,tsx}", "tests/unit/**/*.test.{ts,tsx}"],
     environment: "jsdom",
+    // Vitest 5 clears mock history between tests without resetting implementations.
+    clearMocks: true,
   },
 });

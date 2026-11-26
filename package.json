@@ -3,9 +3,9 @@
   "private": true,
   "version": "0.1.0",
   "type": "module",
-  "packageManager": "pnpm@10.29.1",
+  "packageManager": "pnpm@12.23.0",
   "engines": {
-    "node": ">=22.12.0"
+    "node": "^26.13.1"
   },
   "scripts": {
     "dev": "vite",
@@ -60,43 +60,31 @@
   },
   "dependencies": {
     "@diffusionstudio/piper-wasm": "1.0.0",
-    "@huggingface/transformers": "3.8.1",
-    "@mintplex-labs/piper-tts-web": "1.0.4",
-    "@ricky0123/vad-web": "0.0.30",
+    "@huggingface/transformers": "4.3.2",
+    "@mintplex-labs/piper-tts-web": "1.0.5",
+    "@ricky0123/vad-web": "0.0.31",
     "kokoro-js": "1.2.1",
-    "lucide-react": "^0.548.0",
-    "react": "^19.2.8",
-    "react-dom": "^19.2.8",
+    "lucide-react": "1.79.0",
+    "react": "^19.3.1",
+    "react-dom": "^19.3.1",
     "react-markdown": "10.1.0",
     "remark-gfm": "4.0.1"
   },
   "devDependencies": {
-    "@axe-core/playwright": "^4.10.0",
-    "@playwright/test": "^1.55.0",
-    "@tailwindcss/vite": "^4.3.3",
-    "@types/node": "^24.13.3",
-    "@types/react": "^19.2.17",
-    "@types/react-dom": "^19.2.3",
-    "@vitejs/plugin-react": "^6.0.4",
-    "jsdom": "30.0.0",
+    "@axe-core/playwright": "^4.14.1",
+    "@playwright/test": "^1.65.1",
+    "@tailwindcss/vite": "^4.3.5",
+    "@types/node": "^26.6.7",
+    "@types/react": "^19.3.1",
+    "@types/react-dom": "^19.3.0",
+    "@vitejs/plugin-react": "^6.3.0",
+    "jsdom": "31.0.1",
     "openapi-typescript": "7.13.0",
-    "oxlint": "^1.76.0",
-    "prettier": "^3.9.6",
-    "tailwindcss": "^4.3.3",
-    "typescript": "~6.0.2",
-    "vite": "^8.1.5",
-    "vitest": "^4.1.10"
-  },
-  "pnpm": {
-    "overrides": {
-      "brace-expansion": "5.0.9",
-      "js-yaml": "4.3.1",
-      "sharp": "0.35.3"
-    },
-    "patchedDependencies": {
-      "@mintplex-labs/piper-tts-web@1.0.4": "patches/@mintplex-labs__piper-tts-web@1.0.4.patch",
-      "kokoro-js@1.2.1": "patches/kokoro-js@1.2.1.patch",
-      "@huggingface/transformers@3.8.1": "patches/@huggingface__transformers@3.8.1.patch"
-    }
+    "oxlint": "^1.95.0",
+    "prettier": "^3.10.1",
+    "tailwindcss": "^4.3.5",
+    "typescript": "~7.0.2",
+    "vite": "^8.3.8",
+    "vitest": "^5.1.1"
   }
 }

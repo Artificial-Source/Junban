@@ -1,7 +1,7 @@
 //! Explicit request and result shapes for Phase 2 use cases.
 
 use jiff::{
-    Timestamp, ToSpan, Zoned,
+    Timestamp, ToSpan, ZonedDateTime,
     civil::{Date, Time},
     tz::TimeZone,
 };
@@ -77,7 +77,7 @@ pub struct TemporalContext {
 impl TemporalContext {
     /// Sample once from the host zone via Jiff `tz-system`.
     pub fn sample_now() -> Self {
-        let now = Zoned::now();
+        let now = ZonedDateTime::now();
         Self {
             sampled_completion_date: now.date(),
             server_time_zone: now.time_zone().clone(),
@@ -186,8 +186,8 @@ pub struct TaskListAsOf {
 }
 
 impl TaskListAsOf {
-    /// Build bounds from one local [`Zoned`] clock sample.
-    pub fn from_zoned(now: &Zoned) -> Result<Self, junban_domain::ValidationError> {
+    /// Build bounds from one local [`ZonedDateTime`] clock sample.
+    pub fn from_zoned(now: &ZonedDateTime) -> Result<Self, junban_domain::ValidationError> {
         Self::for_local_date(now.date(), now.time_zone())
     }
 
@@ -209,14 +209,14 @@ impl TaskListAsOf {
             }
         })?;
         let recent_completed_from = first_recent
-            .to_zoned(time_zone.clone())
+            .to_zoned_datetime(time_zone.clone())
             .map_err(|_| junban_domain::ValidationError::Invalid {
                 field: "as_of_date",
                 reason: "could not resolve local day start to a timestamp",
             })?
             .timestamp();
         let recent_completed_until = next_local_day
-            .to_zoned(time_zone.clone())
+            .to_zoned_datetime(time_zone.clone())
             .map_err(|_| junban_domain::ValidationError::Invalid {
                 field: "as_of_date",
                 reason: "could not resolve next local day start to a timestamp",
@@ -284,7 +284,7 @@ mod task_list_as_of_tests {
     fn from_zoned_uses_the_sample_date_and_zone() {
         let now = Date::constant(2026, 7, 29)
             .at(18, 30, 0, 0)
-            .to_zoned(TimeZone::fixed(tz::offset(-6)))
+            .to_zoned_datetime(TimeZone::fixed(tz::offset(-6)))
             .unwrap();
         let as_of = TaskListAsOf::from_zoned(&now).unwrap();
         assert_eq!(as_of.as_of_date, Date::constant(2026, 7, 29));

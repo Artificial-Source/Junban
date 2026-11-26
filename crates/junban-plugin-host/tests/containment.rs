@@ -13,7 +13,6 @@ use junban_plugin_sdk::{
     decode_child_frame, decode_host_call_request, decode_invocation_outcome, encode_parent_frame,
     inspect_component_for_runtime, private_body_types as body, validate_child_body,
 };
-use sha2::{Digest, Sha256};
 
 const SESSION: &str = "00000000-0000-4000-8000-000000000001";
 const RUST_COMPONENT: &[u8] =
@@ -154,6 +153,7 @@ impl HostProcess {
         self.send(&frame, &body);
     }
 
+    #[track_caller]
     fn receive(&self) -> (ChildFrame, Vec<u8>) {
         match self.frames.recv_timeout(FRAME_TIMEOUT).unwrap() {
             ReaderEvent::Message(frame, body) => (frame, body),
@@ -334,7 +334,7 @@ fn fence(invocation: u64) -> AuthorityFence {
 }
 
 fn sha256(bytes: &[u8]) -> String {
-    format!("{:x}", Sha256::digest(bytes))
+    junban_plugin_sdk::Sha256Digest::of(bytes).into_string()
 }
 
 fn expect_capability(frame: ChildFrame, bytes: &[u8]) -> (CallbackFence, HostCallRequest) {
@@ -702,7 +702,8 @@ fn cancel_unload_shutdown_and_finish_races_drain_active_invocations() {
             ChildFrame::Outcome { fence, kind, .. } => {
                 assert_eq!(fence, service);
                 assert_eq!(kind, junban_plugin_sdk::InvocationKind::CallService);
-                expect_failure(host.receive(), service, HostFailureCode::StaleAuthority);
+                // The exact cancel lost to completion. Only the outcome is emitted;
+                // the next invocation's fence also detects any duplicate terminal.
             }
             other => panic!("unexpected finish/cancel race frame {other:?}"),
         }

@@ -29,7 +29,11 @@ use junban_domain::{
     ai_approval_action_hash, decode_sha256_hex, read_backup_header, sha256_bytes,
     validate_backup_header, validate_task_tags, write_backup_header,
 };
-use rusqlite::{Connection, MAIN_DB, OptionalExtension, Transaction, backup::Backup, params};
+use rusqlite::{
+    Connection, MAIN_DB, OptionalExtension, Transaction,
+    backup::{Backup, NO_PROGRESS},
+    params,
+};
 use sha2::{Digest, Sha256};
 
 use crate::migration::{self, CURRENT_SCHEMA_VERSION};
@@ -64,7 +68,7 @@ pub(crate) fn create_backup(
     let _settings = read_settings(connection)?;
 
     let payload_path = temp_backup_path(profile_dir, "payload", "sqlite3");
-    if let Err(error) = connection.backup(MAIN_DB, &payload_path, None) {
+    if let Err(error) = connection.backup(MAIN_DB, &payload_path, NO_PROGRESS) {
         let _ = fs::remove_file(&payload_path);
         return Err(storage_error(error));
     }
@@ -244,7 +248,7 @@ pub(crate) fn restore_backup(
 
     checkpoint_wal(connection)?;
     let rollback_path = temp_backup_path(profile_dir, "rollback", "sqlite3");
-    if let Err(error) = connection.backup(MAIN_DB, &rollback_path, None) {
+    if let Err(error) = connection.backup(MAIN_DB, &rollback_path, NO_PROGRESS) {
         let _ = fs::remove_file(&rollback_path);
         return Err(storage_error(error));
     }

@@ -77,14 +77,14 @@ The author inputs are the public WIT under `crates/junban-plugin-sdk/wit/`, a co
 Use Rust 1.93.0, `wasm32-wasip2`, and the package-local locked dependencies. The shipped examples build exactly as follows:
 
 ```sh
-rustup target add wasm32-wasip2
+rustup toolchain install 1.93.0 --profile minimal --target wasm32-wasip2
 
 cargo test --manifest-path plugins/reference/pomodoro-rust/Cargo.toml --locked
-cargo build --manifest-path plugins/reference/pomodoro-rust/Cargo.toml \
+cargo +1.93.0 build --manifest-path plugins/reference/pomodoro-rust/Cargo.toml \
   --locked --release --target wasm32-wasip2
 
 cargo test --manifest-path plugins/reference/automation-rust/Cargo.toml --locked
-cargo build --manifest-path plugins/reference/automation-rust/Cargo.toml \
+cargo +1.93.0 build --manifest-path plugins/reference/automation-rust/Cargo.toml \
   --locked --release --target wasm32-wasip2
 ```
 

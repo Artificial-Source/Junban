@@ -9,7 +9,6 @@ use junban_plugin_sdk::{
     HostFailureCode, InvocationRequest, ParentFrame, RuntimeLimits, RuntimeProfile,
     canonical_permission_hash, child_body_len, decode_child_frame, encode_parent_frame,
 };
-use sha2::{Digest, Sha256};
 
 const SESSION: &str = "00000000-0000-4000-8000-000000000001";
 const INVOCATION: &str = "00000000-0000-4000-8000-000000000002";
@@ -22,10 +21,7 @@ fn tiny_component() -> Vec<u8> {
 }
 
 fn hash(bytes: &[u8]) -> String {
-    Sha256::digest(bytes)
-        .iter()
-        .map(|byte| format!("{byte:02x}"))
-        .collect()
+    junban_plugin_sdk::Sha256Digest::of(bytes).into_string()
 }
 
 fn fence() -> AuthorityFence {

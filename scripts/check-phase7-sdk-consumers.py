@@ -110,8 +110,8 @@ def main() -> int:
         bindgen.append("--check")
     run(bindgen, RUST)
 
-    run(["cargo", "check", "--locked", "--target", "wasm32-wasip2"], RUST)
-    run(["cargo", "build", "--locked", "--release", "--target", "wasm32-wasip2"], RUST)
+    run(["cargo", "+1.93.0", "check", "--locked", "--target", "wasm32-wasip2"], RUST)
+    run(["cargo", "+1.93.0", "build", "--locked", "--release", "--target", "wasm32-wasip2"], RUST)
     built_rust = RUST / "target/wasm32-wasip2/release/junban_plugin_sdk_rust_consumer.wasm"
     if options.regenerate:
         shutil.copyfile(built_rust, RUST_ARTIFACT)

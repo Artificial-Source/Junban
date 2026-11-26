@@ -27,6 +27,15 @@ pub const COMPONENT_NESTING_MAX: usize = 32;
 // StarlingMonkey's retained TypeScript profile has thousands of nested core
 // sections; this remains a fixed pre-iteration ceiling rather than an unbounded walk.
 pub const COMPONENT_SECTIONS_MAX: usize = 65_536;
+// Keep the 0.248 validator proposal set. New proposals are not part of the
+// frozen guest/linker contract, even if the SDK decoder understands them.
+const COMPONENT_VALIDATION_FEATURES: WasmFeatures = WasmFeatures::all()
+    .difference(WasmFeatures::CM_IMPLEMENTS)
+    .difference(WasmFeatures::CM_CANON_NAMES)
+    .difference(WasmFeatures::CM_FORWARD)
+    .difference(WasmFeatures::CM_ACCESSORS)
+    .difference(WasmFeatures::ACQUIRE_RELEASE_ATOMICS)
+    .difference(WasmFeatures::MULTIBYTE_ARRAY_ACCESS);
 pub const REQUIRED_GUEST_EXPORT: &str = "junban:plugin/guest@0.1.0";
 pub const RUST_WASI_BASELINE: &[&str] = &[
     "wasi:cli/environment@0.2.6",
@@ -76,7 +85,7 @@ pub fn inspect_component(
         return Err(SdkError::Length { field: "component" });
     }
     require_component_encoding_and_metadata_bounds(component_bytes)?;
-    Validator::new_with_features(WasmFeatures::all())
+    Validator::new_with_features(COMPONENT_VALIDATION_FEATURES)
         .validate_all(component_bytes)
         .map_err(|_| SdkError::ComponentMalformed)?;
     let decoded =
@@ -104,7 +113,7 @@ pub fn inspect_component_for_runtime(
         return Err(SdkError::Length { field: "component" });
     }
     require_component_encoding_and_metadata_bounds(component_bytes)?;
-    Validator::new_with_features(WasmFeatures::all())
+    Validator::new_with_features(COMPONENT_VALIDATION_FEATURES)
         .validate_all(component_bytes)
         .map_err(|_| SdkError::ComponentMalformed)?;
     let decoded =
@@ -256,7 +265,8 @@ fn inspect_decoded_component(
 
 fn streaming_component_metadata(mut reader: impl Read) -> Result<usize> {
     let mut parser = Parser::new(0);
-    let mut validator = Validator::new_with_features(WasmFeatures::all());
+    parser.set_features(COMPONENT_VALIDATION_FEATURES);
+    let mut validator = Validator::new_with_features(COMPONENT_VALIDATION_FEATURES);
     let mut function_allocations = FuncValidatorAllocations::default();
     let mut parsers = Vec::new();
     let mut buffer = Vec::new();
@@ -276,8 +286,6 @@ fn streaming_component_metadata(mut reader: impl Read) -> Result<usize> {
                 if eof {
                     return Err(SdkError::ComponentMalformed);
                 }
-                let hint =
-                    usize::try_from(hint).map_err(|_| SdkError::Length { field: "component" })?;
                 let read_len = hint.clamp(1, 64 * 1024);
                 let old_len = buffer.len();
                 buffer.resize(
@@ -340,15 +348,7 @@ fn streaming_component_metadata(mut reader: impl Read) -> Result<usize> {
                     parser = nested.clone();
                 }
                 Payload::CustomSection(section) => {
-                    let range = section.range();
-                    let size = range.end.checked_sub(range.start).ok_or(SdkError::Length {
-                        field: "component metadata",
-                    })?;
-                    if size > COMPONENT_AUTHORITY_METADATA_SECTION_MAX {
-                        return Err(SdkError::ComponentAuthority {
-                            field: "metadata section",
-                        });
-                    }
+                    let size = metadata_section_size(section.range())?;
                     metadata_bytes = metadata_bytes.checked_add(size).ok_or(SdkError::Length {
                         field: "component metadata",
                     })?;
@@ -435,6 +435,20 @@ fn require_component_encoding_and_metadata_bounds(bytes: &[u8]) -> Result<()> {
     Ok(())
 }
 
+// wasmparser uses 64-bit stream offsets even on 32-bit hosts. Enforce the
+// section limit before converting a range to an in-memory byte count.
+fn metadata_section_size(range: std::ops::Range<u64>) -> Result<usize> {
+    let size = range.end.checked_sub(range.start).ok_or(SdkError::Length {
+        field: "component metadata",
+    })?;
+    if size > COMPONENT_AUTHORITY_METADATA_SECTION_MAX as u64 {
+        return Err(SdkError::ComponentAuthority {
+            field: "metadata section",
+        });
+    }
+    Ok(size as usize)
+}
+
 fn authority_metadata_bytes(bytes: &[u8]) -> Result<usize> {
     let mut total = 0_usize;
     for payload in Parser::new(0).parse_all(bytes) {
@@ -442,16 +456,8 @@ fn authority_metadata_bytes(bytes: &[u8]) -> Result<usize> {
         if let Payload::CustomSection(section) = payload {
             // Count full custom-section authority material: name bytes + data bytes.
             // wasmparser's range covers the exact payload (name length prefix + name + data).
-            let range = section.range();
-            let size = range.end.checked_sub(range.start).ok_or(SdkError::Length {
-                field: "component metadata",
-            })?;
+            let size = metadata_section_size(section.range())?;
             debug_assert!(size >= section.name().len().saturating_add(section.data().len()));
-            if size > COMPONENT_AUTHORITY_METADATA_SECTION_MAX {
-                return Err(SdkError::ComponentAuthority {
-                    field: "metadata section",
-                });
-            }
             total = total.checked_add(size).ok_or(SdkError::Length {
                 field: "component metadata",
             })?;
@@ -583,6 +589,16 @@ fn function_fingerprint(resolve: &Resolve, function: &Function, out: &mut Vec<u8
         | FunctionKind::AsyncStatic(_) => {
             return Err(SdkError::ComponentAuthority {
                 field: "async function kind",
+            });
+        }
+        FunctionKind::Getter
+        | FunctionKind::Setter
+        | FunctionKind::MethodGetter(_)
+        | FunctionKind::MethodSetter(_)
+        | FunctionKind::StaticGetter(_)
+        | FunctionKind::StaticSetter(_) => {
+            return Err(SdkError::ComponentAuthority {
+                field: "accessor function kind",
             });
         }
     }

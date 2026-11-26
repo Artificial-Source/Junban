@@ -7,7 +7,7 @@
 use std::collections::BTreeSet;
 
 use jiff::{
-    ToSpan, Zoned,
+    ToSpan, ZonedDateTime,
     civil::{Date, Time},
     tz::TimeZone,
 };
@@ -49,7 +49,7 @@ const CHILD_OP_DOMAIN: &[u8] = b"junban.ai.tool.child.v1\0";
 /// One sampled server-local clock for an entire tool execution.
 #[derive(Debug, Clone)]
 pub struct ToolExecContext {
-    pub now: Zoned,
+    pub now: ZonedDateTime,
     confirmed_work_hours: Option<Option<WorkHours>>,
 }
 
@@ -59,13 +59,13 @@ impl ToolExecContext {
     #[allow(dead_code)] // public constructor for later orchestration wiring
     pub fn sample_now() -> Self {
         Self {
-            now: Zoned::now(),
+            now: ZonedDateTime::now(),
             confirmed_work_hours: None,
         }
     }
 
     #[must_use]
-    pub fn new(now: Zoned) -> Self {
+    pub fn new(now: ZonedDateTime) -> Self {
         Self {
             now,
             confirmed_work_hours: None,
@@ -74,7 +74,7 @@ impl ToolExecContext {
 
     /// Freeze the confirmed settings and local clock used by one tool invocation.
     #[must_use]
-    pub fn with_confirmed_settings(now: Zoned, settings: &AppSettings) -> Self {
+    pub fn with_confirmed_settings(now: ZonedDateTime, settings: &AppSettings) -> Self {
         Self {
             now,
             confirmed_work_hours: Some(settings.planning.work_hours),
@@ -2063,7 +2063,7 @@ async fn exec_apply_auto_schedule_day<R: Repository, E: EventSink>(
     }
 
     let mut created = Vec::with_capacity(prepared.len());
-    for (item, prior) in prepared.into_iter().zip(recovered.into_iter()) {
+    for (item, prior) in prepared.into_iter().zip(recovered) {
         let mutation = if let Some(mutation) = prior {
             mutation
         } else {
@@ -2988,7 +2988,10 @@ mod tests {
 
     fn fixed_ctx() -> ToolExecContext {
         let zone = TimeZone::get("UTC").unwrap();
-        let now = date(2026, 8, 2).at(12, 0, 0, 0).to_zoned(zone).unwrap();
+        let now = date(2026, 8, 2)
+            .at(12, 0, 0, 0)
+            .to_zoned_datetime(zone)
+            .unwrap();
         ToolExecContext::new(now)
     }
 

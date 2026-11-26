@@ -145,12 +145,12 @@ describe("TaskList multi-select wiring (P2-FE-002)", () => {
   it("supports keyboard Space toggle and Shift+Space range on the focus control (P2-A11Y-003)", () => {
     render(createElement(InboxLikeView));
 
-    const alpha = Array.from(container.querySelectorAll("button")).find(
-      (btn) => btn.getAttribute("aria-label") === "Task: Alpha",
-    ) as HTMLButtonElement;
-    const charlie = Array.from(container.querySelectorAll("button")).find(
-      (btn) => btn.getAttribute("aria-label") === "Task: Charlie",
-    ) as HTMLButtonElement;
+    const alpha = container.querySelector<HTMLButtonElement>(
+      'button[data-task-focus-control][data-task-id="t1"]',
+    )!;
+    const charlie = container.querySelector<HTMLButtonElement>(
+      'button[data-task-focus-control][data-task-id="t3"]',
+    )!;
 
     act(() => {
       alpha.dispatchEvent(
@@ -159,7 +159,7 @@ describe("TaskList multi-select wiring (P2-FE-002)", () => {
     });
     expect(container.querySelector('[aria-label="Bulk task actions"]')).toBeTruthy();
     expect(container.textContent).toContain("1 selected");
-    expect(alpha.getAttribute("aria-label")).toBe("Task: Alpha, selected");
+    expect(alpha.textContent).toBe("Alpha, selected");
 
     act(() => {
       charlie.dispatchEvent(
@@ -172,7 +172,7 @@ describe("TaskList multi-select wiring (P2-FE-002)", () => {
       );
     });
     expect(container.textContent).toContain("3 selected");
-    expect(charlie.getAttribute("aria-label")).toBe("Task: Charlie, selected");
+    expect(charlie.textContent).toBe("Charlie, selected");
 
     // Bulk actions remain reachable in the document tab order while selection is active.
     const bulkComplete = container.querySelector(

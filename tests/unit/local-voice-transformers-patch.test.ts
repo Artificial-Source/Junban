@@ -2,6 +2,7 @@ import { readFileSync } from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { describe, expect, it, vi } from "vitest";
+import { configureVerifiedTransformers } from "../../src/ui/voice/local/engines/configure-transformers.ts";
 
 const WASM_SENTINEL = "/__junban_local_voice_wasm_unconfigured__/";
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../..");
@@ -21,31 +22,34 @@ describe("transformers CDN patch", () => {
     }
   });
 
-  it("imports without network and allows overwriting wasmPaths before inference", async () => {
+  it("imports without network and only uses verified models and shipped WASM URLs", async () => {
     const fetchSpy = vi.fn(() => {
       throw new Error("unexpected network during transformers import");
     });
     vi.stubGlobal("fetch", fetchSpy);
+    // jsdom supplies window but still exposes Node process.release. Select the
+    // same WASM backend the browser bundle uses in the shipped web worker.
+    vi.stubGlobal("process", Object.create(process, { release: { value: undefined } }));
 
-    const transformers = await import("@huggingface/transformers");
-    expect(fetchSpy).not.toHaveBeenCalled();
-    expect(transformers.env.version).toBe("3.8.1");
+    try {
+      const transformers = await import("@huggingface/transformers");
+      expect(fetchSpy).not.toHaveBeenCalled();
+      expect(transformers.env.version).toBe("4.3.2");
+      expect(transformers.env.backends.onnx.wasm?.wasmPaths).toMatchObject({
+        mjs: expect.stringContaining(WASM_SENTINEL),
+        wasm: expect.stringContaining(WASM_SENTINEL),
+      });
 
-    const backends = transformers.env.backends as {
-      onnx?: { wasm?: { wasmPaths?: string | Record<string, string> } };
-    };
-    // Mirror loader: ensure structure exists, start from sentinel, then overwrite.
-    if (!backends.onnx) {
-      backends.onnx = { wasm: { wasmPaths: WASM_SENTINEL } };
-    } else {
-      backends.onnx.wasm = backends.onnx.wasm ?? {};
-      backends.onnx.wasm.wasmPaths = WASM_SENTINEL;
+      const paths = { mjs: "/assets/test-ort.mjs", wasm: "/assets/test-ort.wasm" };
+      configureVerifiedTransformers(transformers.env, "whisper-tiny.en-q4", paths);
+      expect(transformers.env.backends.onnx.wasm?.wasmPaths).toEqual(paths);
+      expect(transformers.env.useWasmCache).toBe(false);
+      await expect(transformers.env.fetch("/models/unverified.onnx")).rejects.toMatchObject({
+        code: "cache_miss",
+      });
+      expect(fetchSpy).not.toHaveBeenCalled();
+    } finally {
+      vi.unstubAllGlobals();
     }
-    expect(backends.onnx.wasm?.wasmPaths).toBe(WASM_SENTINEL);
-
-    backends.onnx.wasm!.wasmPaths = "/assets/ort-same-origin/";
-    expect(transformers.env.backends.onnx?.wasm?.wasmPaths).toBe("/assets/ort-same-origin/");
-
-    vi.unstubAllGlobals();
   });
 });

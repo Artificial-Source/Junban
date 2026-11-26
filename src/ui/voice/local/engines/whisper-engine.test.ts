@@ -6,10 +6,11 @@ const env = {
   allowRemoteModels: true,
   allowLocalModels: false,
   useBrowserCache: true,
+  useWasmCache: true,
   useCustomCache: false,
   customCache: null as unknown,
   backends: { onnx: { wasm: { wasmPaths: "/__junban_local_voice_wasm_unconfigured__/" } } },
-  version: "3.8.1",
+  version: "4.3.2",
 };
 
 vi.mock("@huggingface/transformers", () => ({
@@ -21,8 +22,8 @@ vi.mock("../same-origin-assets.ts", () => ({
   loadWhisperRuntimeAssets: async () => ({
     ortWasmBaseUrl: "/assets/ort-whisper/",
     ortWasmPaths: {
-      mjs: "/assets/ort-whisper/ort-wasm-simd-threaded.jsep.mjs",
-      wasm: "/assets/ort-whisper/ort-wasm-simd-threaded.jsep.wasm",
+      mjs: "/assets/ort-whisper/ort-wasm-simd-threaded.mjs",
+      wasm: "/assets/ort-whisper/ort-wasm-simd-threaded.wasm",
     },
   }),
 }));
@@ -35,6 +36,7 @@ describe("whisper engine owner", () => {
     env.allowRemoteModels = true;
     env.allowLocalModels = false;
     env.useBrowserCache = true;
+    env.useWasmCache = true;
     env.useCustomCache = false;
     env.customCache = null;
     vi.resetModules();
@@ -75,10 +77,11 @@ describe("whisper engine owner", () => {
     expect(env.allowRemoteModels).toBe(false);
     expect(env.allowLocalModels).toBe(true);
     expect(env.useBrowserCache).toBe(false);
+    expect(env.useWasmCache).toBe(false);
     expect(env.useCustomCache).toBe(true);
     expect(env.backends.onnx.wasm.wasmPaths).toEqual({
-      mjs: "/assets/ort-whisper/ort-wasm-simd-threaded.jsep.mjs",
-      wasm: "/assets/ort-whisper/ort-wasm-simd-threaded.jsep.wasm",
+      mjs: "/assets/ort-whisper/ort-wasm-simd-threaded.mjs",
+      wasm: "/assets/ort-whisper/ort-wasm-simd-threaded.wasm",
     });
 
     const text = await handle.transcribe(new Float32Array([0.1, 0.2, 0.0]));

@@ -9,6 +9,7 @@ import {
 } from "./calendarRange";
 
 const SHORT_WEEKDAY_FORMATTER = new Intl.DateTimeFormat("en-US", { weekday: "short" });
+const MONTH_YEAR_FORMATTER = new Intl.DateTimeFormat("en-US", { month: "long", year: "numeric" });
 const FULL_DATE_FORMATTER = new Intl.DateTimeFormat("en-US", {
   weekday: "long",
   month: "long",
@@ -70,14 +71,12 @@ export function CalendarWeekView({
             const key = toCivilDateKey(day);
             const isToday = key === today;
             const weekday = SHORT_WEEKDAY_FORMATTER.format(day);
-            const fullDate = FULL_DATE_FORMATTER.format(day);
             const dayNum = day.getDate();
 
             return (
               <button
                 key={key}
                 type="button"
-                aria-label={`View ${fullDate}`}
                 onClick={() => onDayClick(day)}
                 className={`flex min-h-[56px] flex-col items-center py-3 transition-colors hover:bg-surface-secondary focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-focus md:min-h-0 md:py-2.5 ${
                   isToday ? "bg-accent-action/5" : ""
@@ -89,7 +88,7 @@ export function CalendarWeekView({
                   }`}
                 >
                   {weekday}
-                </span>
+                </span>{" "}
                 <span
                   className={`mt-0.5 flex h-8 w-8 items-center justify-center rounded-full text-lg font-semibold ${
                     isToday ? "bg-accent-action text-on-accent-action" : "text-on-surface"
@@ -97,6 +96,7 @@ export function CalendarWeekView({
                 >
                   {dayNum}
                 </span>
+                <span className="sr-only">{MONTH_YEAR_FORMATTER.format(day)}</span>
               </button>
             );
           })}

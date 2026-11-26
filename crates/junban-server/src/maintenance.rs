@@ -112,7 +112,7 @@ impl MaintenanceGate {
         // Saturating sub keeps a mismatched release from wrapping the counter.
         let _ = self
             .admitted
-            .fetch_update(Ordering::AcqRel, Ordering::Acquire, |count| {
+            .try_update(Ordering::AcqRel, Ordering::Acquire, |count| {
                 count.checked_sub(1)
             });
     }

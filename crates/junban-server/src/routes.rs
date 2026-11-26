@@ -17,7 +17,7 @@ use axum::{
 };
 use futures_core::Stream;
 use http_body_util::BodyExt;
-use jiff::{Timestamp, Zoned, civil::Date, tz::TimeZone};
+use jiff::{Timestamp, ZonedDateTime, civil::Date, tz::TimeZone};
 use junban_app::{AppError, ExportFormat, StagedFile};
 use junban_domain::{
     CommentId, DailyCapacityMinutes, MAX_QUERY_PAGE_LIMIT, MAX_TAGS_PER_TASK, OperationId,
@@ -75,17 +75,17 @@ use junban_app::{ACTIVITY_PAGE_DEFAULT, ACTIVITY_PAGE_MAX, TaskListAsOf};
 
 /// Server-authoritative local civil date for due/overdue evaluation.
 pub fn server_as_of_date() -> Date {
-    Zoned::now().date()
+    ZonedDateTime::now().date()
 }
 
 /// One local clock sample for task list evaluation (civil due date + recent-completion UTC bounds).
 pub fn server_list_as_of() -> Result<TaskListAsOf, junban_domain::ValidationError> {
-    TaskListAsOf::from_zoned(&Zoned::now())
+    TaskListAsOf::from_zoned(&ZonedDateTime::now())
 }
 
 /// One system-zone sample for planning/analytics reads (civil date + zone).
 pub fn server_planning_clock() -> (Date, TimeZone) {
-    let now = Zoned::now();
+    let now = ZonedDateTime::now();
     (now.date(), now.time_zone().clone())
 }
 

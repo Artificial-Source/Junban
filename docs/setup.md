@@ -2,11 +2,11 @@
 
 ## Prerequisites
 
-| Tool    | Requirement                                          |
-| ------- | ---------------------------------------------------- |
-| Rust    | **1.93.0** pinned by `rust-toolchain.toml`           |
-| Node.js | **>= 22.12** (frontend build and checks only)        |
-| pnpm    | **10.29.1** (`packageManager` field in package.json) |
+| Tool    | Requirement                                            |
+| ------- | ------------------------------------------------------ |
+| Rust    | **1.100.0** pinned by `rust-toolchain.toml`            |
+| Node.js | **26.13.1** pinned by `.node-version` (frontend only)  |
+| pnpm    | **12.23.0** (`packageManager` field in `package.json`) |
 
 Install Rust from [rustup](https://rustup.rs/). The workspace toolchain file installs `rustfmt` and `clippy` automatically.
 
@@ -25,10 +25,10 @@ pnpm install
 The frontend uses:
 
 - React 19
-- TypeScript (strict)
+- TypeScript 7 (strict); the OpenAPI generator uses its own TypeScript 5 compiler API
 - Vite 8 with `@vitejs/plugin-react`
 - Tailwind CSS 4 via `@tailwindcss/vite` and `@import "tailwindcss";` (build-time, zero runtime)
-- Oxlint, Prettier, and Vitest
+- Oxlint, Prettier, and Vitest 5
 
 `src/` is frontend-only. It contains the preserved React interface and communicates with the Rust runtime only through the generated HTTP client.
 

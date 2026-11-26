@@ -9202,8 +9202,11 @@ fn install_test_plugin_host_sibling() {
     if sibling.is_file() {
         return;
     }
+    // Cargo 1.100 places test executables under <profile>/build/<crate>/<hash>/out.
     let built_host = directory
-        .parent()
+        .ancestors()
+        .find(|path| path.file_name().is_some_and(|name| name == "build"))
+        .and_then(std::path::Path::parent)
         .expect("Cargo target profile directory")
         .join("junban-plugin-host");
     fs::hard_link(&built_host, &sibling).unwrap_or_else(|error| {

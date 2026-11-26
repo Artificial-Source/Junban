@@ -4,6 +4,7 @@ import os from "node:os";
 import path from "node:path";
 import { execFileSync } from "node:child_process";
 import { fileURLToPath } from "node:url";
+import { format, resolveConfig } from "prettier";
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 const checkedOpenApi = path.join(root, "openapi", "junban-v1.json");
@@ -43,23 +44,13 @@ try {
     stdio: "inherit",
     shell: process.platform === "win32",
   });
-  execFileSync(
-    "pnpm",
-    [
-      "exec",
-      "prettier",
-      "--config",
-      path.join(root, ".prettierrc"),
-      "--write",
-      generatedOpenApi,
-      generatedTypes,
-    ],
-    {
-      cwd: root,
-      stdio: "inherit",
-      shell: process.platform === "win32",
-    },
-  );
+  // Format the two generated outputs explicitly. CLI ignore discovery can
+  // silently skip them when the temporary directory is outside the checkout.
+  const config = await resolveConfig(checkedTypes);
+  for (const file of [generatedOpenApi, generatedTypes]) {
+    const formatted = await format(fs.readFileSync(file, "utf8"), { ...config, filepath: file });
+    fs.writeFileSync(file, formatted);
+  }
 
   if (mode === "check") {
     const drift = [];

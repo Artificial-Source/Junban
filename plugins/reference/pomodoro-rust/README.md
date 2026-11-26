@@ -11,7 +11,7 @@ Use Rust 1.93.0 with the `wasm32-wasip2` target:
 ```sh
 cargo fmt --manifest-path plugins/reference/pomodoro-rust/Cargo.toml -- --check
 cargo test --manifest-path plugins/reference/pomodoro-rust/Cargo.toml --locked
-cargo build --manifest-path plugins/reference/pomodoro-rust/Cargo.toml \
+cargo +1.93.0 build --manifest-path plugins/reference/pomodoro-rust/Cargo.toml \
   --locked --release --target wasm32-wasip2
 mkdir -p plugins/reference/pomodoro-rust/artifacts
 cp plugins/reference/pomodoro-rust/target/wasm32-wasip2/release/junban_reference_pomodoro.wasm \

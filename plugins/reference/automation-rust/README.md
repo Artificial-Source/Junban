@@ -11,7 +11,7 @@ Use Rust 1.93.0 with the `wasm32-wasip2` target:
 ```sh
 cargo fmt --manifest-path plugins/reference/automation-rust/Cargo.toml -- --check
 cargo test --manifest-path plugins/reference/automation-rust/Cargo.toml --locked
-cargo build --manifest-path plugins/reference/automation-rust/Cargo.toml \
+cargo +1.93.0 build --manifest-path plugins/reference/automation-rust/Cargo.toml \
   --locked --release --target wasm32-wasip2
 mkdir -p plugins/reference/automation-rust/artifacts
 cp plugins/reference/automation-rust/target/wasm32-wasip2/release/junban_reference_automation.wasm \

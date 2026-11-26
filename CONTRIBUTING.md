@@ -11,7 +11,7 @@ Thanks for helping build Junban. This repository is a ground-up Rust rewrite wit
 
 ## Development requirements
 
-- Rust **1.93.0** via `rust-toolchain.toml` (includes `rustfmt` and `clippy`)
+- Rust **1.100.0** via `rust-toolchain.toml` (includes `rustfmt` and `clippy`)
 - **Node.js** `>= 22.12` and **pnpm** `10.29.1` for frontend build and checks only
 - Node is never a shipped runtime dependency
 

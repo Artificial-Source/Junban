@@ -7,7 +7,7 @@ The fixture targets the frozen `junban:plugin/plugin@0.1.0` world and uses only 
 To reproduce the artifact with Rust 1.93.0 and the `wasm32-wasip2` target:
 
 ```sh
-cargo build --manifest-path crates/junban-plugin-sdk/consumers/slice2e-rust/Cargo.toml \
+cargo +1.93.0 build --manifest-path crates/junban-plugin-sdk/consumers/slice2e-rust/Cargo.toml \
   --locked --release --target wasm32-wasip2
 cmp crates/junban-plugin-sdk/consumers/slice2e-rust/slice2e-consumer.wasm \
   crates/junban-plugin-sdk/consumers/slice2e-rust/target/wasm32-wasip2/release/junban_plugin_sdk_slice2e_consumer.wasm

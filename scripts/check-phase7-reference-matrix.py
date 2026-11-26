@@ -122,14 +122,14 @@ def load_dogfood() -> Any:
 
 
 def build_references() -> dict[str, Any]:
-    run(["rustup", "target", "add", "wasm32-wasip2"], timeout=600)
+    run(["rustup", "toolchain", "install", "1.93.0", "--profile", "minimal", "--target", "wasm32-wasip2"], timeout=600)
     records: dict[str, Any] = {}
     exact_byte_match_required = is_canonical_byte_host(platform.system(), platform.machine())
     for directory, build_name, retained_name in RUST_REFERENCES:
         root = REFERENCES / directory
         run(
             [
-                "cargo", "build", "--manifest-path", str(root / "Cargo.toml"),
+                "cargo", "+1.93.0", "build", "--manifest-path", str(root / "Cargo.toml"),
                 "--locked", "--release", "--target", "wasm32-wasip2",
             ]
         )

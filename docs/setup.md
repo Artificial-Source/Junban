@@ -4,7 +4,7 @@
 
 | Tool    | Requirement                                          |
 | ------- | ---------------------------------------------------- |
-| Rust    | **1.93.0** pinned by `rust-toolchain.toml`           |
+| Rust    | **1.100.0** pinned by `rust-toolchain.toml`           |
 | Node.js | **>= 22.12** (frontend build and checks only)        |
 | pnpm    | **10.29.1** (`packageManager` field in package.json) |
 
